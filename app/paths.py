@@ -36,7 +36,7 @@ from pathlib import Path
 
 APP_NAME = "OpenMarketingOS"
 APP_TITLE = "Open Marketing OS"
-APP_VERSION = "1.1.0-beta.1"
+APP_VERSION = "0.1.0-beta.1"
 """Single authoritative version string.
 
 `app/routes/health.py` and the release manifest both read this so the version

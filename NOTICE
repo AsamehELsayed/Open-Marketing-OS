@@ -2,156 +2,63 @@ Open Marketing OS
 Copyright 2026 Open Marketing OS contributors
 
 This product includes software developed by the Open Marketing OS contributors.
+The project source is licensed under Apache License 2.0. See LICENSE.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+THIRD-PARTY SOFTWARE AND ATTRIBUTION
 
-    http://www.apache.org/licenses/LICENSE-2.0
+The source-lock and selected-component inventory is in THIRD-PARTY-NOTICES and
+LICENSE-INVENTORY.md (machine-readable counterpart: LICENSE-INVENTORY.json).
+These are lock-derived disclosures. The final frozen Python payload and emitted
+frontend bundle have not yet been built for DEV-028; their exact membership and
+retained license files must be checked before public distribution.
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Local edition — llama.cpp
+The Local edition stages the pinned llama.cpp b11429 Windows CPU runtime,
+revision d81235049384534c167caea52b85a694f6103d14, from the archive with
+SHA-256 1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe.
+The upstream project is MIT-licensed. Retain the runtime MIT LICENSE and bundled
+OpenMP LICENSE-LLVM-OpenMP notice in the Local payload. DEV-029 staged runtime
+evidence includes both; this source candidate includes the llama.cpp MIT notice
+at scripts/package/notices/llama.cpp-LICENSE. Exact runtime notice copies are
+also included under runtime/licenses/llama.cpp/. Confirm both reach the final
+payload.
 
-================================================================================
-THIRD-PARTY SOFTWARE
-================================================================================
+Local model
+The catalog selects Qwen2.5-7B-Instruct Q4_K_M from
+Qwen/Qwen2.5-7B-Instruct-GGUF, revision
+293ca9a10157b0e5fc5cb32af8b636a88bede891, and declares Apache-2.0. Model files
+are downloaded only after user initiation; no model weights, adapters, embeddings,
+or vision weights are included in this source candidate or installer. This
+catalog disclosure does not grant additional model rights or approve weight
+redistribution.
 
-This distribution bundles the Python packages listed in `requirements-lock.txt`
-inside the Windows installer: 52 distributions, plus the CPython interpreter
-and standard library.
+Vendored skills and web asset
+The vendored Marketing Skills library is MIT-licensed; preserve .agents/LICENSE.
+The bundled htmx 2.0.4 asset is Zero-Clause BSD (0BSD); its exact upstream license
+text is in LICENSES/htmx-0BSD.txt and its version-pinned source is listed in
+THIRD-PARTY-NOTICES.
 
-The table below is **measured, and the measurement is reproducible.** It was
-produced by reading each installed distribution's own metadata, not written by
-hand:
+Dependency notices and final payload
+requirements-lock.txt contains 114 pinned Python distributions. The frontend
+production lock contains 11 non-development package entries, including DOMPurify
+3.4.15 declared as (MPL-2.0 OR Apache-2.0). The inventories list exact versions
+and license metadata; they do not assert final installer/bundle membership and
+do not replace required package-specific copyright and license texts. Before
+release, inspect the frozen Python payload and emitted frontend bundle, retain
+the applicable notices and license files, and verify both installers include
+them. pyreadline3's exact locked package metadata identifies BSD without an SPDX
+variant; determine the exact wheel notice/variant in final-payload QA. Cairo/Zain
+font binaries and client imagery are excluded pending documented rights.
 
-```
-python scripts/package/license_inventory.py \
-    --json development/runs/DEV-008/license-inventory.json \
-    --markdown development/runs/DEV-008/license-table.md
-```
+INNO SETUP — PRE-PRODUCTION
+DEV-029 records the Inno Setup compiler's “Non-commercial use only” label. The
+installed vendor license text permits commercial applications. The vendor
+commercial licensing page requests commercial users to buy a commercial
+license; its FAQ says purchase is not strictly required and may wait until the
+installers are production-ready. These are recorded observations, not a legal
+conclusion. Commercial-use/purchase status remains
+NEEDS-FOUNDER-CONFIRMATION; installer state is PRE-PRODUCTION. Official guidance:
+https://jrsoftware.org/isorder.php and https://jrsoftware.org/isinfo.php.
 
-Each licence comes from `License-Expression`, then `License`, then the
-`License ::` trove classifier, then a deterministic licence-text signature. The
-script exits non-zero if any package cannot be attributed, and separately reports
-any strong-copyleft licence as a release blocker. It runs in CI, so this table
-cannot silently drift from the lock file.
-
-**The table below is transcribed from that output** — the script does not write
-`NOTICE` directly, so the copy is a manual step. Re-check it with the command
-above whenever `requirements-lock.txt` changes.
-
-| License | Packages (name==version) |
-|---|---|
-| Apache-2.0 | `distro==1.9.0`, `openai==3.19.2`, `python-multipart==0.0.32`, `requests-toolbelt==1.0.0`, `requests==2.34.2`, `tenacity==9.1.4` |
-| Apache-2.0 OR BSD-2-Clause | `packaging==26.3` |
-| Apache-2.0 OR MIT | `ormsgpack==1.12.2` |
-| BSD-2-Clause | `xxhash==4.0.1` |
-| BSD-3-Clause | `Jinja2==3.1.6`, `MarkupSafe==3.0.3`, `click==8.5.0`, `httpcore2==2.13.1`, `httpcore==1.0.9`, `httpx2==2.13.1`, `httpx==0.28.1`, `idna==3.20`, `jsonpatch==1.33`, `jsonpointer==3.1.1`, `python-dotenv==1.2.3`, `starlette==1.7.0`, `uuid_utils==0.17.1`, `uvicorn==0.54.0`, `websockets==16.1.1`, `zstandard==0.25.0` |
-| MIT | `PyYAML==6.0.3`, `aiosqlite==0.22.1`, `annotated-doc==0.0.5`, `annotated-types==0.8.0`, `anyio==4.15.1`, `charset-normalizer==3.5.1`, `fastapi==0.141.1`, `h11==0.16.0`, `jiter==0.17.0`, `langchain-core==1.6.5`, `langchain-protocol==0.0.19`, `langgraph-checkpoint-sqlite==3.1.1`, `langgraph-checkpoint==4.2.0`, `langgraph-prebuilt==1.1.0`, `langgraph-sdk==0.4.5`, `langgraph==1.2.12`, `langsmith==0.14.1`, `pydantic==2.13.5`, `pydantic_core==2.46.5`, `sniffio==1.3.1`, `truststore==0.10.4`, `typing-inspection==0.4.4`, `urllib3==2.8.0` |
-| MIT OR Apache-2.0 | `sqlite-vec==0.1.9` |
-| MPL-2.0 | `certifi==2026.7.22` |
-| MPL-2.0 AND (Apache-2.0 OR MIT) | `orjson==3.12.0` |
-| PSF-2.0 | `typing_extensions==4.16.0` |
-
-Notes on obligations:
-
-- **MPL-2.0** (`certifi`, `orjson`) is weak, file-level copyleft. It permits
-  distribution inside a larger work under a different licence, and requires
-  only that the MPL-covered files themselves stay available under MPL-2.0. It
-  is compatible with this Apache-2.0 distribution. It is listed explicitly
-  rather than folded into "permissive" because "no copyleft at all" would be
-  false.
-- **No strong copyleft** (GPL, LGPL, AGPL) is present in the shipped set. This
-  is enforced by `license_inventory.py`, which exits non-zero if one appears.
-- Full per-package licence texts ship inside each distribution's
-  `.dist-info/` directory under `_internal/`, which is the standard mechanism
-  for satisfying attribution in a frozen distribution.
-
-### Frontend
-
-The prebuilt React bundle contains:
-
-| License | Packages |
-|---|---|
-| MIT | react, react-dom, react-router, react-router-dom, scheduler, marked, dompurify |
-| BSD-3-Clause | follow-redirects (transitive via `marked`) |
-
-Build-time only, not shipped: `@vitejs/plugin-react`, `vite`, `typescript`,
-`tailwindcss`, `autoprefixer`, `postcss`.
-
-### Vendored marketing skills library
-
-The distribution bundles a **pinned copy of a third-party marketing skills
-library**. It is redistributed, and its licence is recorded here in full
-because the licence requires exactly that.
-
-| Field | Value |
-|---|---|
-| Upstream project | **Marketing Skills** by Corey Haines |
-| Repository | `https://github.com/coreyhaines31/marketingskills` |
-| Release tag | **`v2.11.1`** |
-| Pinned commit | **`5b2c0007766c6a1cf1d53fd8fc73e979e0821022`** |
-| License | **MIT** |
-| Copyright | `Copyright (c) 2025 Corey Haines` |
-| Vendored path | `.agents/skills/` (the library only) |
-| Vendored license text | `.agents/LICENSE` — the upstream `LICENSE` **verbatim** at the pinned commit |
-
-MIT requires only that "the above copyright notice and this permission notice
-shall be included in all copies or substantial portions of the Software". That
-is why the upstream `LICENSE` file itself is shipped, byte-for-byte, next to the
-library — in the Windows installer payload (via `packaging/omos.spec` `datas`)
-and in the public repository (via `scripts/package/export_public_repo.py`).
-
-**This library is not modified.** The vendored copy is content-identical to
-upstream `v2.11.1` after line-ending normalization; the integrity record is
-`skills-lock.json` plus `docs/marketing-skills-manifest.json`, and it is
-re-verified rather than asserted.
-
-`.agents/product-marketing.md` is **not** part of the upstream library. It is
-OMOS-authored, it is licensed Apache-2.0 like the rest of this project, and it
-contains a named third party's Marketing Brain material. It is not
-redistributed, and the MIT grant recorded above does not cover it. See
-`docs/opensource/license-audit.md`.
-
-### Vendored web asset
-
-| Asset | License |
-|---|---|
-| `app/static/htmx.min.js` (htmx 2.0.4) | MIT |
-
-### Deliberately excluded from the payload
-
-`chromadb` and its transitive dependencies (`onnxruntime`, `tokenizers`,
-`grpcio`, `kubernetes`, `numpy`), plus `pytest`, `playwright`, `torch`,
-`transformers`, `sentence-transformers` and `Pillow`. The app degrades to
-SQLite FTS5 keyword retrieval without `chromadb`. See
-`requirements-optional.txt` and `docs/distribution/windows-packaging-decision.md`.
-
-### Not redistributed
-
-The `Zain` and `Cairo` font binaries that exist in the private development
-repository are **not** part of this distribution; their redistribution rights
-are unverified. See `docs/opensource/license-audit.md`.
-
-================================================================================
-NO MODEL WEIGHTS ARE REDISTRIBUTED
-================================================================================
-
-This repository and the Windows installers contain **no** model weights, LoRA
-adapters, embedding models or vision models. The installer is roughly 23 MB
-compressed (about 41 MB installed) of application code, the CPython runtime and
-the Python libraries listed above. Nothing else.
-
-The first public beta ships cloud AI only (OpenRouter or OpenAI), using the
-user's own API key. No on-device model download exists in this release.
-
-================================================================================
-NO OWNED CREDENTIALS
-================================================================================
-
-No API key, token or account credential for any third-party service is included
-in this distribution. Users supply their own provider credentials, which are
-stored locally in a Windows DPAPI-encrypted vault on their own machine.
+This notice and the inventories are not final release clearance. Confirm exact
+payload attribution and applicable redistribution rights before distribution.

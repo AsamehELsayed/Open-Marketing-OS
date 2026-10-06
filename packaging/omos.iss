@@ -1,9 +1,9 @@
 ; Inno Setup script — Open Marketing OS (Windows x64)
 ;
-; Produces OpenMarketingOS-Quick-Setup.exe: a normal, non-technical Windows
-; installer. No AI configuration happens here — that belongs in the app's
-; first-run wizard, because the app can change provider later without the user
-; reinstalling.
+; Produces one named beta installer per explicit package profile. The matching
+; edition-profile.json is installed beside the app as immutable build input.
+; The app bootstrap applies profile defaults only to a pristine settings DB;
+; saved user settings and all user data remain authoritative on upgrades.
 ;
 ; Design rules this script enforces:
 ;   * No technical questions during install. Only language, install location,
@@ -19,9 +19,16 @@
 #define AppName        "Open Marketing OS"
 #define AppShortName   "OpenMarketingOS"
 #define AppExeName     "OpenMarketingOS.exe"
-#define AppVersion     "1.1.0-beta.1"
+#define AppVersion     "{#ReleaseVersion}"
 #define AppPublisher   "Open Marketing OS"
 #define MinWindows     "10.0"
+#if EditionProfile == "local"
+  #define EditionDisplayName "Local"
+#elif EditionProfile == "openrouter"
+  #define EditionDisplayName "OpenRouter"
+#else
+  #error EditionProfile must be either local or openrouter
+#endif
 #ifndef OutputDir
   #define OutputDir "..\dist"
 #endif
@@ -39,7 +46,8 @@
 AppId={{7C4E1B2A-9F3D-4A6E-8B21-0D5E7C9A4F13}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
+AppVerName={#AppName} {#AppVersion} ({#EditionDisplayName})
+AppComments=OMOS edition profile: {#ProfileId}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
@@ -51,7 +59,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=OpenMarketingOS-Quick-Setup
+OutputBaseFilename={#OutputBaseFilename}
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
 Compression=lzma2/max
@@ -83,9 +91,15 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; \
 [Files]
 ; The frozen payload built by scripts\package\build_windows.ps1.
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "_internal\runtime\*"; Flags: ignoreversion recursesubdirs createallsubdirs
-; The managed Local runtime lives in the per-user writable root expected by
-; LocalRuntimeManager. The Python bundle and model cache remain separate.
+; The package profile is immutable install metadata read by app bootstrap. It
+; must only seed a pristine settings database; existing user settings/data win.
+Source: "{#ProfileDescriptor}"; DestDir: "{app}"; DestName: "edition-profile.json"; Flags: ignoreversion
+; Only the Local installer installs the managed llama.cpp runtime into the
+; per-user writable root expected by LocalRuntimeManager. Model files remain
+; outside the installer for both profiles.
+#if EditionProfile == "local"
 Source: "{#PayloadDir}\_internal\runtime\*"; DestDir: "{localappdata}\OpenMarketingOS\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 ; Nothing else is required: the interpreter, every Python dependency, SQLite and
 ; the prebuilt React bundle are all inside the payload.
 

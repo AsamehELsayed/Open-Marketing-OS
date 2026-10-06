@@ -36,8 +36,8 @@ The scripts below are the recommended path because they set up the virtual
 environment, install dependencies, and start both sides with one command.
 
 ```powershell
-git clone https://github.com/<org>/open-marketing-os.git
-cd open-marketing-os
+git clone https://github.com/AsamehELsayed/Open-Marketing-OS.git
+cd Open-Marketing-OS
 .\scripts\setup-dev.ps1     # create .venv, install backend + frontend deps
 .\scripts\run-dev.ps1        # start backend and frontend dev server
 ```

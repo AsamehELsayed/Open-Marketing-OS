@@ -631,8 +631,9 @@ class ConfigService:
             except Exception:
                 database = "unknown"
             from app.contracts.runtime import get_ai_runtime
+            from app import paths
             return {
-                "version": "1.0.0",
+                "version": paths.APP_VERSION,
                 "status": "unknown",
                 "backend": "unknown",
                 "orchestrator": get_ai_runtime(),

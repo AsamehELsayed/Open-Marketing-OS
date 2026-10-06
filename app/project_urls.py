@@ -15,8 +15,9 @@ module. It therefore includes `packaging/project_url.iss`, which is generated
 from this file. `test_public_urls_are_consistent` enforces that the two agree,
 so the URL is defined once and cannot drift.
 
-TO SET THE REAL PUBLIC REPOSITORY, edit `PUBLIC_REPOSITORY_URL` below and
-re-run:
+The founder-confirmed public owner is `AsamehELsayed`; the repository does not
+become public until a separate publication approval. Keep the public identity
+separate from the redacted private-development identity below.
 
     python scripts/package/sync_project_urls.py
 """
@@ -26,16 +27,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: The public repository users will download from. Change this ONE value.
-PUBLIC_REPOSITORY_URL = "https://github.com/<OWNER>/Open-Marketing-OS"
+#: Founder-confirmed public repository target; publication is separately gated.
+PUBLIC_REPOSITORY_URL = "https://github.com/AsamehELsayed/Open-Marketing-OS"
 
 #: The private development repository. Never linked from user-facing material.
 PRIVATE_REPOSITORY_URL = "https://github.com/<PRIVATE-ORIGIN-REDACTED>"
 
-#: Published on the public repository once the founder creates it. Until then the
-#: placeholder below is honest about being a placeholder rather than silently
-#: pointing contributors at a private repo.
-PUBLIC_REPOSITORY_SLUG = "<OWNER>/Open-Marketing-OS"
+#: Public repository slug. This does not indicate that the repository exists.
+PUBLIC_REPOSITORY_SLUG = "AsamehELsayed/Open-Marketing-OS"
 
 #: Repository name inside the slug, used for in-repo relative links.
 PUBLIC_REPO_NAME = "Open-Marketing-OS"
@@ -58,7 +57,7 @@ def security_advisory_url() -> str:
 
 
 def is_placeholder() -> bool:
-    """True while the public URL still points at the private development repo.
+    """True if owner-specific public URL metadata has not been supplied.
 
     Surfaced in the manifest and asserted in tests so it is impossible to
     publish without noticing.
@@ -83,6 +82,4 @@ if __name__ == "__main__":
     print("releases          :", releases_url())
     if is_placeholder():
         print()
-        print("WARNING: the public URL still points at the private development")
-        print("repository. Update PUBLIC_REPOSITORY_URL in this file once the")
-        print("public repository exists, then run scripts/package/sync_project_urls.py")
+        print("WARNING: the public URL is still a placeholder.")

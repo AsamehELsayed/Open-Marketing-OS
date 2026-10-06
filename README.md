@@ -1,244 +1,66 @@
 # Open Marketing OS
 
-**Your open-source AI marketing team.**
+**Open Marketing OS (OMOS)** is a Windows desktop beta for organizing marketing work, chatting with an AI account manager, and retrieving information from project knowledge. It runs on your PC and opens in your default browser. The backend binds to loopback (`127.0.0.1`); it is not intended to be exposed to your LAN.
 
-Open Marketing OS (OMOS) is a free Windows app that gives you a dedicated AI
-marketing account manager. You describe your business in plain language; it
-researches your website and competitors, reviews your social profiles, challenges
-your positioning and offers, plans campaigns and experiments, and keeps track of
-what actually worked.
+This pre-release offers two editions. Choose the inference route that fits your privacy and hardware needs:
 
-It runs on your own machine. Your projects, files and chats stay on your
-computer. You bring your own AI provider account.
+**Project:** [source repository](https://github.com/AsamehELsayed/Open-Marketing-OS) · [releases](https://github.com/AsamehELsayed/Open-Marketing-OS/releases) · [issue tracker](https://github.com/AsamehELsayed/Open-Marketing-OS/issues)
 
-```
-[ Download the installer ]  →  install  →  open  →  connect your AI  →  work
-```
+| Edition | Inference | Setup |
+| --- | --- | --- |
+| **OMOS Local** | After setup, account-manager inference runs on your PC through OMOS-managed llama.cpp. | You explicitly download the pinned model in Settings. No provider key is needed. |
+| **OMOS OpenRouter** | Inference is not local; prompts and selected evidence go to OpenRouter for cloud inference. | You supply your own OpenRouter API key; OMOS stores it using Windows DPAPI. |
 
----
+## OMOS Local
 
-## Download
+The selected model is **Qwen2.5-7B-Instruct Q4_K_M**, pinned to a source revision. Its two model files total **4,683,073,632 bytes** (about **4.36 GiB**). The model is not included in the installer. Review its source and license before downloading it. OMOS does not download these model weights silently: use **Settings → Local Model → Download Model** to start the download. Starting the runtime does not download the model. OMOS verifies the pinned files before activation and manages the llama.cpp `b11429` runtime.
 
-[![Windows](https://img.shields.io/badge/platform-Windows%20x64-0078D4?logo=windows&logoColor=white)](https://github.com/<OWNER>/Open-Marketing-OS/releases)
-[![License](https://img.shields.io/badge/license-Apache--2.0-0078D4)](./LICENSE)
-[![Beta](https://img.shields.io/badge/status-public%20beta-orange)](https://github.com/<OWNER>/Open-Marketing-OS/releases)
+The pinned profile reserves **9,366,147,264 bytes** (about **8.72 GiB**) of temporary disk space for staging and activation. Keep additional free space for Windows, OMOS, project files, and indexes. As a practical planning target, 16 GB of system RAM is a reasonable starting point for a 7B Q4 model; it is not a tested minimum or a guarantee of speed. Actual memory use and response time depend on the PC and workload. The shipped runtime profile is Windows x64 CPU; no GPU requirement is claimed.
 
-### 👉 Normal users: download `OpenMarketingOS-Quick-Setup.exe` from the latest release
+After setup, Local account-manager prompts and responses are processed by the local inference runtime. Other features can still use the network when you invoke them. On first semantic Business Knowledge/RAG use, OMOS may download a pinned local embedding model to the user cache. The embedding implementation does not send document text to its model host. Set up that cache before relying on semantic retrieval offline.
 
-<p align="center">
-  <a href="https://github.com/<OWNER>/Open-Marketing-OS/releases/latest">
-    <img alt="Download Open Marketing OS" src="https://img.shields.io/badge/%F0%9F%93%8D%20Download-latest%20release-0078D4?style=for-the-badge">
-  </a>
-</p>
+## OMOS OpenRouter
 
-> **Please do not download "Source code (zip)" or "Source code (tar.gz)"** unless
-> you intend to build from source. Those are for developers. Ordinary users want
-> `OpenMarketingOS-Quick-Setup.exe` from the [Releases page][releases].
+OMOS does not include or share an OpenRouter key. Enter your own key in the OMOS settings UI. On Windows, the credential value is stored as DPAPI-protected data bound to the current Windows user; the application database holds a credential reference. The key is not intended to be written to plaintext files, logs, prompts, or telemetry.
 
-[releases]: https://github.com/<OWNER>/Open-Marketing-OS/releases
+OpenRouter is cloud inference. Prompts and the project knowledge, conversation attachments, or other evidence selected for a turn are sent to OpenRouter so it can produce a response. Review the provider's terms and privacy settings, and do not submit material you are not comfortable sending to that provider.
 
-After downloading, verify the file against `SHA256SUMS.txt` from the same release
-page. See [Verifying a download](#verifying-a-download).
+## Install and first run
 
----
+1. Download the installer from the [Open Marketing OS releases page](https://github.com/AsamehELsayed/Open-Marketing-OS/releases). Verify its SHA-256 against the release's `checksums-sha256.txt`.
+2. Run the Windows installer and launch OMOS. The launcher starts the local backend and opens the app in your default browser.
+3. Create or select a project and review its Business Knowledge before asking questions.
+4. For **Local**, open **Settings → Local Model**, review the model details and disk requirement, then explicitly select **Download Model**. Wait for checksum verification and activation before starting the runtime or selecting Local inference.
+5. For **OpenRouter**, enter your own key in the credential settings and use the connection check. Choose the provider/model and routing mode in AI settings.
+6. Start an Account Manager conversation. Add relevant files to the correct project when you want them indexed as Business Knowledge.
 
-## Choose your version
+See [SETUP.md](SETUP.md) for more detail.
 
-### ⚡ OMOS Quick — available now
+## Business Knowledge and RAG
 
-**Fast setup. Runs on almost any Windows PC. This is what you download today.**
+OMOS can retrieve relevant text from a project's knowledge and supported files and include that evidence in a conversation. This is retrieval-augmented generation (RAG). Add information to the intended project, allow it to be indexed, and check the citations in the answer. A citation shows which retrieved source informed a response; it is not a guarantee that the response is complete or correct. Retrieval is project-scoped. Do not upload data you lack permission to use.
 
-- Works on Windows 10 and 11, 64-bit
-- Needs 4 GB RAM and an internet connection
-- No GPU, no local model, no big download
-- **Cloud AI through [OpenRouter](https://openrouter.ai) (recommended) or
-  [OpenAI](https://openai.com)** — you supply your own API key
-- Your key is stored encrypted on your own machine — never in a config file, and
-  never in your browser
+Supported file types and size limits are shown in the app. Image OCR is not supported. Retrieval behavior can degrade to lexical search if semantic embeddings are unavailable. The first semantic index use may need an internet connection to obtain the pinned local embedding model; application text is not sent to that model host.
 
-### 🔒 OMOS Local — coming in a future beta
+## Data and privacy
 
-Running the marketing AI entirely on your own computer, with no AI API key at
-all, is planned. It is **not** part of this beta, and this release deliberately
-does not advertise it. Nothing is downloaded, and no multi-gigabyte model is
-bundled in the installer.
+In a packaged Windows installation, writable app data is stored under `%LOCALAPPDATA%\OpenMarketingOS\`, separate from the installation directory. This includes the SQLite database at `data\marketing.db`, project and workspace data, search indexes and backups under `data\`, encrypted credential files under `credentials\`, logs under `logs\`, and model/runtime caches under `models\`. The launcher and app also expose local diagnostic details that may include your local file paths; review diagnostics before sharing them.
 
-There is no local model in this release to configure, install or download. The
-Settings screen says so plainly rather than offering a control that cannot work.
+Local inference keeps the account-manager model call on your PC after setup. OpenRouter sends turn prompts and selected evidence to the cloud provider. Network access may also be used by features you invoke, such as website research, and by first-time retrieval embedding setup. The backend's loopback binding is not a claim that all application traffic stays local.
 
----
+## Beta status and limitations
 
-## Getting started
+- This is **PRE-RELEASE / BETA** software. It is not represented as production-ready.
+- The Windows installer is not code-signed. Windows may display an Unknown Publisher warning. Do not disable Windows security controls; obtain the installer and checksum from the announced official release channel.
+- Local offline-after-setup acceptance used a closed loopback proxy for application HTTP(S), not an OS-wide physical network disconnect.
+- The one successful live OpenRouter acceptance request predates the final transport telemetry fix. The fix passed a focused fake-only regression; corrected transport lifecycle telemetry was not re-observed with another live request.
+- Local generation performance and memory use vary by hardware. The RAM planning figure above is not a hardware compatibility guarantee.
+- Public release and issue links use the founder-confirmed target `AsamehELsayed/Open-Marketing-OS`. Publication is not claimed by these documents.
 
-1. Download and run `OpenMarketingOS-Quick-Setup.exe`.
-2. On the welcome screen, pick **Cloud AI** (recommended for the beta).
-3. Choose **OpenRouter** or **OpenAI** and paste your API key.
-4. Press **Test connection**. OMOS verifies the key against the real provider.
-5. Create your workspace — business name, website, and what you sell.
-6. Start working. OMOS opens with concrete next steps, not an empty dashboard.
+## Help and issue reporting
 
-You can change provider, add another one, or disconnect entirely later in
-**Settings → AI** without reinstalling anything.
+Use the [public issue tracker](https://github.com/AsamehELsayed/Open-Marketing-OS/issues). Include the OMOS version, edition, Windows version/architecture, concise reproduction steps, and relevant redacted diagnostics. Do not attach API keys, credential files, real client or project material, database files, or unredacted logs. For a suspected security vulnerability, do not post exploit details publicly; use the private reporting channel linked from the repository's [Security page](https://github.com/AsamehELsayed/Open-Marketing-OS/security) if available, or wait for a maintainer-published private contact channel. These links identify the intended target and do not assert that the repository or release has been published.
 
----
+## License and notices
 
-## What it does
-
-| | |
-|---|---|
-| **AI account manager** | A chat-based marketing manager that plans, challenges and prioritises — and shows its work |
-| **Website research** | Point it at your site and get a real crawl-backed audit, not generic advice |
-| **Instagram research** | Reviews a public profile through the provider you configure |
-| **Competitor research** | Summarises how competitors position themselves |
-| **Positioning and offer critique** | Pressure-tests your messaging and proposes sharper versions |
-| **Campaigns and experiments** | Turns strategy into trackable work with success metrics and stop conditions |
-| **Approvals** | Nothing is sent or published without your explicit sign-off |
-| **Project memory** | Every project keeps its own context, so answers stay relevant and separate |
-| **Files and knowledge** | Drop in briefs, decks and notes; OMOS retrieves from them when relevant |
-| **Bring your own integrations** | OpenRouter, OpenAI, Apify, Bright Data, Meta, and MCP servers |
-| **Real-time streaming** | Responses stream as they are produced |
-
-Every answer is required to cite its sources. When OMOS does not know something,
-it says so rather than inventing it.
-
----
-
-## Screenshots
-
-> Coming with the first public release. Check the
-> [release notes][releases] for the current set — all screenshots are captured
-> with no API keys, no client data and no personal file paths visible.
-
----
-
-## Requirements
-
-| | |
-|---|---|
-| **OS** | Windows 10 or 11, 64-bit |
-| **RAM** | 4 GB minimum, 8 GB comfortable |
-| **Disk** | ~500 MB |
-| **Internet** | Required — for your AI provider, website research and Instagram research |
-| **Not required** | Python, Node.js, Git, Docker, a terminal, a code editor, or a GPU |
-
-You do **not** need to install any developer tooling. The installer ships
-everything, including the Python runtime and the built web interface.
-
----
-
-## Verifying a download
-
-This beta is **not code-signed**, so Windows SmartScreen will show an
-*"Unknown publisher"* warning. That is expected and honest — we would rather
-tell you than have you discover it at a bad moment. Do not disable SmartScreen.
-
-Instead, verify the download:
-
-1. Download `OpenMarketingOS-Quick-Setup.exe` and `SHA256SUMS.txt` from the
-   [releases page][releases].
-2. In PowerShell:
-
-   ```powershell
-   Get-FileHash .\OpenMarketingOS-Quick-Setup.exe -Algorithm SHA256
-   ```
-
-3. Compare the hash to the matching line in `SHA256SUMS.txt`.
-
-`release-manifest.json` on the same page records the build commit, build date
-and per-artifact checksums.
-
----
-
-## Privacy
-
-OMOS is local software, but "local" has a precise meaning and it is worth being
-straight about the edges:
-
-**Stays on your machine**
-
-- Your projects, chats, files and uploaded knowledge
-- Your settings and workspace files
-- Encrypted references to your provider credentials
-
-**Leaves your machine**
-
-- **AI requests go to the provider you chose.** In this beta OMOS sends your
-  prompts and the relevant project context to OpenRouter or OpenAI to get an
-  answer. The app is local; the AI inference is not.
-- **Website research** fetches the sites you ask about.
-- **Instagram research** contacts the provider you configured for it.
-
-**Never sent, anywhere**
-
-- OMOS has no analytics and no telemetry. Model usage, timing and cost are
-  recorded **locally**, in your own database, so you can see your own spend.
-- Your API keys are never written to a `.env` file, never placed in browser
-  storage, and never stored in plain text. They are encrypted with Windows
-  DPAPI, bound to your Windows user account.
-- OMOS ships no API keys of its own. Every credential belongs to you.
-
-Read the full [privacy statement](./docs/privacy.md).
-
----
-
-## Where your data lives
-
-Everything OMOS owns for you is in one folder:
-
-```
-%LOCALAPPDATA%\OpenMarketingOS\
-```
-
-Your projects, database, uploads, knowledge and logs are there — **not** in the
-installation folder. That is why updating or uninstalling OMOS never costs you
-your work, and why the portable ZIP does not scatter files across your
-Downloads folder.
-
-- **Backup and restore:** [docs/user-data-and-backup.md](./docs/user-data-and-backup.md)
-- **Troubleshooting:** [docs/troubleshooting.md](./docs/troubleshooting.md)
-
-Uninstalling removes the application only. Your data and credentials are left
-alone, on purpose.
-
----
-
-## Contributing
-
-Development setup is documented separately in **[CONTRIBUTING.md](./CONTRIBUTING.md)** —
-that document is for developers and is *not* how you install OMOS as a user.
-
----
-
-## Architecture
-
-For the curious and for contributors — deliberately below the user
-documentation, because most people installing a marketing tool do not care how
-it is built internally.
-
-A Python [FastAPI](https://fastapi.tiangolo.com/) backend orchestrates each turn
-through [LangGraph](https://langchain-ai.github.io/langgraph/): it assembles
-labeled context, gates retrieval, classifies intent, executes tools when the
-request genuinely needs them, and calls the model. Project memory and retrieval
-run on SQLite (with optional hybrid vector search), scoped per project. A React
-interface is served by the same process, which listens only on `127.0.0.1` and
-is opened in your default browser.
-
-More detail in [docs/architecture.md](./docs/architecture.md) and
-[docs/distribution/windows-packaging-decision.md](./docs/distribution/windows-packaging-decision.md).
-
----
-
-## Security
-
-Please read **[SECURITY.md](./SECURITY.md)** before reporting anything
-security-sensitive. Do not open a public issue for an unfixed vulnerability, and
-never paste API keys into an issue, a log or a screenshot.
-
----
-
-## License
-
-**Apache License 2.0** — see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
-
-You can use it commercially, self-host it, and change it. If you redistribute
-it, keep the license and the notice, and say what you changed.
+OMOS source is distributed under the Apache License 2.0 as shown in [LICENSE](LICENSE), with attribution details in [NOTICE](NOTICE). Third-party software and Local model terms are separate; see the included notices and the model details shown in Settings before use. The release remains pre-production; applicable production/CI licensing decisions are not claimed as confirmed.

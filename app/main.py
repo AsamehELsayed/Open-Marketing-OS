@@ -31,7 +31,9 @@ templates.env.filters["from_json"] = _from_json
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Open Marketing OS v1.0.0")
+    from app import paths
+
+    app = FastAPI(title=f"Open Marketing OS v{paths.APP_VERSION}")
 
     @app.middleware("http")
     async def _dead_post_chat_404(request: Request, call_next):
@@ -42,7 +44,11 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _startup():
         from app import paths
-        from app.deps import init_db
+        from app import deps
+
+        # Detect an existing installation before init_db creates the database.
+        # Edition profiles only seed defaults for genuinely new user state.
+        database_preexisted = deps.DB_PATH.exists()
 
         # DEV-008: in a frozen Windows build every mutable byte lives under
         # %LOCALAPPDATA%. Create it before the database, and lay down the
@@ -54,7 +60,14 @@ def create_app() -> FastAPI:
             from app.services.workspace_bootstrap import ensure_workspace
 
             ensure_workspace(paths.user_data_root())
-        init_db()
+        deps.init_db()
+        if paths.is_frozen():
+            from app.services.edition_profile import apply_first_run_profile
+
+            apply_first_run_profile(
+                paths.bundle_root() / "edition-profile.json",
+                database_preexisted=database_preexisted,
+            )
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

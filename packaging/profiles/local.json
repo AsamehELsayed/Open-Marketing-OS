@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "profile_id": "omos-local-v0.1.0-beta.1",
+  "edition": "Local",
+  "release_version": "0.1.0-beta.1",
+  "initial_settings": {
+    "ai_mode": "AUTO",
+    "manager_provider": "auto",
+    "active_model": "Qwen2.5-7B-Instruct",
+    "local_model_enabled": true,
+    "cloud_escalation": "off",
+    "openrouter_default_model": ""
+  },
+  "local_model_catalog": {
+    "path": "config/local_models.json",
+    "default_model_id": "qwen2.5-7b-instruct-q4_k_m",
+    "source": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "293ca9a10157b0e5fc5cb32af8b636a88bede891",
+    "model_bundled": false
+  },
+  "credential_policy": {
+    "provider": "user-selected",
+    "credential_bundled": false
+  },
+  "settings_policy": "apply only when initializing a pristine settings database; never overwrite saved settings, projects, workspace files, or credentials"
+}

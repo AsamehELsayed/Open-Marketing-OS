@@ -118,9 +118,19 @@ def test_version_is_consistent_everywhere():
     iss = (REPO_ROOT / "packaging" / "omos.iss").read_text(encoding="utf-8")
     match = re.search(r'#define\s+AppVersion\s+"([^"]+)"', iss)
     assert match, "omos.iss must define AppVersion"
-    assert match.group(1) == version, (
-        f"packaging/omos.iss says {match.group(1)} but app/paths.py says {version}"
+    assert match.group(1) == "{#ReleaseVersion}", (
+        "omos.iss must use the build-time ReleaseVersion supplied from app/paths.py"
     )
+    installer_script = (
+        REPO_ROOT / "scripts" / "package" / "build_installer.ps1"
+    ).read_text(encoding="utf-8")
+    assert r'APP_VERSION\s*=\s*"([^"]+)"' in installer_script
+    assert "$ReleaseVersion = $VersionMatch.Groups[1].Value" in installer_script
+    assert "'/DReleaseVersion=\"' + $ReleaseVersion + '\"'" in installer_script
+    paths_source = (REPO_ROOT / "app" / "paths.py").read_text(encoding="utf-8")
+    source_match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', paths_source)
+    assert source_match and source_match.group(1) == version
+    assert version not in installer_script
 
     manifest = REPO_ROOT / "dist" / "release-manifest.json"
     if manifest.is_file():

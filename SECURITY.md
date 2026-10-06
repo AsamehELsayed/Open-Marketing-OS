@@ -1,103 +1,32 @@
 # Security Policy
 
-## Supported versions
+## Release status
 
-Only the **latest published release** receives security fixes. When a new
-version ships, the previous one stops being supported.
+Open Marketing OS `v0.1.0-beta.1` is a **PRE-RELEASE / BETA**. It is not code-signed and is not represented as production-ready. Windows may show an Unknown Publisher warning. Obtain installers only from the public release channel announced by the maintainers and verify their SHA-256 checksums against the accompanying checksum file. Do not disable operating-system security protections.
 
-| Version | Supported |
-| --- | --- |
-| Latest release | Yes |
-| Anything older | No |
+## Reporting a security issue
 
-If you are on an older version, update to the latest release before reporting
-anything — the issue may already be fixed.
+The founder-confirmed public target is [AsamehELsayed/Open-Marketing-OS](https://github.com/AsamehELsayed/Open-Marketing-OS). Use the private vulnerability-reporting channel linked from its [Security page](https://github.com/AsamehELsayed/Open-Marketing-OS/security) if that feature is available. Until maintainers publish a private channel, do not post exploit steps, credentials, private data, or other sensitive vulnerability details in a public issue. These links identify the intended target; this document does not assert that the repository has been published or that private vulnerability reporting is enabled.
 
-## Reporting a vulnerability
+For a non-sensitive product issue, use the [public issue tracker](https://github.com/AsamehELsayed/Open-Marketing-OS/issues). Include the affected OMOS version and edition, Windows version/architecture, concise reproduction steps, and redacted diagnostics. Do not attach user databases, credential files, raw logs containing private paths, API keys, tokens, passwords, or real company/project content.
 
-**Use GitHub's private vulnerability reporting.** On the repository, open the
-**Security** tab and choose **Report a vulnerability**. This opens a private
-advisory visible only to you and the maintainers, and it is the primary channel.
+## Security behavior and privacy boundaries
 
-If that option is unavailable to you, you can file a GitHub Issue and select the
-option to report it as a **security advisory** — that keeps the conversation
-private as well.
+- **Local listener:** the packaged launcher binds the backend to `127.0.0.1` on a dynamically selected port. This prevents direct LAN binding; it is not a claim that the entire application is offline or immune to local-machine threats. Do not port-forward or reverse-proxy the listener.
+- **OMOS Local:** account-manager inference runs on the managed local llama.cpp runtime after the explicitly initiated model download has completed, checksums have passed, and the model is active. The Qwen model weights are not bundled. Other network-enabled features remain capable of using the network. First semantic RAG use may fetch a pinned embedding model into the local user cache; its embedding code does not send document text to its model host.
+- **OMOS OpenRouter:** the user supplies the OpenRouter key. Prompts and evidence selected for a turn are sent to OpenRouter for cloud inference. Review the provider's own terms and retention controls before sending sensitive material.
+- **Credential storage:** on Windows, provider secrets are stored as DPAPI-protected blobs bound to the current Windows user. SQLite stores references, not the plaintext secret value. Do not manually copy credential blobs to another account or machine.
+- **Data at rest:** packaged builds keep writable state under `%LOCALAPPDATA%\OpenMarketingOS\`, including workspace/project data, the application database, indexes, logs, credentials, and model caches. Anyone with access to your Windows account or unlocked device may be able to access ordinary workspace content.
+- **Diagnostics:** launcher details and logs can contain local paths and runtime metadata. Review and redact them before sharing.
 
-> **Do not open a public Issue for an unfixed vulnerability.** A public issue
-> announces the bug to everyone before a fix exists. Use one of the private
-> channels above.
+## Known validation limits
 
-If the project later publishes a security contact email, it will be listed in
-this file. Until then, the private advisory flow above is the only sanctioned
-channel — please do not guess an address or contact a third party.
+DEV-029 Local offline-after-setup validation used a closed loopback proxy for application HTTP(S), not an OS-wide physical network disconnect. The successful live OpenRouter generation predates the final transport telemetry fix. That fix passed a focused fake-only regression, but its corrected transport lifecycle telemetry was not re-observed with an additional live provider request.
 
-### What to include
+## Safe use
 
-- **Affected version** — the exact version string from Settings → About (or the
-  release you downloaded).
-- **Edition** — OMOS Quick is the only edition in this beta; say so explicitly if
-  you are unsure.
-- **Windows version and architecture** — e.g. Windows 11 x64.
-- **Reproduction** — the smallest set of steps that shows the problem.
-- **Impact** — what an attacker gains, and what access they need first.
-- **Suggested mitigation** — if you have one, include it.
-
-### What not to include
-
-- **API keys, tokens, or passwords of any kind.** Not in the report body, not
-  in screenshots, not in attached files.
-- **Personal data**, customer data, or your marketing content.
-- **Raw credential files** from `%LOCALAPPDATA%\OpenMarketingOS\credentials\`.
-
-If you accidentally paste a key or token, **redact it and rotate it immediately**
-at the provider. Treat it as compromised the moment it exists in a public place.
-A redacted report is still fully useful.
-
-## Response expectations
-
-These are targets, not guarantees:
-
-| Stage | Target |
-| --- | --- |
-| Acknowledgement that the report was received | 3 business days |
-| Initial assessment (severity, reproducibility, affected versions) | 10 business days |
-| Fix and release, if a fix is warranted | Depends on severity; communicated in the advisory |
-| Disclosure | Coordinated with you, after a fix is available |
-
-You will be credited in the release notes if you want to be. If you would rather
-stay anonymous, that is fine — the advisory will credit "a responsible
-researcher" or omit the credit.
-
-You will not be sued or retaliated against for good-faith research that stays
-within the scope above: no social engineering, no denial-of-service, no access
-to data belonging to anyone other than yourself.
-
-## Security posture
-
-What the product actually does today, stated plainly:
-
-- **Credentials are encrypted at rest with Windows DPAPI**, bound to your
-  Windows user account. Each secret is a separate encrypted file under
-  `%LOCALAPPDATA%\OpenMarketingOS\credentials\`. The database stores only
-  `vault://` references, never secret values. Secrets are not written to
-  `.env`, browser storage, logs, or the database.
-- **The backend binds `127.0.0.1` only**, on a dynamically chosen free port. It
-  is not exposed to your LAN or the internet, and the launcher opens your
-  default browser to it. Do not port-forward, reverse-proxy, or otherwise expose
-  this port. If you need to reach it from another machine, do not.
-- **Installations are not code-signed.** Windows SmartScreen will show an
-  **Unknown publisher** warning. This is expected for a beta. Do not disable
-  SmartScreen. Instead, verify your download against the published
-  `SHA256SUMS.txt` and confirm the hashes match.
-- **AI inference is not local in the Quick edition.** Prompts and context are
-  sent to the cloud provider you configured (OpenRouter or OpenAI). The app is
-  local; the inference is not. See [docs/privacy.md](docs/privacy.md).
-- **No OMOS-owned API keys are shipped.** You bring your own provider
-  credentials, and the app runs with none of its own.
-
-## Security-relevant documentation
-
-- [docs/privacy.md](docs/privacy.md) — what stays local, what leaves the machine
-- [docs/user-data-and-backup.md](docs/user-data-and-backup.md) — where data and
-  credentials live on disk
-- [docs/troubleshooting.md](docs/troubleshooting.md) — if you hit an error
+- Keep Windows and the app's dependencies updated from trusted release sources.
+- Do not expose the local listener to other devices.
+- Do not submit confidential content to OpenRouter unless permitted by your organization and acceptable under the provider's current terms.
+- Keep backups of important project/workspace files in a location you control.
+- Redact credentials and private data from issue reports and screenshots. If a key is accidentally disclosed, revoke or rotate it with the provider.
