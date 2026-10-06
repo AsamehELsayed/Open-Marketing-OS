@@ -1,22 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import type { SettingsConfig } from "../api/client";
 import PageHeader from "../components/chrome/PageHeader";
+import { getStartHereProfileCopy } from "../editionProfileCopy";
 
-const topics = [
+const openingTopics = [
   { title: "Welcome to OMOS", text: "OMOS is an AI marketing workspace. Its Account Manager can coordinate specialist work, use marketing playbooks and connected tools, and bring the evidence into one clear result." },
   { title: "How OMOS works", text: "You describe the work. The Account Manager chooses a practical approach, brings in suitable specialists, gathers evidence, and combines the findings into a result you can review." },
   { title: "Your Account Manager", text: "The Account Manager is your main point of contact. It understands your request, coordinates work, selects relevant skills and tools, tracks progress, and summarizes the outcome." },
   { title: "Your marketing team", text: "Depending on the task, OMOS may bring in specialists for research, SEO, conversion improvement, strategy, social media, or content. The team used can vary with the request." },
   { title: "Skills and tools", text: "A Skill is a marketing method or playbook, such as an SEO audit. A Tool retrieves information or performs an action, such as reading a website or researching public web pages." },
   { title: "Your business workspace", text: "Create a business profile with its name and, if useful, a website, short context, and primary market. Your Account Manager uses this information to make its first recommendations more relevant." },
-  { title: "Connect AI", text: "This beta supports OpenRouter and OpenAI. Add your own provider credential in Settings and test the connection there. OMOS stores the credential securely and does not show it again after saving. Local AI is planned for a later beta." },
+];
+
+const closingTopics = [
   { title: "Connect integrations", text: "Settings lists the integrations available in this build. Public Instagram research can use its configured research providers; Meta Insights is for a connected owned account. Website analysis can use public website content. Availability depends on configuration and provider access." },
   { title: "Start your first task", text: "Open Chat and ask for one clear outcome. Try: “Review my website and suggest three improvements,” “Compare my competitors,” “Improve my positioning,” “Audit my Instagram,” or “Suggest growth experiments.”" },
   { title: "Understand the execution tree", text: "The activity view shows work that has been queued, started, completed, or failed, plus items waiting for approval. It is a progress view, not a display of private model reasoning. Completed branches feed into the final summary." },
   { title: "Approvals", text: "Some actions pause and ask you to decide before continuing. Review pending items in Approvals, read what is proposed, then approve or reject it. OMOS resumes the work with the decision you make." },
   { title: "When something fails", text: "A branch may report that a provider or specialist could not complete its work. Other independent work may continue. OMOS should identify unavailable evidence so you can decide whether to retry or adjust the request." },
-  { title: "Quick troubleshooting", text: "AI provider not connected: open Settings → AI & Models. Integration not connected: open Settings → Integrations. Website or Instagram research unavailable: check the URL, public access, and provider status. A failed branch: open its activity details and retry with a narrower request. Chat not responding: confirm a provider is connected, then reload and try again." },
+  { title: "Quick troubleshooting", text: "Integration not connected: open Settings → Integrations. Website or Instagram research unavailable: check the URL, public access, and provider status. A failed branch: open its activity details and retry with a narrower request. Chat not responding: check the AI route and its model/runtime or provider status in Settings." },
   { title: "Recommended first prompts", text: "English: “Analyze my website, SEO, positioning and conversion funnel, then propose three prioritized growth experiments.” Arabic: “حلل موقعي والـSEO والتموضع وقمع التحويل، واقترح 3 تجارب نمو ذات أولوية.” You can also start with a website review, competitor comparison, positioning critique, Instagram audit, or experiment ideas." },
 ];
 
@@ -24,6 +28,28 @@ export default function StartHere() {
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editionProfile, setEditionProfile] = useState("");
+  const editionCopy = getStartHereProfileCopy(editionProfile);
+  const topics = [
+    ...openingTopics,
+    { title: editionCopy.title, text: editionCopy.text },
+    ...closingTopics.slice(0, 5),
+    { title: "Quick troubleshooting", text: editionCopy.troubleshooting },
+    closingTopics[6],
+  ];
+
+  useEffect(() => {
+    let current = true;
+    api.getSettingsConfig()
+      .then((config: SettingsConfig) => {
+        if (current) setEditionProfile(config.ai.edition_profile || "");
+      })
+      .catch(() => {
+        if (current) setEditionProfile("");
+      });
+    return () => { current = false; };
+  }, []);
+
   const continueTo = async (path: string) => {
     if (saving) return;
     setSaving(true);
@@ -46,7 +72,7 @@ export default function StartHere() {
         <p className="mt-3 max-w-3xl text-body text-inksecondary">The Account Manager coordinates the work, uses the right marketing methods and available tools, then gives you a result with progress and evidence you can review.</p>
         <div className="mt-5 flex flex-wrap gap-2">
           <button type="button" onClick={() => navigate("/app/business/new")} className="rounded bg-accent px-4 py-2 text-bodysm font-semibold text-white hover:bg-accenthover">Create your business</button>
-          <button type="button" disabled={saving} onClick={() => void continueTo("/app/settings?section=ai")} className="rounded bg-accent px-4 py-2 text-bodysm font-semibold text-white hover:bg-accenthover disabled:opacity-60">{saving ? "Saving…" : "Connect AI"}</button>
+          <button type="button" disabled={saving} onClick={() => void continueTo(`/app/settings?section=${editionCopy.settingsSection}`)} className="rounded bg-accent px-4 py-2 text-bodysm font-semibold text-white hover:bg-accenthover disabled:opacity-60">{saving ? "Saving…" : editionCopy.stepAction}</button>
           <button type="button" disabled={saving} onClick={() => void continueTo("/app")} className="rounded border border-linedefault px-4 py-2 text-bodysm font-medium text-ink hover:bg-elevated">Open Chat</button>
           <button type="button" disabled={saving} onClick={() => void continueTo("/app/settings?section=general")} className="rounded border border-linedefault px-4 py-2 text-bodysm font-medium text-ink hover:bg-elevated">Explore Settings</button>
         </div>
@@ -58,7 +84,7 @@ export default function StartHere() {
         <ol className="mt-4 grid gap-3 sm:grid-cols-2">
           {[
             { title: "Create your business", text: "Add your business name and any optional context.", to: "/app/business/new", action: "Create business" },
-            { title: "Connect an AI provider", text: "Add and test a provider credential.", to: "/app/settings?section=ai", action: "Open AI settings" },
+            { title: editionCopy.stepTitle, text: editionCopy.stepText, to: `/app/settings?section=${editionCopy.settingsSection}`, action: editionCopy.stepAction },
             { title: "Add optional integrations", text: "Configure the integrations available in this workspace.", to: "/app/settings?section=integrations", action: "Open integrations" },
             { title: "Open Account Manager", text: "Meet your main point of contact for marketing work.", to: "/app", action: "Open Account Manager" },
             { title: "Ask your first marketing task", text: "Describe one clear outcome you want help with.", to: "/app/chat/new", action: "Start a new chat" },
@@ -78,11 +104,13 @@ export default function StartHere() {
           <p className="mt-2 text-bodysm leading-relaxed text-inksecondary">{topic.text}</p>
           {index === 5 && <Link className="mt-3 inline-block text-bodysm font-medium" to="/app/settings?section=general">Open general settings →</Link>}
           {index === 6 && <>
+            {editionCopy.showCloudSetupImage && <>
             <figure className="mt-4 overflow-hidden rounded-md border border-linedefault bg-base">
               <img src="/app/start-here/settings-ai.png" alt="Settings AI and Models page showing provider choices and an unavailable Local AI state." loading="lazy" className="block max-h-56 w-full object-cover object-top sm:max-h-64" />
               <figcaption className="border-t border-linesubtle px-3 py-2 text-meta text-inksecondary">Settings → AI &amp; Models. This synthetic capture shows provider options; no credential values are present.</figcaption>
             </figure>
-            <Link className="mt-3 inline-block text-bodysm font-medium" to="/app/settings?section=ai">Open AI settings →</Link>
+            </>}
+            <Link className="mt-3 inline-block text-bodysm font-medium" to={`/app/settings?section=${editionCopy.settingsSection}`}>{editionCopy.stepAction} →</Link>
           </>}
           {index === 7 && <>
             <figure className="mt-4 overflow-hidden rounded-md border border-linedefault bg-base">

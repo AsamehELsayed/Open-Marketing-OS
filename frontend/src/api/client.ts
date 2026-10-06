@@ -283,6 +283,7 @@ export interface SettingsConfig {
     language: string;
   };
   ai: {
+    edition_profile?: string;
     ai_mode: string;
     local_ai_status: string;
     active_model: string;

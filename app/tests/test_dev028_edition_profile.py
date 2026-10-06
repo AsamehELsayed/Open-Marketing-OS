@@ -92,3 +92,32 @@ def test_descriptor_with_unapproved_routing_defaults_is_rejected(tmp_path, monke
 
     with pytest.raises(ValueError):
         apply_first_run_profile(path, database_preexisted=False)
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    ["omos-local-v0.1.0-beta.1", "omos-openrouter-v0.1.0-beta.1"],
+)
+def test_ai_config_exposes_installed_edition_profile(monkeypatch, profile_id):
+    from app.services.config_service import ConfigService
+
+    def get_setting(cls, key, default=None, conn=None):
+        return profile_id if key == "edition_profile" else default
+
+    monkeypatch.setattr(ConfigService, "get_setting", classmethod(get_setting))
+    monkeypatch.setattr(
+        ConfigService, "is_openai_configured",
+        classmethod(lambda cls, conn=None: False),
+    )
+    monkeypatch.setattr(
+        ConfigService, "get_openrouter_credential_status",
+        classmethod(lambda cls, conn=None: "not_configured"),
+    )
+    monkeypatch.setattr(
+        ConfigService, "is_openrouter_configured",
+        classmethod(lambda cls, conn=None: False),
+    )
+
+    config = ConfigService.get_ai_config(conn=object())
+
+    assert config["edition_profile"] == profile_id

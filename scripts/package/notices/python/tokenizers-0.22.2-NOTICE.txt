@@ -1,0 +1,4 @@
+Package: tokenizers 0.22.2
+License metadata: Apache-2.0. Author metadata: Nicolas Patry <nicolas.patry@protonmail.com>; Anthony Moi <anthony@huggingface.co>.
+The accompanying Apache-2.0.txt contains the full standard Apache License, Version 2.0 text.
+Version-pinned source: https://github.com/huggingface/tokenizers/tree/v0.22.2

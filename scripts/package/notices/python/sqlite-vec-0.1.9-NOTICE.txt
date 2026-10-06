@@ -1,0 +1,5 @@
+Package: sqlite-vec 0.1.9
+Copyright (c) 2024 Alex Garcia
+License: MIT OR Apache-2.0, at the recipient's option.
+The accompanying LICENSE-MIT and LICENSE-APACHE files provide the complete license texts.
+Version-pinned source: https://github.com/asg017/sqlite-vec/tree/v0.1.9

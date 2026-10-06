@@ -229,6 +229,16 @@ if ($LASTEXITCODE -ne 0) { Fail 'Provider-boundary verification failed; inspect 
 New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
 Copy-Item (Join-Path $BuildDir 'OpenMarketingOS\*') $PayloadDir -Recurse -Force
 
+# Recipient-facing attribution must accompany the actual frozen application,
+# not remain only in the source tree. Copy exact locked Python package files,
+# production frontend dependency licenses, htmx 0BSD, and project inventories.
+Write-Step 'Staging recipient-facing third-party notices and license files'
+$sitePackages = (& $python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+if ($LASTEXITCODE -ne 0 -or -not $sitePackages) { Fail 'Could not locate the locked Python site-packages for license staging.' }
+& $python (Join-Path $PSScriptRoot 'stage_license_payload.py') `
+  --repo-root $RepoRoot --payload-dir $PayloadDir --site-packages $sitePackages
+if ($LASTEXITCODE -ne 0) { Fail 'Recipient-facing license staging failed; packaging stopped.' }
+
 # The app must not read a .env. If one ever got bundled it would be a secret leak.
 $strayEnv = Get-ChildItem $PayloadDir -Recurse -Force -Include '.env', '.env.*' -ErrorAction SilentlyContinue
 if ($strayEnv) {

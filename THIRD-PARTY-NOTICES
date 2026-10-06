@@ -1,12 +1,12 @@
 THIRD-PARTY NOTICES — DEV-028 SOURCE/LOCK INVENTORY
 
-Open Marketing OS is licensed under Apache License 2.0; see `LICENSE`. This file lists the package versions present in the source locks and the license metadata found for those versions. The final frozen Python payload and frontend bundle are not yet built, so exact redistribution membership and required retained vendor license/copyright texts remain pending. Do not treat this source-lock disclosure as final payload clearance.
+Open Marketing OS is licensed under Apache License 2.0; see `LICENSE`. This inventory records exact source-lock package versions and declared license metadata. The Windows packaging step stages exact license files for all locked Python distributions and all production frontend packages into `THIRD-PARTY-LICENSES`, then writes a manifest beside them. The final installer still requires post-build membership verification; this source inventory alone is not final payload clearance.
 
 ## Project and selected components
 
 - Open Marketing OS contributors — Apache-2.0; see `LICENSE` and this `NOTICE`.
 - htmx 2.0.4 (`app/static/htmx.min.js`) — Zero-Clause BSD (0BSD). Exact upstream license text is included at `LICENSES/htmx-0BSD.txt`; source: https://github.com/bigskysoftware/htmx/blob/v2.0.4/LICENSE.
-- llama.cpp b11429 revision `d81235049384534c167caea52b85a694f6103d14` — MIT. Runtime archive SHA-256: `1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe`. Preserve the runtime MIT `LICENSE` and `LICENSE-LLVM-OpenMP` files in the Local payload; DEV-029 staged runtime evidence records these notices.
+- llama.cpp b11429 revision `d81235049384534c167caea52b85a694f6103d14` — MIT. Runtime archive SHA-256: `1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe`. The Local profile installs the runtime MIT `LICENSE` and `LICENSE-LLVM-OpenMP` files with its runtime. OpenRouter has no llama.cpp runtime and does not install these runtime-specific files.
 - Local model catalog entry: Qwen2.5-7B-Instruct Q4_K_M, `Qwen/Qwen2.5-7B-Instruct-GGUF` revision `293ca9a10157b0e5fc5cb32af8b636a88bede891`, catalog-declared Apache-2.0. Model weights are user-downloaded and are not included in this source candidate or installer.
 - Vendored Marketing Skills: `coreyhaines31/marketingskills` v2.11.1, commit `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`, MIT; retain `.agents/LICENSE`.
 

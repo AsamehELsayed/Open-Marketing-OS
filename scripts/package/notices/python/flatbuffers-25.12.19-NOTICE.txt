@@ -1,0 +1,4 @@
+Package: flatbuffers 25.12.19
+License metadata: Apache 2.0. Package author metadata: Derek Bailey <derekbailey@google.com>.
+The accompanying Apache-2.0.txt contains the full standard Apache License, Version 2.0 text.
+Version-pinned source: https://github.com/google/flatbuffers/tree/v25.12.19

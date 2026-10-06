@@ -8,20 +8,21 @@ THIRD-PARTY SOFTWARE AND ATTRIBUTION
 
 The source-lock and selected-component inventory is in THIRD-PARTY-NOTICES and
 LICENSE-INVENTORY.md (machine-readable counterpart: LICENSE-INVENTORY.json).
-These are lock-derived disclosures. The final frozen Python payload and emitted
-frontend bundle have not yet been built for DEV-028; their exact membership and
-retained license files must be checked before public distribution.
+The Windows packaging step copies these recipient notices into the application
+payload and stages locked Python and production frontend package license files
+under THIRD-PARTY-LICENSES. Its manifest identifies exact package versions and
+copied files. Verify the resulting installer contents after each release build.
 
 Local edition — llama.cpp
 The Local edition stages the pinned llama.cpp b11429 Windows CPU runtime,
 revision d81235049384534c167caea52b85a694f6103d14, from the archive with
 SHA-256 1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe.
-The upstream project is MIT-licensed. Retain the runtime MIT LICENSE and bundled
-OpenMP LICENSE-LLVM-OpenMP notice in the Local payload. DEV-029 staged runtime
-evidence includes both; this source candidate includes the llama.cpp MIT notice
-at scripts/package/notices/llama.cpp-LICENSE. Exact runtime notice copies are
-also included under runtime/licenses/llama.cpp/. Confirm both reach the final
-payload.
+The upstream project is MIT-licensed. The Local profile installs the runtime
+MIT LICENSE and bundled OpenMP LICENSE-LLVM-OpenMP notice alongside the runtime
+under the user's Local runtime directory. The OpenRouter profile excludes that
+runtime directory and its runtime-specific license files. DEV-029 staged runtime
+evidence includes both notices; source copies are under
+runtime/licenses/llama.cpp/ and scripts/package/notices/llama.cpp-LICENSE.
 
 Local model
 The catalog selects Qwen2.5-7B-Instruct Q4_K_M from
@@ -41,14 +42,14 @@ THIRD-PARTY-NOTICES.
 Dependency notices and final payload
 requirements-lock.txt contains 114 pinned Python distributions. The frontend
 production lock contains 11 non-development package entries, including DOMPurify
-3.4.15 declared as (MPL-2.0 OR Apache-2.0). The inventories list exact versions
-and license metadata; they do not assert final installer/bundle membership and
-do not replace required package-specific copyright and license texts. Before
-release, inspect the frozen Python payload and emitted frontend bundle, retain
-the applicable notices and license files, and verify both installers include
-them. pyreadline3's exact locked package metadata identifies BSD without an SPDX
-variant; determine the exact wheel notice/variant in final-payload QA. Cairo/Zain
-font binaries and client imagery are excluded pending documented rights.
+3.4.15 declared as (MPL-2.0 OR Apache-2.0). The packaging step copies license
+files from each exact locked Python distribution and all production frontend
+packages into THIRD-PARTY-LICENSES, with a generated manifest. It also includes
+the exact htmx 0BSD text, project inventory, and vendored-skills MIT text.
+Final installer membership still requires post-build verification. The exact
+pyreadline3 wheel notice is copied; its own text describes the terms as a
+BSD-type license without naming a narrower SPDX variant. Cairo/Zain font
+binaries and client imagery are excluded pending documented rights.
 
 INNO SETUP — PRE-PRODUCTION
 DEV-029 records the Inno Setup compiler's “Non-commercial use only” label. The

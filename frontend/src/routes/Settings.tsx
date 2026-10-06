@@ -6,6 +6,7 @@ import Modal from "../components/chrome/Modal";
 import { useProject } from "../components/shell/project-context";
 import { projectOpenRouterCredentialStatus } from "../api/openrouterCredentialStatus";
 import LocalModelSetup from "../components/settings/LocalModelSetup";
+import { getAiSettingsProfileCopy, getEditionKind } from "../editionProfileCopy";
 
 /**
  * DEV-008-SKILLS-OPS added the `skills` tab through the six documented
@@ -16,7 +17,7 @@ import LocalModelSetup from "../components/settings/LocalModelSetup";
  *      `TABS.some((t) => t.id === sec)`
  *   3. the `useState<SectionTab>` tab state (unchanged, already generic)
  *   4. the deep-link effect        (unchanged, already generic)
- *   5. the tab bar                 (unchanged, it maps `TABS`)
+ *   5. the tab bar                 (renders the edition-visible tabs)
  *   6. the section body           (below)
  * The skills registry is independent of the settings-config fetch, so its
  * section renders OUTSIDE the `loading / !config` gate: a settings-config
@@ -1013,6 +1014,15 @@ export default function Settings() {
     vision?.last_checked_at,
   );
   const vaultConfigured = Boolean(config?.privacy_security.vault_backend);
+  const editionKind = getEditionKind(config?.ai.edition_profile);
+  const editionAiCopy = getAiSettingsProfileCopy(config?.ai.edition_profile);
+  const visibleTabs = editionKind === "openrouter"
+    ? TABS.filter((item) => item.id !== "local")
+    : TABS;
+
+  useEffect(() => {
+    if (editionKind === "openrouter" && tab === "local") setTab("ai");
+  }, [editionKind, tab]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -1042,7 +1052,7 @@ export default function Settings() {
 
         {/* Tab Bar */}
         <div className="border-b border-linedefault mb-6 flex flex-wrap gap-2">
-          {TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = tab === t.id;
             return (
               <button
@@ -1075,7 +1085,7 @@ export default function Settings() {
           </div>
         ) : (
           <div className="max-w-4xl space-y-6">
-            {tab === "local" && <LocalModelSetup />}
+            {tab === "local" && editionAiCopy.localModelAvailable && <LocalModelSetup />}
 
             {/* TAB 1: GENERAL */}
             {tab === "general" && (
@@ -1150,37 +1160,40 @@ export default function Settings() {
             {tab === "ai" && (
               <div className="space-y-4">
                 <section className="rounded border border-linedefault bg-surface p-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-h3 font-semibold text-ink">Local Intelligence</h3>
-                  </div>
-                  <p className="text-bodysm text-inksecondary mt-1">
-                    Set up and manage the pinned local model from the Local Model tab. Downloading requires an explicit action there.
-                  </p>
-                  <p className="text-meta text-inkmuted mt-2">These values show the configured base model and adapter.</p>
+                  <h3 className="text-h3 font-semibold text-ink">{editionAiCopy.summaryTitle}</h3>
+                  <p className="text-bodysm text-inksecondary mt-1">{editionAiCopy.summaryText}</p>
+                  {editionAiCopy.localModelAvailable && (
+                    <>
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div className="rounded border border-linedefault bg-elevated p-3">
+                          <span className="text-meta text-inkmuted block">Active Base Model</span>
+                          <span className="text-bodysm font-semibold text-ink mt-0.5 block">
+                            {config.ai.active_model}
+                          </span>
+                          <span className="text-meta text-inksecondary mt-1 block">Selected model</span>
+                        </div>
 
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <div className="rounded border border-linedefault bg-elevated p-3">
-                      <span className="text-meta text-inkmuted block">Active Base Model</span>
-                      <span className="text-bodysm font-semibold text-ink mt-0.5 block">
-                        {config.ai.active_model}
-                      </span>
-                      <span className="text-meta text-inksecondary mt-1 block">Selected model</span>
-                    </div>
-
-                    <div className="rounded border border-linedefault bg-elevated p-3">
-                      <span className="text-meta text-inkmuted block">Marketing Intelligence Adapter</span>
-                      <span className="text-bodysm font-semibold text-ink mt-0.5 block">
-                        {config.ai.marketing_adapter}
-                      </span>
-                      <span className="text-meta text-inksecondary mt-1 block">Configured adapter</span>
-                    </div>
-                  </div>
+                        <div className="rounded border border-linedefault bg-elevated p-3">
+                          <span className="text-meta text-inkmuted block">Marketing Intelligence Adapter</span>
+                          <span className="text-bodysm font-semibold text-ink mt-0.5 block">
+                            {config.ai.marketing_adapter}
+                          </span>
+                          <span className="text-meta text-inksecondary mt-1 block">Configured adapter</span>
+                        </div>
+                      </div>
+                      {editionKind === "local" && (
+                        <button type="button" onClick={() => setTab("local")} className="mt-4 rounded border border-linedefault px-3 py-1.5 text-bodysm font-medium text-ink hover:bg-elevated">
+                          Open Local Model setup
+                        </button>
+                      )}
+                    </>
+                  )}
                 </section>
 
                 <section className="rounded border border-linedefault bg-surface p-5">
                   <h3 className="text-h3 font-semibold text-ink">AI Routing Mode</h3>
                    <p className="text-bodysm text-inksecondary mt-1">
-                     Choose how OMOS routes model requests. Local routing is available when the verified model runtime is ready.
+                     {editionAiCopy.routingText}
                    </p>
 
                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -1188,7 +1201,7 @@ export default function Settings() {
                       {
                         mode: "AUTO",
                         title: "Auto (Recommended)",
-                        desc: "Uses the ready local model when available, then follows the configured provider fallback.",
+                        desc: editionAiCopy.autoText,
                       },
                       {
                         mode: "BASE",
@@ -1260,9 +1273,7 @@ export default function Settings() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-h3 font-semibold text-ink">OpenRouter</h3>
-                      <p className="text-bodysm text-inksecondary mt-0.5">
-                        Optional cloud AIs through one provider. Requests routed through OpenRouter leave the local machine.
-                      </p>
+                      <p className="text-bodysm text-inksecondary mt-0.5">{editionAiCopy.openrouterText}</p>
                     </div>
                     <span
                       className={`rounded-sm border px-2 py-0.5 text-meta font-medium ${badgeClass(
@@ -2211,8 +2222,8 @@ export default function Settings() {
                   </p>
                   <ul className="mt-3 list-disc pl-5 text-meta text-inksecondary space-y-1">
                     <li>No telemetry or analytics beacons are emitted by this software.</li>
-                    <li>Marketing strategy documents, customer emails, and audit data remain on your local disk.</li>
-                    <li>External AI inference is used only if explicitly configured under AI Settings.</li>
+                    <li>Workspace files stay in the local user-data area. If you use OpenRouter, the prompt and evidence selected for that turn are sent to the provider.</li>
+                    <li>{editionKind === "openrouter" ? "This edition requires your own OpenRouter credential for cloud inference; Windows protects the saved key with DPAPI." : editionKind === "local" ? "This edition runs account-manager inference locally after you explicitly download and verify the pinned model." : "The active AI route determines whether a turn uses local inference or sends selected content to a configured cloud provider."}</li>
                   </ul>
                 </section>
               </div>

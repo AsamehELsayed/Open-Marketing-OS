@@ -100,6 +100,8 @@ class ConfigService:
     def get_ai_config(cls, conn=None) -> dict[str, Any]:
         with _get_conn(conn) as current:
             return {
+                "edition_profile": str(cls.get_setting(
+                    "edition_profile", "", conn=current) or ""),
                 "ai_mode": str(cls.get_setting(
                     "ai_mode", DEFAULT_AI_MODE, conn=current)).upper(),
                 "local_ai_status": cls.get_setting(
