@@ -34,6 +34,13 @@ def test_stage_copies_project_python_frontend_and_vendored_notices(tmp_path: Pat
         "Metadata-Version: 2.1\nName: sample-pkg\nVersion: 1.2.3\n",
     )
     _write(site_packages / "sample_pkg-1.2.3.dist-info" / "licenses" / "LICENSE.txt", "python MIT license\n")
+    _write(site_packages / "sample_pkg" / "LICENSE", "package-level MIT license\n")
+    _write(site_packages / "sample_pkg" / "ThirdPartyNotices.txt", "package dependency notices\n")
+    _write(
+        site_packages / "sample_pkg-1.2.3.dist-info" / "RECORD",
+        "sample_pkg/LICENSE,,\nsample_pkg/ThirdPartyNotices.txt,,\n"
+        "sample_pkg-1.2.3.dist-info/licenses/LICENSE.txt,,\n",
+    )
     _write(
         repo / "frontend" / "package-lock.json",
         json.dumps({
@@ -54,6 +61,8 @@ def test_stage_copies_project_python_frontend_and_vendored_notices(tmp_path: Pat
     assert (payload / "LICENSES" / "htmx-0BSD.txt").is_file()
     assert (payload / "THIRD-PARTY-LICENSES" / "marketing-skills" / "LICENSE").is_file()
     assert (payload / manifest["python_packages"][0]["license_files"][0]).is_file()
+    assert any(path.endswith("distribution/sample_pkg/LICENSE") for path in manifest["python_packages"][0]["license_files"])
+    assert any(path.endswith("distribution/sample_pkg/ThirdPartyNotices.txt") for path in manifest["python_packages"][0]["license_files"])
     assert (payload / manifest["frontend_packages"][0]["license_files"][0]).is_file()
     assert manifest["python_package_count"] == 1
     assert manifest["frontend_package_count"] == 1

@@ -9,7 +9,10 @@ import shutil
 import sys
 from pathlib import Path
 
-LICENSE_FILE = re.compile(r"^(?:licen[cs]e|copying|notice|copyright)(?:[-_.].*)?$", re.I)
+LICENSE_FILE = re.compile(
+    r"^(?:(?:licen[cs]e|copying|notice|copyright)(?:[-_.].*)?|third[-_.]?party[-_.]?notices?(?:[-_.].*)?)$",
+    re.I,
+)
 FALLBACKS = {
     "flatbuffers": ["Apache-2.0.txt", "flatbuffers-25.12.19-NOTICE.txt"],
     "langsmith": ["langsmith-0.14.1-LICENSE-MIT.txt"],
@@ -80,10 +83,29 @@ def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
         dest_base = payload / "THIRD-PARTY-LICENSES" / "python" / f"{canonical(package)}-{version}"
         files = []
         dist_path = Path(dist._path).resolve()
+        copied_sources: set[Path] = set()
         for source in dist_path.rglob("*"):
             if not source.is_file() or not LICENSE_FILE.match(source.name):
                 continue
             files.append(_copy(source, dest_base / source.relative_to(dist_path)))
+            copied_sources.add(source.resolve())
+        # Some wheels declare their license and third-party notices beside the
+        # import package rather than inside dist-info (for example, onnxruntime).
+        # Include the exact installed files listed by the wheel RECORD as well.
+        for record_path in dist.files or ():
+            if not LICENSE_FILE.match(Path(record_path).name):
+                continue
+            source = Path(dist.locate_file(record_path)).resolve()
+            if not source.is_file() or source in copied_sources:
+                continue
+            try:
+                source_relative = source.relative_to(site_packages)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Package license file is outside the isolated site-packages: {source}"
+                ) from exc
+            files.append(_copy(source, dest_base / "distribution" / source_relative))
+            copied_sources.add(source)
         fallback_names = FALLBACKS.get(canonical(package), [])
         if not files and not fallback_names:
             raise RuntimeError(f"No exact license text found for locked package {package}=={version}")
