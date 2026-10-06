@@ -1,0 +1,48 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ hello }}.</h1>
+<p class="subtitle">Here's what your marketing team is doing.</p>
+
+{% if focus %}
+<div class="card">
+<p class="muted">Your main focus</p>
+<h2>{{ focus.title }}</h2>
+<p>{{ focus.id }} · <span class="badge">{{ focus.status|status_label }}</span>
+{% if focus_prospects %} · {{ focus_prospects }} verified prospects{% endif %}</p>
+<a class="btn" href="/campaigns">View campaign</a>
+</div>
+{% else %}
+<div class="empty"><strong>No campaigns yet.</strong>Sync your workspace in Settings to load your marketing plan.</div>
+{% endif %}
+
+<h2>Needs your attention</h2>
+{% if pending_approvals %}
+<p class="subtitle">{{ pending_approvals|length }} thing(s) need your approval.</p>
+<div class="grid">
+{% for a in pending_approvals %}
+<div class="card"><h3>{{ a.title }}</h3><p class="muted">{{ a.kind }}</p>
+<a class="btn" href="/approvals">Review</a></div>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty"><strong>You're all caught up.</strong>Nothing needs your approval right now.</div>
+{% endif %}
+
+<h2>Team activity</h2>
+{% if activity %}
+<div class="card"><ul class="activity">
+{% for item in activity %}<li><time>{{ item.when }}</time>{{ item.text }}</li>{% endfor %}
+</ul></div>
+{% else %}
+<div class="empty"><strong>Quiet so far.</strong>Team activity will show up here once work begins.</div>
+{% endif %}
+
+<h2>Next step</h2>
+<div class="card"><p>{{ step.text }}</p><a class="btn" href="{{ step.href }}">{{ step.cta }}</a></div>
+
+<div class="card">
+<h3>Need anything?</h3>
+<p class="muted">Talk to your Account Manager about your marketing, campaigns, results, or what to do next.</p>
+<a class="btn" href="/chat">Open Account Manager</a>
+</div>
+{% endblock %}

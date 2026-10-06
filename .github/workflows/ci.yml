@@ -1,0 +1,380 @@
+# Open Marketing OS — CI
+#
+# Action pinning policy: this file pins third-party actions to MAJOR version
+# tags (actions/checkout@v4, gitleaks/gitleaks-action@v2, ...) for readability.
+# That is good enough for day-to-day use, but a major tag is a moving target,
+# so a compromised upstream release would be picked up automatically. For a
+# stricter supply-chain posture, pin every `uses:` to a full commit SHA
+# (e.g. actions/checkout@<40-char-sha> # v4.2.2) and let Dependabot bump the SHAs.
+# The repo owner may switch to SHA pinning without any other change here.
+#
+# These workflows never require the founder's API keys. Nothing in CI needs a
+# secret, and no secret is referenced by this file.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    paths:
+      - '.github/**'
+      - 'app/**'
+      - 'frontend/**'
+      # DEV-008-PUBLISH-GATE: `scripts/**` and `config/**` are both load-bearing
+      # at runtime -- `config/model_pricing.yaml` is read on every graph turn and
+      # its absence once shipped a frozen app that looked healthy and never
+      # replied. A change to it must be able to trigger CI. `tests/**` was
+      # removed because the public repository has no root `tests/`; the real
+      # suite lives in `app/tests/` and is already covered by `app/**`.
+      - 'scripts/**'
+      - 'config/**'
+      - 'launcher/**'
+      - 'packaging/**'
+      - 'docs/**'
+      - 'pytest.ini'
+      - 'requirements*.txt'
+      - 'app.py'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'README.md'
+
+# Minimal permissions: CI only ever needs to read the repository.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          set -o pipefail
+          python -m pytest -q 2>&1 | tee pytest-output.txt
+
+      - name: Upload pytest output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output-py${{ matrix.python-version }}
+          path: pytest-output.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  lockfile:
+    # DEV-008: the release workflow builds from requirements-lock.txt while this
+    # file used to install requirements.txt. Nothing therefore validated the
+    # dependency set that actually ships, and a divergence between the two would
+    # only have surfaced as a broken installer in front of a user.
+    #
+    # This job installs the *locked* set in a clean environment and boots the
+    # backend, so an undeclared or unpinned dependency fails in CI rather than
+    # during a release.
+    name: Locked runtime is installable and bootable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-lock.txt
+
+      - name: Reject a lock file with a byte-order mark
+        # A UTF-8 BOM makes pip misparse the first requirement. It shipped once
+        # during DEV-008 and was only caught by reading the file's first bytes.
+        run: |
+          if [ "$(head -c 3 requirements-lock.txt | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+            echo "::error file=requirements-lock.txt::Lock file starts with a UTF-8 BOM, which breaks pip's parser. Rewrite it without a BOM."
+            exit 1
+          fi
+          echo "lock file has no BOM"
+
+      - name: Install the locked runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+
+      - name: Boot the backend on the locked set
+        env:
+          OMOS_WORKSPACE_DIR: ${{ runner.temp }}/omos-ci
+          OMOS_FROZEN: '1'
+        run: |
+          python -c "
+          from app.main import create_app
+          app = create_app()
+          print('backend booted with', len(app.routes), 'routes')
+          "
+
+      - name: Every shipped dependency is attributed
+        # An unattributed package in a public distribution is a licensing
+        # finding, not a rounding error, so this fails the build.
+        run: python scripts/package/license_inventory.py
+
+  windows:
+    # DEV-008: the Credential Vault is the product's headline security claim
+    # ("encrypted at rest with Windows DPAPI, bound to your Windows user
+    # account") and every DPAPI test is `skipif(sys.platform != 'win32')`. On a
+    # Linux-only matrix that claim was structurally incapable of being verified
+    # by CI and had only ever run on one developer's machine.
+    name: Windows tests (DPAPI credential vault)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run the DPAPI and Windows-only tests
+        run: |
+          python -m pytest -q -rs `
+            app/tests/test_dev007_vault.py `
+            app/tests/test_dev008_distribution.py `
+            app/tests/test_dev008_launcher.py `
+            app/tests/test_dev008_public_export.py `
+            app/tests/test_dev008_public_urls.py
+
+  packaging:
+    # DEV-008: packaging/omos.spec is what produces the release artifact, and
+    # it was not in the CI path filter, so a change to it could not trigger a
+    # run at all. This job at least proves the spec parses, the payload data
+    # files it references exist, and the packaging scripts are syntactically
+    # valid PowerShell.
+    name: Packaging inputs are consistent
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: PyInstaller spec parses
+        run: python -c "import ast, pathlib; ast.parse(pathlib.Path('packaging/omos.spec').read_text(encoding='utf-8'))"
+
+      - name: Data files referenced by the spec exist
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @(
+            'app/database/schema.sql',
+            'app/templates',
+            'app/static',
+            '.agents/skills',
+            '.agents/LICENSE'
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) { throw "Missing packaged data file: $item" }
+            Write-Host "ok: $item"
+          }
+          if (-not (Test-Path 'packaging/project_url.iss')) { throw 'Missing generated project_url.iss' }
+          if (-not (Test-Path 'packaging/omos.iss')) { throw 'Missing packaging/omos.iss' }
+
+      - name: Generated URL defines are current
+        run: python scripts/package/sync_project_urls.py --check
+
+      - name: Packaging scripts parse
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($script in @(
+            'scripts/package/build_windows.ps1',
+            'scripts/package/build_installer.ps1',
+            'scripts/package/build_portable.ps1',
+            'scripts/setup-dev.ps1',
+            'scripts/run-dev.ps1'
+          )) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script), [ref]$null, [ref]$errors)
+            if ($errors) { throw "$script has parse errors: $($errors | Out-String)" }
+            Write-Host "ok: $script"
+          }
+
+  skills-provenance:
+    # DEV-008-SKILLS-OPS (W10): the vendored marketing-skills library is a
+    # pinned third-party redistribution. The licence audit used to NOT gate
+    # anything, so a drifted checksum, a missing skill, or a dropped MIT
+    # notice would have shipped silently. Every step below exits non-zero on
+    # failure and the job has no `continue-on-error`, so a missing provenance
+    # field FAILS the build instead of scrolling past as a warning.
+    #
+    # Ordering dependency: the smoke step calls GET /api/skills, which is
+    # W6's route (app/routes/skills.py, registered in app/main.py). This job
+    # therefore requires W6 to have landed; the orchestrator runs the full
+    # suite after integration, at which point the route exists.
+    name: Skills provenance gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Verify the skills pin (checksums, counts, role table)
+        # Recomputes library_checksum + per-skill checksums from the file
+        # tree and compares against the recorded pin. Any single-byte drift
+        # in any SKILL.md, any MISSING/INVALID skill, or any ROLE_UNMAPPED
+        # entry exits non-zero with a named MANIFEST_DRIFT reason.
+        run: python -m app.services.skills.manifest --verify
+
+      - name: Verify the upstream licence grant is recorded
+        # Asserts the upstream MIT text is vendored at .agents/LICENSE and
+        # NOTICE names the repository, tag, commit and licence. A missing
+        # field exits non-zero; it never warns.
+        run: python -m app.services.skills.manifest --check-license
+
+      - name: Boot the app and smoke-call the skills registry
+        # Boots the real app and asserts GET /api/skills returns 200 with
+        # MISSING: 0 / INVALID: 0 and no absolute path on the wire. A
+        # missing route or a non-zero validation count fails the build.
+        run: |
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import create_app
+          client = TestClient(create_app())
+          response = client.get('/api/skills')
+          assert response.status_code == 200, f'GET /api/skills -> {response.status_code}: {response.text[:500]}'
+          data = response.json()['data']
+          missing, invalid = data['missing'], data['invalid']
+          missing_n = len(missing) if isinstance(missing, list) else missing
+          invalid_n = len(invalid) if isinstance(invalid, list) else invalid
+          assert missing_n == 0, f'MISSING: {missing}'
+          assert invalid_n == 0, f'INVALID: {invalid}'
+          for skill in data['skills']:
+              assert 'C:\\\\' not in skill['path'] and not skill['path'].startswith('/'), skill['path']
+          print(f\"skills smoke: OK (total={data['total']} valid={data['valid']} missing=0 invalid=0)\")
+          "
+
+  frontend:
+    name: Frontend typecheck and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload built frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  security:
+    name: Secret hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          # gitleaks scans commit history, so a shallow clone would hide leaks.
+          fetch-depth: 0
+
+      - name: Scan repository history for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          # v2 fails the step when leaks are found; `fail: true` is explicit so
+          # the intent survives a future default change.
+          fail: true
+          GITLEAKS_ENABLE_SUMMARY: true
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert no .env file is tracked
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "::error file=.env::A .env file is tracked in git. Untrack it, purge it from history, and rotate every secret it contained."
+            exit 1
+          fi
+          echo "no tracked .env"
+
+      - name: Assert no font binaries are committed
+        # DEV-008-PUBLISH-GATE. Unlicensed fonts were found in the tree during
+        # DEV-008 and are excluded from the export and the installer, but nothing
+        # enforced it in CI, so one `git add` of a .woff would have shipped it.
+        # Redistribution rights for the fonts previously in use were never
+        # verified, and "it's a font I use" is not a licence.
+        run: |
+          set -o pipefail
+          found=$(git ls-files | grep -Ei '\.(ttf|otf|woff2?|eot|ttc|fon|pfb|pfm)$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::Font binaries are tracked. Redistribution rights are unverified; remove them or add a licence."
+            echo "$found"
+            exit 1
+          fi
+          echo "no tracked font binaries"
+
+      - name: Repository secret scan (allowlisted sentinels only)
+        # gitleaks above is an independent, history-wide scanner. This runs the
+        # repository's own `scripts/package/secret_scan.py`, which additionally
+        # enforces the documented sentinel allowlist and the no-developer-home-path
+        # rule. Without this step the allowlist in that file would be
+        # documentation rather than policy: a real credential could be added
+        # next to an allowlisted sentinel and nothing here would object.
+        run: python scripts/package/secret_scan.py --root .

@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Campaigns</h1>
+<p class="subtitle">What your team is working on.</p>
+{% for campaign in campaigns %}
+<div class="card">
+<h2>{{ campaign.title }}</h2>
+<p><span class="badge {{ campaign.status|status_badge }}">{{ campaign.status|status_label }}</span></p>
+{% if counts and counts[campaign.id] %}<p>{{ counts[campaign.id] }} prospect(s) tracked</p>{% endif %}
+{% if campaign.measurement_window %}<p class="muted">Review: {{ campaign.measurement_window }}</p>{% endif %}
+{% if campaign.result %}<p class="muted">Latest: {{ campaign.result[:160] }}</p>{% endif %}
+{% include "_partials/campaign_row.html" %}
+</div>
+{% else %}
+<div class="empty"><strong>No campaigns yet.</strong>Sync your workspace in Settings to load your marketing plan.</div>
+{% endfor %}
+{% endblock %}

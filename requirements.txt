@@ -1,0 +1,48 @@
+# Open Marketing OS — runtime dependencies (required)
+#
+# This file was under-declared before DEV-008: it listed 8 packages while the
+# app actually imported langgraph, langgraph-checkpoint-sqlite, PyYAML and
+# python-dotenv. A clean `pip install -r requirements.txt` therefore produced
+# an app that could not start, which would have made every CI run and every
+# release build non-reproducible.
+#
+# Everything here is needed for the shipped OMOS Quick backend, including
+# persistent local vectors and CPU semantic inference. FTS remains available
+# when the local model cache is unavailable.
+#
+#   pip install -r requirements.txt
+#
+# For a byte-reproducible release build use requirements-lock.txt instead.
+
+# --- web tier ---------------------------------------------------------------
+fastapi>=0.115
+uvicorn>=0.30
+jinja2>=3.1
+python-multipart>=0.0.9
+
+# --- outbound HTTP (website research, provider calls, Instagram providers) ---
+httpx>=0.27
+
+# --- AI providers (OpenRouter via the OpenAI-compatible client, and OpenAI) --
+openai>=1.0
+
+# --- orchestration ----------------------------------------------------------
+# LangGraph is the shipped runtime (AI_RUNTIME=langgraph is the default and the
+# only non-rollback path). langgraph depends on langchain-core, which the
+# retrieval layer also uses directly.
+langgraph>=1.0
+langgraph-checkpoint-sqlite>=3.0
+
+# --- configuration ----------------------------------------------------------
+PyYAML>=6.0
+python-dotenv>=1.0
+chromadb==1.0.20
+
+# Local-only semantic search. The application downloads a pinned model snapshot
+# to the user's cache on first use; it never submits document/query text.
+numpy>=2.2,<3
+onnxruntime==1.23.2
+tokenizers==0.22.2
+huggingface-hub==0.36.2
+filelock>=3.16
+tqdm>=4.66

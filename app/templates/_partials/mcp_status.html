@@ -1,0 +1,64 @@
+{# DEV-007 W8: MCP server rows + tools registry. Presence-only, default deny. #}
+<div class="card" id="mcp-status">
+<h3>Automation servers (MCP)</h3>
+<p class="muted">Default deny: nothing runs for this project until a server is connected and its capability is explicitly allowed. READ capabilities are automatic, WRITE / EXTERNAL needs approval, DESTRUCTIVE is blocked.</p>
+{% if mcp_rows %}
+<table>
+<thead><tr><th>Server</th><th>Scope</th><th>Approval</th><th>Capabilities</th><th>Allowed</th><th>Connected</th><th></th></tr></thead>
+<tbody>
+{% for s in mcp_rows %}
+<tr>
+<td>{{ s.name }}</td>
+<td>{{ s.scope }}</td>
+<td><span class="badge {{ s.approval_tone }}">{{ s.approval_label }}</span></td>
+<td class="muted">{% for c in s.capabilities %}<span class="badge {{ c.tone }}">{{ c.label }}</span> {{ c.name }}{% if not loop.last %} | {% endif %}{% endfor %}{% if not s.capabilities %}{{ s.detail }}{% endif %}</td>
+<td>{% if s.allowed %}<span class="badge approved">allowed</span>{% else %}<span class="badge rejected">denied</span>{% endif %}</td>
+<td>{% if s.connected %}<span class="badge approved">connected</span>{% else %}<span class="badge">not connected</span>{% endif %}</td>
+<td>
+<form class="inline integration-action" method="post" action="/settings/mcp/action" data-action="connect" data-card="mcp-{{ s.name }}">
+<input type="hidden" name="project_id" value="{{ project_id }}">
+<input type="hidden" name="server" value="{{ s.name }}">
+<input type="hidden" name="action" value="connect">
+<button class="btn-secondary" type="submit">Connect</button>
+</form>
+<form class="inline integration-action" method="post" action="/settings/mcp/action" data-action="discover" data-card="mcp-{{ s.name }}">
+<input type="hidden" name="project_id" value="{{ project_id }}">
+<input type="hidden" name="server" value="{{ s.name }}">
+<input type="hidden" name="action" value="discover">
+<button class="btn-secondary" type="submit">Discover</button>
+</form>
+<form class="inline integration-action" method="post" action="/settings/mcp/action" data-action="{{ 'allowlist_off' if s.allowed else 'allowlist_on' }}" data-card="mcp-{{ s.name }}">
+<input type="hidden" name="project_id" value="{{ project_id }}">
+<input type="hidden" name="server" value="{{ s.name }}">
+<input type="hidden" name="action" value="{{ 'allowlist_off' if s.allowed else 'allowlist_on' }}">
+<button class="btn-secondary" type="submit">{{ "Revoke" if s.allowed else "Allow" }}</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% elif mcp_status_available %}
+<p class="muted" id="mcp-empty">No MCP servers registered for this project yet.</p>
+{% else %}
+<p class="muted" id="mcp-empty">MCP status not available yet - showing not_configured (fail closed).</p>
+{% endif %}
+<div id="mcp-legend">
+<p class="muted">Approval classes: <span class="badge approved">READ</span> automatic | <span class="badge pending">WRITE / EXTERNAL</span> approval needed | <span class="badge rejected">DESTRUCTIVE</span> blocked</p>
+</div>
+<h3 id="tools-registry">Tools registry</h3>
+{% if tool_rows %}
+<table>
+<thead><tr><th>Tool</th><th>Side effect</th><th>Description</th></tr></thead>
+<tbody>
+{% for t in tool_rows %}
+<tr><td>{{ t.name }}</td><td><span class="badge {{ t.tone }}">{{ t.label }}</span></td><td class="muted">{{ t.description }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% elif tool_status_available %}
+<p class="muted" id="tools-empty">No tools registered for this project yet.</p>
+{% else %}
+<p class="muted" id="tools-empty">Tool status not available yet - showing not_configured (fail closed).</p>
+{% endif %}
+</div>

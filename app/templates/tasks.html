@@ -1,0 +1,4 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Tasks</h1>
+{% for task in tasks %}{% include "_partials/task_row.html" %}{% else %}<p>No tasks. Run Reimport in Settings.</p>{% endfor %}
+{% endblock %}

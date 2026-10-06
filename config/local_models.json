@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "default_model_id": "qwen2.5-7b-instruct-q4_k_m",
+  "model": {
+    "model_id": "qwen2.5-7b-instruct-q4_k_m",
+    "display_name": "Qwen2.5-7B-Instruct Q4_K_M",
+    "publisher": "Qwen",
+    "source": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "293ca9a10157b0e5fc5cb32af8b636a88bede891",
+    "source_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/commit/293ca9a10157b0e5fc5cb32af8b636a88bede891",
+    "license": "Apache-2.0",
+    "license_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/blob/293ca9a10157b0e5fc5cb32af8b636a88bede891/LICENSE",
+    "quantization": "Q4_K_M",
+    "shards": [
+      {
+        "filename": "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/293ca9a10157b0e5fc5cb32af8b636a88bede891/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+        "size_bytes": 3993201344,
+        "sha256": "dfce12e3862a5283ccfb88221b48480e58745165de856439950d0f22590580db"
+      },
+      {
+        "filename": "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/293ca9a10157b0e5fc5cb32af8b636a88bede891/qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+        "size_bytes": 689872288,
+        "sha256": "539cf93f78e887edea1c04e2d7d8cdaca9d01dae9c9025bcb8accbe29df3d72a"
+      }
+    ],
+    "download_bytes": 4683073632,
+    "temporary_disk_bytes": 9366147264
+  },
+  "runtime": {
+    "name": "llama.cpp",
+    "version": "b11429",
+    "source": "ggml-org/llama.cpp",
+    "revision": "d81235049384534c167caea52b85a694f6103d14",
+    "asset_name": "llama-b11429-bin-win-cpu-x64.zip",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cpu-x64.zip",
+    "size_bytes": 19398918,
+    "sha256": "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe",
+    "license": "MIT",
+    "license_url": "https://github.com/ggml-org/llama.cpp/blob/d81235049384534c167caea52b85a694f6103d14/LICENSE",
+    "attestation_url": "https://github.com/ggml-org/llama.cpp/attestations/52904614",
+    "executable": "llama-server.exe"
+  }
+}

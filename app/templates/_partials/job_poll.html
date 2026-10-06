@@ -1,0 +1,8 @@
+<div class="job-row" id="job-{{ job.id }}"{% if job.status in ("queued", "running") %} hx-get="/jobs/{{ job.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<strong>{{ job.kind }}</strong> <span class="badge">{{ job.status }}</span>
+started {{ job.started_at or "—" }} · updated {{ job.finished_at or job.started_at or "—" }} · exit {{ job.exit_code if job.exit_code is not none else "—" }}
+<a href="/jobs/{{ job.id }}/log">log</a>
+{% if job.status in ("queued", "waiting_approval") %}
+<form hx-post="/jobs/{{ job.id }}/cancel" hx-target="#job-{{ job.id }}" hx-swap="outerHTML"><button>Cancel</button></form>
+{% endif %}
+</div>

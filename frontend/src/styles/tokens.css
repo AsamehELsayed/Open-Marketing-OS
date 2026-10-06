@@ -1,0 +1,78 @@
+/** DEV-004 W1 design tokens. Single source for the restrained dark theme.
+ *  Near-black charcoal bg, elevated surfaces, low-contrast borders,
+ *  soft-white text, muted gray secondary, ONE indigo accent.
+ *  Semantic success/warning/error only. No gradients / glass / neon.
+ */
+:root {
+  --bg-base: #0e1116;
+  --bg-raised: #151a21;
+  --bg-elevated: #1b212b;
+  --bg-overlay: #222a36;
+
+  --border-subtle: #232b37;
+  --border-default: #2e3745;
+
+  --text-primary: #eef1f5;
+  --text-secondary: #9aa4b2;
+  --text-muted: #6b7684;
+
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-ink: #eef0ff;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --error: #f87171;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Typography scale: 12-14 meta / 14-16 body / 18-24 headings */
+  --text-meta: 12px;
+  --text-meta-lg: 13px;
+  --text-body-sm: 14px;
+  --text-body: 15px;
+  --text-body-lg: 16px;
+  --text-h3: 18px;
+  --text-h2: 21px;
+  --text-h1: 24px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent-hover);
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+}
+
+.app-surface {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.app-meta {
+  font-size: var(--text-meta);
+  color: var(--text-secondary);
+}

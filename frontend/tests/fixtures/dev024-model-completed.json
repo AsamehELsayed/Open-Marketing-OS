@@ -1,0 +1,26 @@
+{
+  "event": "model_completed",
+  "meta": {
+    "turn_id": "dev024-sanitized-replay",
+    "call_id": "offline-call-1",
+    "telemetry": {
+      "provider": "OpenRouter",
+      "requested_model": "stealth/space-bunny-alpha",
+      "actual_model": "stealth/space-bunny-alpha",
+      "model": "legacy-model-alias",
+      "route": "openrouter",
+      "route_mode": "OPENROUTER",
+      "http_attempt_count": 1,
+      "http_status": 200,
+      "latency_ms": 26708
+    },
+    "retrieval_telemetry": {
+      "retrieval_mode": "hybrid_rrf",
+      "lexical_hits": 3,
+      "vector_hits": 4,
+      "fused_hits": 3,
+      "selected_chunk_ids": ["c000"],
+      "source_file_ids": ["synthetic-business-knowledge.txt"]
+    }
+  }
+}

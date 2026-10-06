@@ -1,0 +1,91 @@
+name: Bug report
+description: Report something that does not work in Open Marketing OS
+title: '[Bug]: '
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    value: |
+      ## ⚠️ Never paste API keys or secrets
+
+      **Do not paste API keys, tokens, `.env` contents, cookies, or session data into this
+      issue — not even a truncated or "redacted" one.** Once it is posted it is public and
+      stays in the git history, and we cannot delete it for you.
+
+      If a key was exposed here, **revoke/rotate it first**, then come back and describe the
+      bug without the value.
+
+      For technical details, use the app's own **"Show Details"** disclosure instead of this
+      field: it produces redacted, copy-pasteable diagnostics that are safe to share.
+
+  - type: input
+    id: version
+    attributes:
+      label: OMOS version
+      description: 'Shown in the app (Help > About), e.g. `v1.1.0-beta.1`.'
+      placeholder: v1.1.0-beta.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      description: Which build are you running?
+      options:
+        - Quick
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: 'Run `winver`, or Settings > About. Include the build number if you can.'
+      placeholder: Windows 11 23H2 (build 22631)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead? Include the exact error text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem, starting from a fresh launch.
+      placeholder: |
+        1. Launch OMOS
+        2. Open workspace "Acme"
+        3. Click ...
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Paste the output of the app's "Show Details" panel here. It is already redacted.
+        Never paste API keys or secrets — if you are unsure, leave this blank and describe
+        the problem in words instead.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing open issues and this is not a duplicate.
+          required: true
+        - label: I did not include any API keys, tokens, or other secrets in this report.
+          required: true

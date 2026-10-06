@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} — Open Marketing OS</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<div class="brand">Open <span>Marketing OS</span></div>
+<div class="project-switch"><a href="/projects">Projects</a></div>
+<nav>
+<div class="nav-section">Workspace</div>
+<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a>
+<a href="/chat" class="{% if request.url.path.startswith('/chat') %}active{% endif %}">Account Manager</a>
+<a href="/campaigns" class="{% if request.url.path.startswith('/campaigns') %}active{% endif %}">Campaigns</a>
+<a href="/approvals" class="{% if request.url.path.startswith('/approvals') %}active{% endif %}">Approvals</a>
+<a href="/results" class="{% if request.url.path.startswith('/results') or request.url.path.startswith('/experiments') %}active{% endif %}">Results</a>
+<a href="/settings" class="{% if request.url.path.startswith('/settings') or request.url.path.startswith('/system') %}active{% endif %}">Settings</a>
+<div class="nav-section">Advanced</div>
+<a href="/brain">Marketing Brain</a>
+<a href="/tasks">Tasks</a>
+<a href="/jobs">Jobs</a>
+<a href="/companies">Companies</a>
+<a href="/system">System Health</a>
+</nav>
+</aside>
+<div class="content"><div class="content-inner">
+{% block content %}{% endblock %}
+</div></div>
+</div>
+</body>
+</html>

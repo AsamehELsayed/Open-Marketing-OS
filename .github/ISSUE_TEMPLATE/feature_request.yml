@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a capability or improvement for Open Marketing OS
+title: '[Feature]: '
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: markdown
+    value: |
+      Keep it short and concrete. The most useful requests describe the problem you are
+      actually trying to solve, not the solution you imagine.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that is hard, slow, or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Proposed outcome
+      description: What would "working" look like? A concrete before/after is best.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you have tried, or other tools you used instead.
+    validations:
+      required: false

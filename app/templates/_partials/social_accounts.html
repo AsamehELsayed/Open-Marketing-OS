@@ -1,0 +1,41 @@
+{# W3-owned shared partial: per-project social accounts (included by projects + settings). #}
+{% set _pid = project_id if project_id is defined and project_id else (active_project if active_project is defined and active_project else active) %}
+<div class="card" id="social-accounts">
+{% if social_accounts %}
+<table>
+<thead><tr><th>Platform</th><th>Handle</th><th>URL</th><th>Status</th><th>Source</th><th></th></tr></thead>
+<tbody>
+{% for a in social_accounts %}
+<tr>
+<td>{{ a.platform }}</td>
+<td>@{{ a.handle }}</td>
+<td class="muted">{{ a.url }}</td>
+<td><strong>{{ a.status }}</strong></td>
+<td class="muted">{{ a.source }}</td>
+<td>
+<form method="post" action="/projects/social/remove" class="inline">
+<input type="hidden" name="project_id" value="{{ _pid }}">
+<input type="hidden" name="platform" value="{{ a.platform }}">
+<button class="btn-secondary" type="submit">Remove</button>
+</form>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="muted">No social accounts recorded for this project yet.</p>
+{% endif %}
+<h3>Add / update</h3>
+<form method="post" action="/projects/social/save">
+<input type="hidden" name="project_id" value="{{ _pid }}">
+<select name="platform">
+{% for p in social_platforms %}
+<option value="{{ p }}">{{ p }}</option>
+{% endfor %}
+</select>
+<input name="handle" placeholder="@handle (letters, numbers, _ and .)" required>
+<button class="btn-secondary" type="submit">Save</button>
+</form>
+<p class="muted">Handles accept letters, numbers, underscore and dot (max 80). New entries start as LIKELY until website-link evidence verifies them.</p>
+</div>

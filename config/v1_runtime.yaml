@@ -1,0 +1,7 @@
+# DEV-005/DEV-007 v1 runtime flags — declarative defaults (W0-owned).
+# Env overrides at runtime: AI_RUNTIME, MAX_AGENT_CONCURRENCY.
+# Default is langgraph (DEV-007 W1); AI_RUNTIME=legacy is rollback-only
+# (v1.0.0 tag is the rollback point — not a second shipped runtime).
+# Hard cap 4 matches app/services/turns.py _POOL, scripts/dev_sched.py, AGENTS.md.
+ai_runtime: langgraph  # legacy | langgraph
+max_agent_concurrency: 4

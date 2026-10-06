@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Marketing Brain</h1>
+{% if indexed %}
+<table><tr><th>Document</th><th>Status</th><th>Indexed</th></tr>
+{% for d in docs %}<tr><td>{{ d.path }}</td><td><span class="badge">{{ d.status_tag }}</span></td><td>{{ d.indexed_at }}</td></tr>{% endfor %}
+</table>
+<p>Brain files are edited in the workspace, never here. Ambiguous content stays UNKNOWN.</p>
+{% else %}<p>Index not built yet. Run Reimport in Settings, then build the retrieval index.</p>{% endif %}
+{% endblock %}

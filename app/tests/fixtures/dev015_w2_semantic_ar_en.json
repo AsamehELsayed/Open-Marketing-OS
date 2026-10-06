@@ -1,0 +1,27 @@
+{
+  "schema": "DEV-015-semantic-evaluation-v1",
+  "frozen_before_model_inference": true,
+  "documents": [
+    {"id":"checkout","project":"a","text":"Reducing checkout friction improves conversion and decreases abandonment. Fewer form fields help visitors complete purchases."},
+    {"id":"retention","project":"a","text":"A welcome email sequence helps new customers adopt the service. Ongoing usage reminders can reduce cancellations."},
+    {"id":"pricing","project":"a","text":"Proposal pricing uses a fixed monthly retainer with a separate one-time setup fee. Campaign ID MK-92741-Z."},
+    {"id":"arabic-brand","project":"a","text":"نستخدم أسلوباً واضحاً وودوداً في رسائل العلامة التجارية. يجب تجنب الوعود غير المثبتة عند مخاطبة العملاء."},
+    {"id":"mixed-budget","project":"a","text":"ميزانية campaign الأسبوعية تساوي 5000 جنيه، مع مراجعة CAC قبل زيادة إنفاق الإعلانات."},
+    {"id":"isolation","project":"a","text":"Synthetic internal reference NEBULA-MARKETING-742 concerns the spring campaign."},
+    {"id":"distractor-shipping","project":"a","text":"Shipping labels describe parcel weight and warehouse dispatch dates. Delivery insurance covers damaged packages."},
+    {"id":"distractor-weather","project":"a","text":"Weather forecasts describe rain and wind. Umbrellas are stored near the office entrance."},
+    {"id":"foreign-conversion","project":"b","text":"Completed purchases and checkout conversion belong to a different project's confidential plan."}
+  ],
+  "queries": [
+    {"id":"english-paraphrase","project":"a","text":"How can we get more visitors to finish buying?","relevant":["checkout"]},
+    {"id":"arabic-cross-language","project":"a","text":"إزاي نخلي عدد أكبر من الزوار يكملوا عملية الشراء؟","relevant":["checkout"]},
+    {"id":"english-to-arabic","project":"a","text":"What tone should our company use when speaking with customers?","relevant":["arabic-brand"]},
+    {"id":"arabic-paraphrase","project":"a","text":"كيف نتحدث مع المشترين دون المبالغة في النتائج؟","relevant":["arabic-brand"]},
+    {"id":"mixed","project":"a","text":"ما معيار زيادة campaign spend؟","relevant":["mixed-budget"]},
+    {"id":"retention-paraphrase","project":"a","text":"How do we help subscribers stay instead of quitting?","relevant":["retention"]},
+    {"id":"exact-id","project":"a","text":"MK-92741-Z","relevant":["pricing"]},
+    {"id":"isolation-a","project":"a","text":"NEBULA-MARKETING-742","relevant":["isolation"]},
+    {"id":"isolation-b","project":"b","text":"NEBULA-MARKETING-742","relevant":[]},
+    {"id":"absent","project":"a","text":"Describe our product's guaranteed medical treatment outcomes","relevant":[]}
+  ]
+}

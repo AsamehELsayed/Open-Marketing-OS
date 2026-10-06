@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security issue — read SECURITY.md first
+    url: ./blob/master/SECURITY.md
+    about: Do not open a public issue for security problems. Follow the reporting process in SECURITY.md instead.

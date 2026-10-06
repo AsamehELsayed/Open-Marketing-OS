@@ -1,0 +1,11 @@
+<div class="job-card" id="job-{{ job.id }}" data-job-status="{{ job.status }}">
+<strong>{{ job.kind }}</strong> <span class="badge">{{ job.status }}</span>
+<div class="muted">created {{ job.created_at or job.started_at or "—" }} · updated {{ job.updated_at or job.finished_at or "—" }}</div>
+<div><a href="/jobs/{{ job.id }}/process">View process</a>{% if result %} · <a href="/jobs/{{ job.id }}/result">result artifact</a>{% endif %} · <a href="/jobs/{{ job.id }}/log">log</a></div>
+{% if result %}<p class="muted">Result: {{ (result.stdout_tail or "")[:300] }}</p>{% endif %}
+{% if events %}
+<ul class="timeline">
+{% for e in events %}<li class="{% if e.event_type in ('worker_completed',) %}done{% elif e.event_type in ('worker_failed',) %}failed{% elif e.event_type in ('worker_started',) %}active{% endif %}"><time>{{ (e.created_at or "")[11:16] }}</time>{{ e.label }}{% if e.detail %} — {{ e.detail }}{% endif %}</li>{% endfor %}
+</ul>
+{% endif %}
+</div>

@@ -1,0 +1,288 @@
+# Open Marketing OS — Release (Windows packaging + GitHub prerelease)
+#
+# Action pinning policy matches .github/workflows/ci.yml: third-party actions
+# are pinned to MAJOR tags for readability. Pin them to full commit SHAs
+# (e.g. actions/checkout@<40-char-sha> # v4.2.2) for a stricter supply-chain
+# posture; Dependabot can then bump the SHAs.
+#
+# This workflow needs NO founder API keys. Packaging builds the frozen backend
+# and the React bundle; the user's provider key is only used at runtime.
+#
+# Artifact contract (consumed by users and by docs):
+#   dist/OpenMarketingOS-Quick-Setup.exe   Inno Setup installer  (required)
+#   dist/OpenMarketingOS-Portable.zip      no-install archive    (optional)
+#   dist/SHA256SUMS.txt                    checksums             (required)
+#   dist/release-manifest.json             build provenance      (required)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build a release from (e.g. v1.1.0-beta.1). Leave empty to use the ref that was dispatched.'
+        required: false
+        type: string
+
+# Only release-asset upload needs write. Nothing else is granted.
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          # Full history so the exact-match tag verification below is meaningful.
+          fetch-depth: 0
+
+      - name: Verify the checked-out ref is exactly the release tag
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # PowerShell 7.4+ turns a native command's stderr into a terminating
+          # error. Tools like git/pyinstaller/iscc write progress to stderr on
+          # success, so disable that and rely on explicit $LASTEXITCODE checks.
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $expected = $env:DISPATCH_TAG
+          } else {
+            $expected = $env:REF_NAME
+          }
+
+          if ([string]::IsNullOrWhiteSpace($expected)) {
+            throw "No release tag supplied. Push a 'v*' tag, or pass the 'tag' input to workflow_dispatch."
+          }
+
+          $actual = $null
+          try {
+            $actual = git describe --tags --exact-match
+          } catch {
+            $actual = $null
+          }
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($actual)) {
+            throw "Ref '$expected' is not an exact tag. A release must be built from a committed tag, not a branch or SHA."
+          }
+
+          $actual = $actual.Trim()
+          if ($actual -ne $expected.Trim()) {
+            throw "Tag mismatch: checked out '$actual' but expected '$expected'. Refusing to publish."
+          }
+
+          Write-Host "Verified release tag: $actual"
+          "RELEASE_TAG=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-lock.txt
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python build dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          # A lock file gives a reproducible release; fall back to requirements.txt.
+          if (Test-Path -LiteralPath 'requirements-lock.txt') {
+            Write-Host 'Installing from requirements-lock.txt'
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements-lock.txt
+          } else {
+            Write-Host 'requirements-lock.txt not found; installing from requirements.txt'
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
+          }
+
+      - name: Build the React frontend
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed with exit code $LASTEXITCODE" }
+
+      - name: Build the Windows payload (frozen backend + React)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $script = 'scripts/package/build_windows.ps1'
+          if (-not (Test-Path -LiteralPath $script)) {
+            throw "Required packaging script not found: $script. A release cannot be built without it."
+          }
+          & pwsh -NoProfile -File $script
+          if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
+
+      - name: Build the Inno Setup installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $script = 'scripts/package/build_installer.ps1'
+          if (-not (Test-Path -LiteralPath $script)) {
+            throw "Required packaging script not found: $script. A release cannot be built without it."
+          }
+          & pwsh -NoProfile -File $script
+          if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
+
+          $installer = 'dist/OpenMarketingOS-Quick-Setup.exe'
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Expected installer not produced: $installer"
+          }
+          Write-Host "Installer built: $installer"
+
+      # OPTIONAL artifact: the portable zip is a convenience build. If this step
+      # fails the release still ships (installer + checksums + manifest) and the
+      # upload step below skips the missing file instead of failing.
+      - name: Build the portable zip (optional)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $script = 'scripts/package/build_portable.ps1'
+          if (-not (Test-Path -LiteralPath $script)) {
+            throw "Packaging script not found: $script. Skipping the OPTIONAL portable zip."
+          }
+          & pwsh -NoProfile -File $script
+          if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
+
+      - name: Generate release manifest and checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $script = 'scripts/package/make_manifest.py'
+          if (-not (Test-Path -LiteralPath $script)) {
+            throw "Required packaging script not found: $script. Release provenance cannot be generated without it."
+          }
+          python $script
+          if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
+
+          foreach ($required in @('dist/SHA256SUMS.txt', 'dist/release-manifest.json')) {
+            if (-not (Test-Path -LiteralPath $required)) {
+              throw "Expected release artifact not produced: $required"
+            }
+          }
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notes = @'
+          # Open Marketing OS Beta 1
+
+          Your open-source AI marketing team, now as a Windows app.
+
+          ## Download
+
+          **Normal users — do NOT download "Source code (zip/tar.gz)".** That is for developers.
+
+          ### OMOS Quick (recommended)
+          Fast setup. Uses your own OpenRouter or OpenAI account.
+
+          `OpenMarketingOS-Quick-Setup.exe`
+
+          ### OMOS Portable
+          No installer. Extract and run `OpenMarketingOS.exe`.
+
+          `OpenMarketingOS-Portable.zip`
+
+          Verify your download with `SHA256SUMS.txt`.
+
+          ## Highlights
+          - AI marketing account manager with real tool use
+          - Project memory and project-scoped retrieval
+          - Website research and Instagram research
+          - OpenRouter and OpenAI support (bring your own key)
+          - Files and vision
+          - MCP integrations
+          - Real-time streaming responses
+          - Windows x64 desktop app
+
+          ## Where your data goes
+          Your projects, files and chats stay on your computer. **AI requests are sent to
+          the AI provider you connect** (OpenRouter or OpenAI) — the app is local, the AI
+          inference is not. Web and Instagram research also contact external services.
+          See the Privacy section of the README.
+
+          ## Requirements
+          Windows 10 or 11, 64-bit. 4 GB RAM. Internet access for AI providers and web research.
+
+          ## Beta notice
+          This is a public beta. Please report bugs via GitHub Issues and read SECURITY.md before
+          reporting anything security-sensitive. The installer is not code-signed yet, so Windows
+          SmartScreen may show an "Unknown publisher" warning. Verify your download against
+          SHA256SUMS.txt.
+          '@
+
+          # Defensive: strip any leading whitespace and drop trailing blank
+          # lines so the rendered markdown is exact.
+          $lines = $notes -split "`r?`n" | ForEach-Object { $_.TrimStart() }
+          while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[-1])) {
+            $lines = $lines[0..($lines.Count - 2)]
+          }
+          $body = $lines -join "`n"
+
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          Set-Content -LiteralPath 'dist/release-notes.md' -Value $body -Encoding utf8NoBOM
+          Write-Host 'Wrote dist/release-notes.md'
+
+      - name: Upload release assets to the GitHub prerelease
+        id: gh_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Open Marketing OS Beta 1
+          prerelease: true
+          draft: false
+          # We supply our own user-oriented body; GitHub's auto-notes would
+          # only add a commit list on top of it.
+          generate_release_notes: false
+          body_path: dist/release-notes.md
+          # The portable zip is optional, so a missing file must not fail the
+          # upload. The installer, checksums, and manifest are asserted above.
+          fail_on_unmatched_files: false
+          files: |
+            dist/OpenMarketingOS-Quick-Setup.exe
+            dist/OpenMarketingOS-Portable.zip
+            dist/SHA256SUMS.txt
+            dist/release-manifest.json
+
+      - name: Print release URL
+        shell: pwsh
+        run: 'Write-Host "Release published: ${{ steps.gh_release.outputs.url }}"'

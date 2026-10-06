@@ -1,0 +1,7 @@
+{% if not retry %}
+<div class="chat-turn chat-user"><div class="chat-bubble"><p>{{ user_body }}</p></div></div>
+{% endif %}
+<div class="chat-turn chat-assistant assistant-shell" data-shell-for="{{ turn.id }}">
+<div class="chat-bubble" data-shell-body><p><span class="spin"></span>Working…</p></div>
+</div>
+<div data-turn-stream="{{ turn.id }}" hidden></div>

@@ -1,0 +1,17 @@
+<div id="conflicts">
+{% if stats %}<p>Last import: {{ stats }}</p>{% endif %}
+{% if resolved %}<p>Resolved {{ resolved.row_id }} (kept {{ resolved.keep }}).</p>{% endif %}
+{% for c in conflicts %}
+<div class="conflict" id="conflict-{{ c.event.ref_id }}">
+<strong>{{ c.event.ref_id }}</strong> ({{ c.adapter }} ← {{ c.source }})
+<p>File and database disagree. The database row was left untouched. Choose explicitly:</p>
+{% if c.current %}<p>Current DB status: <span class="badge">{{ c.current.status }}</span></p>{% endif %}
+<form hx-post="/settings/conflicts/resolve" hx-target="#conflicts" hx-swap="outerHTML">
+<input type="hidden" name="adapter" value="{{ c.adapter }}">
+<input type="hidden" name="row_id" value="{{ c.event.ref_id }}">
+<select name="keep"><option value="db">Keep database</option><option value="file">Keep file</option></select>
+<button>Resolve</button>
+</form>
+</div>
+{% else %}<p>No unresolved conflicts.</p>{% endfor %}
+</div>

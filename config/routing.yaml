@@ -1,0 +1,48 @@
+default:
+  controller: OpenCode marketing-pm
+  cost_class: cheap_or_standard
+
+lanes:
+  planner:
+    executor: SOL
+    call_only_if: SOL Planning Gate in AGENTS.md
+    precondition: compressed decision packet exists
+
+  review:
+    executor: SOL
+    call_only_if: SOL Review Gate in AGENTS.md
+    precondition: cheap QA completed
+
+  browser:
+    executor: Antigravity
+    call_only_if: normal OpenCode web access is insufficient
+    scope: narrow evidence request only
+
+  research:
+    executor: OpenCode worker
+
+  web_growth:
+    executor: OpenCode worker
+
+  content:
+    executor: OpenCode worker
+
+  creative:
+    executor: OpenCode creative director first
+    expensive_generation: only after route decision
+
+  acquisition:
+    executor: OpenCode worker
+
+  lifecycle:
+    executor: OpenCode worker
+
+  ops:
+    executor: OpenCode worker
+
+  qa:
+    executor: OpenCode cheap reviewer
+
+parallelism:
+  default_max_workers: 4
+  expensive_parallel_workers: 1

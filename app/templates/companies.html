@@ -1,0 +1,6 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Companies</h1>
+{% for c in companies %}
+<div><strong>{{ c.id }}</strong> — {{ c.name }} (<a href="{{ c.website }}">{{ c.website }}</a>)</div>
+{% else %}<p>No companies.</p>{% endfor %}
+{% endblock %}

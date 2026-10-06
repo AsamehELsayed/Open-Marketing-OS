@@ -1,0 +1,11 @@
+# Open Marketing OS — development and test dependencies
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Not needed to run a released build; the Windows installer ships its own
+# bundled interpreter.
+
+pytest>=8.0
+
+# Optional retrieval extras, useful for exercising the hybrid path in CI.
+-r requirements-optional.txt

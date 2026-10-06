@@ -1,0 +1,19 @@
+# Open Marketing OS — optional extras
+#
+# The wider LangChain ecosystem remains optional. The supported Windows build
+# includes Chroma and local ONNX inference from requirements.txt.
+#
+#   - Without the `langchain-*` packages, `app/services/rag/langchain_pipeline.py`
+#     uses its vendored lexical/vector fallbacks. Retrieval still works.
+#
+# Install these only if you want the experimental LangChain pipeline:
+#
+#   pip install -r requirements.txt -r requirements-optional.txt
+#
+# Advanced / experimental retrieval pipeline. Imported lazily inside functions
+# with fallbacks, so a missing package degrades rather than crashes.
+langchain-core>=1.0
+langchain-text-splitters>=1.0
+langchain-community>=0.4
+langchain-classic>=1.0
+langchain-chroma>=0.2

@@ -1,0 +1,48 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Settings</h1>
+<p class="subtitle">Your business, your data, your controls.</p>
+
+<h2>Company</h2>
+<div class="card">
+{% if company %}<h3>{{ company.name }}</h3><p class="muted">{{ company.website }}</p>
+{% else %}<p class="muted">No company loaded yet — sync your workspace below.</p>{% endif %}
+</div>
+
+<h2>Workspace</h2>
+<div class="card">
+<p>Sync your business files into the app, or refresh the search index.</p>
+<form class="inline" hx-post="/settings/reimport" hx-target="#conflicts" hx-swap="outerHTML"><button class="btn-secondary">Sync workspace files</button></form>
+<form class="inline" hx-post="/settings/reindex" hx-target="#reindex-result" hx-swap="innerHTML"><button class="btn-secondary">Refresh search</button></form>
+<div id="reindex-result"></div>
+</div>
+
+<h2>Account Manager Provider</h2>
+<div id="provider-status">{% include "_partials/provider_status.html" %}</div>
+
+<h2 id="integrations">Integrations</h2>
+<p class="muted">Presence only — tokens and secrets are stored outside this page and are never shown here.</p>
+{% for s in integration_sections %}
+<h2>Integrations — {{ s.title }}</h2>
+<div class="integration-section" id="integrations-{{ s.id }}">
+{% for card in s.cards %}{% include "_partials/integration_card.html" %}{% endfor %}
+{% if s.id == "automation-mcp" %}{% include "_partials/mcp_status.html" %}{% endif %}
+</div>
+{% endfor %}
+
+<h2>Social accounts (project: {{ active_project }})</h2>
+{% include "_partials/social_accounts.html" %}
+
+<h2>Backup</h2>
+<div class="card"><p>Download a copy of everything the app knows.</p>
+<form method="post" action="/settings/backup"><button class="btn-secondary">Download backup</button></form></div>
+
+<h2>Privacy</h2>
+<div class="card"><p>No tracking, no telemetry, no cloud. Your data stays in the <span class="muted">data/</span> folder on this machine.</p></div>
+
+<h2>Data conflicts</h2>
+<div id="conflicts">{% include "_partials/conflict_list.html" %}</div>
+
+<h2>Advanced</h2>
+<div class="card"><p class="muted">Technical diagnostics. Most people never need these.</p>
+<p><a href="/system">System Health</a> · <a href="/brain">Marketing Brain</a> · <a href="/tasks">Tasks</a> · <a href="/jobs">Jobs</a> · <a href="/companies">Companies</a></p></div>
+{% endblock %}

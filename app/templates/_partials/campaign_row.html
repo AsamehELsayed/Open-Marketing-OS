@@ -1,0 +1,7 @@
+<div id="campaign-{{ campaign.id }}">
+<form class="inline" hx-post="/campaigns/{{ campaign.id }}/status" hx-target="#campaign-{{ campaign.id }}" hx-swap="outerHTML">
+<span class="muted">Stage:</span>
+<select name="status"><option>proposed</option><option>drafted</option><option>approved</option><option>executing</option><option>measuring</option><option>learned</option><option>rejected</option><option>blocked</option></select>
+<button class="btn-secondary">Update</button>
+</form>
+</div>

@@ -1,0 +1,35 @@
+# DEV-005 W5 — versioned model pricing (effective dates).
+# Local legs have no API cost; local compute is not metered (see local_compute_note).
+# Rates are USD per million tokens. cached_input_per_million prices the cached
+# subset of input tokens; uncached input (input - cached) prices at
+# input_per_million. Never reuse a stale version or borrow a future one:
+# effective_version(as_of) raises PricingUnavailable when no version is
+# effective on or before as_of.
+local_compute_note: "local compute cost is not metered"
+
+versions:
+  - version: "2026-09-01"
+    effective_date: "2026-09-01"
+    models:
+      # Planning placeholder values versioned explicitly so every persisted
+      # call cites the pricing it used. Per-million rates converted from the
+      # prior per-1K placeholders (x1000); cached input at half input rate.
+      gpt-4o-mini:
+        input_per_million: 0.15
+        cached_input_per_million: 0.075
+        output_per_million: 0.6
+      gpt-4o:
+        input_per_million: 2.5
+        cached_input_per_million: 1.25
+        output_per_million: 10.0
+  - version: "2026-09-22"
+    effective_date: "2026-09-22"
+    models:
+      gpt-4o-mini:
+        input_per_million: 0.15
+        cached_input_per_million: 0.075
+        output_per_million: 0.6
+      gpt-4o:
+        input_per_million: 2.5
+        cached_input_per_million: 1.25
+        output_per_million: 10.0

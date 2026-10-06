@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block content %}<h1>System Health</h1>
+<p class="subtitle">Technical diagnostics. For advanced users.</p>
+<div class="card">
+<table>
+<tr><th>Area</th><th>Value</th></tr>
+<tr><td>Campaigns</td><td>{{ info.campaigns }}</td></tr>
+<tr><td>Tasks</td><td>{{ info.tasks }}</td></tr>
+<tr><td>Pending approvals</td><td>{{ info.approvals_pending }}</td></tr>
+<tr><td>Background jobs</td><td>{{ info.jobs }}</td></tr>
+<tr><td>Indexed documents</td><td>{{ info.documents }}</td></tr>
+<tr><td>Unresolved conflicts</td><td>{{ info.conflicts }}</td></tr>
+<tr><td>Search mode</td><td>{{ info.retrieval }}</td></tr>
+</table>
+</div>
+{% endblock %}

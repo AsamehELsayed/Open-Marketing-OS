@@ -1,0 +1,7 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Approvals</h1>
+<p class="subtitle">Nothing moves without you. Review each item, then approve or request changes.</p>
+{% for approval in approvals %}{% include "_partials/approval_row.html" %}{% else %}
+<div class="empty"><strong>Nothing needs your approval.</strong>Your marketing team can continue working without you right now.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,42 @@
+principles:
+  - "OpenCode workers do the bulk of work."
+  - "Do not pay for SOL to summarize raw research."
+  - "Compress before expensive delegation."
+  - "Antigravity is an exception path."
+  - "Generate final creative, not endless variants."
+
+cost_classes:
+  cheap:
+    examples:
+      - extraction
+      - tagging
+      - normalization
+      - simple drafts
+      - QA
+
+  standard:
+    examples:
+      - customer research
+      - competitor research
+      - SEO/CRO audit
+      - content creation
+      - lifecycle planning
+
+  premium:
+    examples:
+      - new positioning
+      - pricing
+      - market entry
+      - high-stakes campaign
+      - strategic conflict resolution
+
+  browser:
+    examples:
+      - blocked social profile inspection
+      - UI-only source
+      - computer-use requirement
+
+  creative:
+    examples:
+      - final image generation
+      - final video generation

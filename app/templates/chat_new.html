@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>Start a conversation</h1>
+<p class="subtitle">Which project are we working on?</p>
+<div class="grid">
+{% for p in projects %}
+<div class="card">
+<h3>{{ p.name }}</h3>
+{% if p.website %}<p class="muted">{{ p.website }}</p>{% endif %}
+{% if p.goal %}<p>{{ p.goal }}</p>{% endif %}
+<form method="post" action="/chat/new">
+<input type="hidden" name="project_id" value="{{ p.id }}">
+<button type="submit">Chat about {{ p.name }}</button>
+</form>
+</div>
+{% endfor %}
+<div class="card">
+<h3>New project</h3>
+<form method="post" action="/chat/new">
+<input type="hidden" name="project_id" value="__new__">
+<input name="new_name" placeholder="Project name" required>
+<input name="website" placeholder="Website (optional)">
+<input name="goal" placeholder="Goal in one line (optional)">
+<button type="submit">Create and chat</button>
+</form>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+<div class="task-row" id="task-{{ task.id }}">
+<strong>{{ task.id }}</strong> — {{ task.title }}
+<span class="badge">{{ task.status }}</span> <span class="badge">{{ task.lane }}</span>
+<form hx-post="/tasks/{{ task.id }}/status" hx-target="#task-{{ task.id }}" hx-swap="outerHTML">
+<select name="status"><option>open</option><option>in_progress</option><option>done</option><option>blocked</option></select>
+<button>Set</button>
+</form>
+</div>

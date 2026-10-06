@@ -1,0 +1,17 @@
+<div class="card" id="approval-{{ approval.id }}" data-status="{{ approval.status }}">
+<h3>{{ approval.title }}</h3>
+<p class="muted">{{ approval.kind }}</p>
+{% if approval.status == "pending" %}
+<p><span class="badge pending">Needs your review</span></p>
+{% if "outreach" in approval.kind|lower or "send" in approval.body_md|lower or "publish" in approval.body_md|lower %}
+<p class="muted">Risk: external communication — nothing goes out until you approve.</p>
+{% endif %}
+<form class="inline" hx-post="/approvals/{{ approval.id }}/decide" hx-target="#approval-{{ approval.id }}" hx-swap="outerHTML">
+<select name="decision"><option>approved</option><option>returned</option><option>rejected</option></select>
+<button>Review &amp; decide</button>
+</form>
+{% else %}
+<p><span class="badge">Decided: {{ approval.status|status_label }}</span></p>
+<p class="muted">Decided by {{ approval.decided_by }} at {{ approval.decided_at }}.</p>
+{% endif %}
+</div>

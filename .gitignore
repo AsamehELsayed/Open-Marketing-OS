@@ -1,0 +1,157 @@
+# =============================================================================
+# Open Marketing OS — ignore rules
+#
+# Two jobs, and the tension between them is deliberate:
+#   1. Never let user state, secrets or build output reach a public repository.
+#   2. Never ignore a file a reproducible build needs.
+#
+# DEV-008 rewrote this file. The previous version ignored `data/` wholesale,
+# which meant reproducible-build inputs under `data/` could not be told apart
+# from a developer's personal state, and it ignored no build, log, model or
+# credential path at all.
+# =============================================================================
+
+# --- secrets -----------------------------------------------------------------
+# `.env` is the dev convenience file. It is never committed, in any form.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+secrets.json
+credentials.json
+*.keystore
+
+# --- user state (never source) ------------------------------------------------
+# The frozen app writes everything here; on a developer machine this is the
+# working copy's equivalent.
+# `data/*` rather than `data/`, so a `.gitkeep` placeholder can be re-included.
+# Ignoring the directory itself makes a negation inside it inert, which is a
+# common and very confusing mistake.
+data/*
+!data/.gitkeep
+# Explicitly belt-and-braces the sensitive leaves, in case `data/` is ever
+# un-ignored to ship a fixture.
+data/credentials/
+data/backups/
+data/chroma/
+data/rag_debug/
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/*.sqlite
+data/*.sqlite3
+logs/
+*.log
+
+# --- credentials vault --------------------------------------------------------
+# The DPAPI ciphertext store. Useless outside the creating Windows account and
+# sensitive regardless.
+credentials/
+*.bin.enc
+
+# --- models and weights -------------------------------------------------------
+# Nothing model-related is redistributed (see NOTICE). If local AI ever ships,
+# weights must be downloaded at runtime, never committed.
+*.gguf
+*.ggml
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.bin
+*.ckpt
+models/
+model-cache/
+huggingface/
+.cache/
+
+# --- fonts and licensed binaries ---------------------------------------------
+# DEV-008: `Zain-Bold.ttf`, `Zain-ExtraBold.ttf` and `Cairo-VF.ttf` were tracked
+# under execution/test-01/. Their redistribution rights are unverified, so they
+# must never be committed or published. This is a backstop; the real enforcement
+# is `scripts/package/export_public_repo.py` plus
+# `app/tests/test_dev008_public_export.py`, which fails if a font reaches the
+# public tree. Add a licence review before ever overriding this.
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
+*.pfb
+
+# --- build output -------------------------------------------------------------
+# `build/` and `dist/` are produced by scripts/package/*.ps1 and must never be
+# committed: they contain a frozen interpreter and release assets.
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# --- dependencies -------------------------------------------------------------
+.venv/
+venv/
+env/
+# DEV-026: isolated local runtime created by python -m venv.
+.venv-DEV-008-runtime/
+node_modules/
+frontend/dist/
+.yarn/
+.pnpm-store/
+
+# --- local / editor / OS ------------------------------------------------------
+# Never ignore .editorconfig or .gitattributes: reproducible builds need them.
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- agent and run scratch ----------------------------------------------------
+# Agent tooling config IS tracked; only scratch output is not.
+.dogfood-scratch/
+.reproof-scratch/
+.opencode/node_modules/
+.opencode/package-lock.json
+development/worktrees/
+worktrees/
+*.log.jsonl.tmp
+
+# Per-run bulk data under development/runs/. The run *records* (markdown, JSON
+# evidence, executions.jsonl) are committed; the datasets are not. DEV-006 and
+# DEV-006B each wrote train/validation/held-out JSON of a few hundred KB, which
+# is bulk training input rather than evidence, it duplicates nothing a reviewer
+# needs, and it is exactly the kind of file that ends up shipped by accident.
+# DEV-008-PUBLISH-GATE made this explicit so `git status` is trustworthy.
+development/runs/*/data/
+executions.jsonl.tmp
+
+# --- local orchestration state -------------------------------------------------
+# `state/` at the repo root is a *product* workspace source and IS tracked
+# (the importer reads state/actions.json and state/experiments.json). Only the
+# run-bookkeeping temp files above are ignored.
+
+# --- OS / packaging scratch ---------------------------------------------------
+.iscc/
+*.iss.tmp

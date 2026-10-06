@@ -1,0 +1,23 @@
+green_autonomous:
+  - research
+  - audits
+  - draft copy
+  - internal strategy drafts
+  - creative briefs
+  - asset drafts
+  - analytics reports
+  - competitor monitoring
+
+yellow_human_review:
+  - publish social content
+  - production website edits
+  - send email/outreach
+  - deploy experiments
+  - external directory submissions
+
+red_explicit_approval:
+  - launch or change ad spend
+  - change pricing
+  - mass outreach
+  - destructive production actions
+  - commit to partnership or contract

@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>Projects</h1>
+<p>Active: <strong>{{ active }}</strong>. Each project has its own workspace, knowledge, conversations, campaigns, jobs, and settings.</p>
+<ul>
+{% for p in projects %}
+<li><strong>{{ p.name }}</strong> ({{ p.id }}) — {{ p.status }}{% if p.website %} — {{ p.website }}{% endif %}{% if p.goal %} — {{ p.goal }}{% endif %}</li>
+{% endfor %}
+</ul>
+<h2>New project</h2>
+<form method="post" action="/projects/new">
+<input name="name" placeholder="Project / company name" required>
+<input name="website" placeholder="Website (optional)">
+<input name="goal" placeholder="Goal in one line (optional)">
+<button type="submit">Create + Switch</button>
+</form>
+<h2>Switch / Archive</h2>
+<form method="post" action="/projects/switch">
+<input name="project_id" placeholder="project id" required>
+<button type="submit">Switch</button>
+</form>
+<form method="post" action="/projects/archive">
+<input name="project_id" placeholder="project id" required>
+<button type="submit">Archive</button>
+</form>
+<h2>Social profiles (active project: {{ active }})</h2>
+{% include "_partials/social_accounts.html" %}
+{% endblock %}

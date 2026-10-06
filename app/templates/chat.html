@@ -1,0 +1,254 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="chat-layout">
+<aside class="chat-history" id="chat-history">
+<div class="project-block">
+<span class="muted">Project:</span><strong>{{ project.name }}</strong>
+</div>
+<a class="btn" href="/chat/new">+ New Chat</a>
+<h2>Chats</h2>
+<ul id="chat-list">
+<li class="current"><span>{{ convo.title or "New conversation" }}</span></li>
+{% for c in chats %}<li><a href="/chat/{{ c.id }}">{{ c.title or "New conversation" }}</a></li>{% endfor %}
+</ul>
+</aside>
+<div class="chat-main">
+<div class="project-header">
+<span class="muted">Project:</span><strong>{{ project.name }}</strong>
+<span class="spacer"></span>
+<form method="post" action="/chat/{{ convo.id }}/archive" style="display:inline" onsubmit="return confirm('Archive this chat? You can start a new one anytime.');"><button class="btn-secondary" type="submit">Archive chat</button></form>
+<a class="btn btn-secondary" href="/chat/new">New chat in another project</a>
+</div>
+<h1>Account Manager</h1>
+<p class="subtitle">Your marketing team, in plain language.</p>
+<div id="transcript" data-convo="{{ convo.id }}">
+{% for m in messages %}{% with role=m.role, body=m.body_md, citations=m.citations_json|from_json %}{% include "_partials/chat_turn.html" %}{% endwith %}{% endfor %}
+</div>
+<div class="chat-input">
+<form id="composer">
+<input id="composer-text" name="text" placeholder="Ask your Account Manager anything about your marketing..." required autocomplete="off">
+<button id="composer-send" type="submit">Send</button>
+</form>
+</div>
+</div>
+<aside class="live-panel" id="live-panel">
+<h2>Live Activity</h2>
+<p class="muted" id="live-status-line"><span class="live-status" id="live-status" hidden><span class="dot"></span><span id="live-status-text">Working</span></span></p>
+<ul id="activity-list">
+{% for e in past_events %}<li data-evtype="{{ e.event_type }}" data-meta="{{ e.metadata_json|e }}"><span class="dot done"></span>{{ e.label }}{% if e.detail %}<span class="detail">{{ e.detail }}</span>{% endif %}</li>{% endfor %}
+</ul>
+</aside>
+</div>
+<script>
+(function () {
+  var convoId = "{{ convo.id }}";
+  var form = document.getElementById("composer");
+  var input = document.getElementById("composer-text");
+  var sendBtn = document.getElementById("composer-send");
+  var transcript = document.getElementById("transcript");
+  var activityList = document.getElementById("activity-list");
+  var liveStatus = document.getElementById("live-status");
+  var liveStatusText = document.getElementById("live-status-text");
+  var seenEventIds = {};
+  var activeSource = null;
+
+  function esc(s) {
+    return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  var STATUS_WORDS = {
+    turn_started: "Working", context_started: "Working", context_completed: "Working",
+    state_read: "Working", rag_started: "Researching", rag_completed: "Researching",
+    web_started: "Researching", web_source: "Researching", web_completed: "Researching",
+    instagram_provider_started: "Researching", instagram_provider_completed: "Researching",
+    tool_started: "Working", tool_completed: "Working",
+    delegation_started: "Delegating", job_created: "Delegating", job_status_changed: "Delegating",
+    worker_started: "Delegating", worker_completed: "Delegating",
+    approval_required: "Waiting for your approval",
+    synthesis_started: "Writing response", assistant_delta: "Writing response"
+  };
+
+  function setStatus(text) {
+    if (!text) { liveStatus.hidden = true; return; }
+    liveStatus.hidden = false;
+    liveStatusText.textContent = text;
+  }
+
+  var PANEL_DOT = {
+    turn_started: "", provider_selected: "", context_started: "", context_completed: "done",
+    state_read: "done", rag_started: "", rag_completed: "done",
+    web_started: "", web_source: "done", web_completed: "done",
+    instagram_provider_started: "", instagram_provider_completed: "done",
+    tool_started: "", tool_completed: "done", tool_failed: "failed",
+    delegation_started: "", job_created: "active", job_status_changed: "active",
+    worker_started: "active", worker_completed: "done", worker_failed: "failed",
+    approval_required: "active", synthesis_started: "",
+    assistant_delta: "", assistant_completed: "done",
+    turn_completed: "done", turn_failed: "failed"
+  };
+
+  function latencyOf(data) {
+    var m = (data && data.meta) || {};
+    return (typeof m.latency_display === "string" && m.latency_display) ? m.latency_display : "";
+  }
+
+  function appendLatencyBadge(shellBody, display) {
+    if (!shellBody || !display) return;
+    if (shellBody.querySelector(".latency-badge")) return;
+    shellBody.innerHTML += ' <span class="detail latency-badge">' + esc(display) + "</span>";
+  }
+
+  function addActivity(type, label, detail) {
+    if (type === "assistant_delta" || type === "synthesis_started" ||
+        type === "turn_started" || type === "provider_selected" ||
+        type === "context_started" || type === "context_completed" ||
+        type === "tool_started" || type === "rag_started" ||
+        type === "web_started" || type === "instagram_provider_started" ||
+        type === "delegation_started" || type === "job_status_changed") {
+      var s = STATUS_WORDS[type];
+      if (s) setStatus(s);
+      if (type !== "web_source") return;
+    }
+    var li = document.createElement("li");
+    var dot = PANEL_DOT[type] || "";
+    li.innerHTML = '<span class="dot ' + dot + '"></span>' + esc(label) +
+      (detail ? '<span class="detail">' + esc(detail) + "</span>" : "");
+    activityList.appendChild(li);
+  }
+
+  function streamTurn(turnId, shellBody, afterId) {
+    if (activeSource) { try { activeSource.close(); } catch (e) {} }
+    var url = "/chat/turns/" + turnId + "/events" + (afterId ? "?after=" + afterId : "");
+    var src = new EventSource(url);
+    activeSource = src;
+    src.onmessage = function (ev) { handleEvent(turnId, shellBody, ev, false); };
+    src.addEventListener("turn_completed", function (ev) { handleEvent(turnId, shellBody, ev, true); });
+    src.addEventListener("turn_failed", function (ev) { handleEvent(turnId, shellBody, ev, true); });
+    src.addEventListener("assistant_completed", function (ev) { handleEvent(turnId, shellBody, ev, false); });
+    src.addEventListener("assistant_delta", function (ev) { handleEvent(turnId, shellBody, ev, false); });
+    src.onerror = function () { /* browser auto-reconnects; server keeps history */ };
+  }
+
+  function handleEvent(turnId, shellBody, ev, terminal) {
+    var lastId = ev.lastEventId || "";
+    if (lastId && seenEventIds[lastId]) return;
+    if (lastId) seenEventIds[lastId] = true;
+    var data = {};
+    try { data = JSON.parse(ev.data || "{}"); } catch (e) {}
+    var fullText = data.text || data.detail || "";
+    if (ev.type === "assistant_delta" && fullText) {
+      shellBody.innerHTML = "<p>" + esc(fullText) + "</p>";
+      addActivity("assistant_delta");
+      return;
+    }
+    if (ev.type === "assistant_completed" && fullText) {
+      shellBody.innerHTML = "<p>" + esc(fullText) + "</p>";
+      shellBody.dataset.filled = "1";
+      return;
+    }
+    if (ev.type === "turn_completed") {
+      setStatus("");
+      if (data.text && !shellBody.dataset.filled) {
+        shellBody.innerHTML = "<p>" + esc(data.text) + "</p>";
+        shellBody.dataset.filled = "1";
+      }
+      var latC = latencyOf(data);
+      if (latC) {
+        appendLatencyBadge(shellBody, latC);
+        addActivity("turn_completed", "Response ready · " + latC);
+      } else {
+        addActivity("turn_completed", "Response ready");
+      }
+      if (activeSource) { try { activeSource.close(); } catch (e) {} activeSource = null; }
+      return;
+    }
+    if (ev.type === "turn_failed") {
+      setStatus("");
+      shellBody.innerHTML = '<p>Something interrupted this run. ' +
+        '<button class="btn-secondary" data-retry-turn="' + esc(turnId) + '">Retry</button></p>';
+      var latF = latencyOf(data);
+      if (latF) {
+        appendLatencyBadge(shellBody, latF);
+        addActivity("turn_failed", "Something interrupted this run. · " + latF);
+      } else {
+        addActivity("turn_failed", "Something interrupted this run.");
+      }
+      if (activeSource) { try { activeSource.close(); } catch (e) {} activeSource = null; }
+      return;
+    }
+    addActivity(ev.type, data.label || ev.type, data.detail || "");
+  }
+
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-retry-turn]");
+    if (!btn) return;
+    var turnId = btn.getAttribute("data-retry-turn");
+    btn.disabled = true;
+    fetch("/chat/turn/" + turnId + "/retry", { method: "POST" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        var shell = tmp.querySelector("[data-shell-for]");
+        var newTurn = tmp.querySelector("[data-turn-stream]");
+        transcript.appendChild(tmp);
+        if (newTurn) {
+          streamTurn(newTurn.getAttribute("data-turn-stream"),
+                     shell ? shell.querySelector("[data-shell-body]") : null, 0);
+        }
+      });
+  });
+
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var text = input.value.trim();
+    if (!text) return;
+    var clientId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    sendBtn.disabled = true;
+    var body = new URLSearchParams({ conversation_id: convoId, text: text, client_message_id: clientId });
+    fetch("/chat/turn", { method: "POST", body: body })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        transcript.appendChild(tmp);
+        input.value = "";
+        var shell = tmp.querySelector("[data-shell-body]");
+        var stream = tmp.querySelector("[data-turn-stream]");
+        if (shell) shell.innerHTML = '<p><span class="spin"></span>Working…</p>';
+        setStatus("Working");
+        if (stream) streamTurn(stream.getAttribute("data-turn-stream"), shell, 0);
+        transcript.lastElementChild.scrollIntoView(false);
+      })
+      .catch(function () { setStatus(""); })
+      .finally(function () { sendBtn.disabled = false; input.focus(); });
+  });
+
+  // Reload path: surface persisted latency badges from past_events metadata.
+  try {
+    var past = activityList.querySelectorAll("li[data-meta]");
+    for (var pi = 0; pi < past.length; pi++) {
+      var raw = past[pi].getAttribute("data-meta") || "";
+      if (raw.indexOf("latency_display") === -1) continue;
+      var pmeta = null;
+      try { pmeta = JSON.parse(raw); } catch (pe) { pmeta = null; }
+      var pdisp = pmeta && pmeta.latency_display;
+      if (typeof pdisp === "string" && pdisp && !past[pi].querySelector(".latency-badge")) {
+        past[pi].innerHTML += ' <span class="detail latency-badge">' + esc(pdisp) + "</span>";
+      }
+    }
+  } catch (e) {}
+
+  {% if open_turn %}
+  (function () {
+    var shell = document.createElement("div");
+    shell.className = "chat-turn chat-assistant assistant-shell";
+    shell.innerHTML = '<div class="chat-bubble" data-shell-body><p><span class="spin"></span>Working…</p></div>';
+    transcript.appendChild(shell);
+    setStatus("Working");
+    streamTurn("{{ open_turn.id }}", shell.querySelector("[data-shell-body]"), 0);
+  })();
+  {% endif %}
+})();
+</script>
+{% endblock %}

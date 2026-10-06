@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Jobs</h1>
+<div id="job-list">
+{% for job in jobs %}
+<div class="job-card" data-job-row="{{ job.id }}">
+<strong>{{ job.kind }}</strong>
+<span class="badge" data-job-status>{{ job.status }}</span>
+<div class="muted">created {{ job.created_at or job.started_at or "—" }} · updated {{ job.updated_at or job.finished_at or "—" }}</div>
+<div><a href="/jobs/{{ job.id }}/process">View process</a> · <a href="/jobs/{{ job.id }}/log">log</a></div>
+</div>
+{% else %}<p>No background jobs yet.</p>{% endfor %}
+</div>
+<script>
+(function () {
+  document.querySelectorAll("[data-job-row]").forEach(function (row) {
+    var jobId = row.getAttribute("data-job-row");
+    var badge = row.querySelector("[data-job-status]");
+    if (badge && /^(queued|running|waiting_approval)/.test(badge.textContent.trim())) {
+      var src = new EventSource("/jobs/" + jobId + "/events");
+      src.onmessage = function (ev) {
+        try {
+          var d = JSON.parse(ev.data || "{}");
+          if (d.status) badge.textContent = d.status;
+        } catch (e) {}
+      };
+      src.addEventListener("job_terminal", function (ev) {
+        try { badge.textContent = JSON.parse(ev.data || "{}").status || badge.textContent; } catch (e) {}
+        try { src.close(); } catch (e) {}
+      });
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% if role == "user" %}
+<div class="chat-turn chat-user"><div class="chat-bubble"><p>{{ body }}</p></div></div>
+{% else %}
+<div class="chat-turn chat-assistant"><div class="chat-bubble"><p>{{ body }}</p>
+{% if citations %}<details class="cites"><summary>View sources ({{ citations|length }})</summary>
+{% for c in citations %}<span class="badge">{{ c.path }} [{{ c.status_tag }}]</span> {% endfor %}
+</details>{% endif %}
+</div></div>
+{% endif %}

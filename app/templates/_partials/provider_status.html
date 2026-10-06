@@ -1,0 +1,14 @@
+<div class="card">
+<p><strong>Selection:</strong> {{ provider.selection }}{% if provider.env_override %} <span class="muted">(from environment)</span>{% endif %}</p>
+<p>OpenAI: {% if provider.openai_ready %}Configured{% else %}Not configured{% endif %}</p>
+<p><strong>Current Account Manager:</strong> {% if provider.current == "openai" %}OpenAI{% else %}Deterministic{% endif %}</p>
+<p class="muted">Priority: {{ provider.priority | join(", ") }}. No secrets are shown here.</p>
+<form class="inline" hx-post="/settings/provider" hx-target="#provider-status" hx-swap="outerHTML">
+<select name="manager_provider">
+<option value="auto"{% if provider.selection == "auto" %} selected{% endif %}>Auto</option>
+<option value="openai"{% if provider.selection == "openai" %} selected{% endif %}>OpenAI</option>
+<option value="deterministic"{% if provider.selection == "deterministic" %} selected{% endif %}>Deterministic</option>
+</select>
+<button class="btn-secondary">Save</button>
+</form>
+</div>

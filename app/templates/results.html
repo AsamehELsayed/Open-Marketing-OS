@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+{% block content %}<h1>Results</h1>
+<p class="subtitle">What are we learning?</p>
+{% for e in experiments %}
+<div class="card" id="exp-{{ e.id }}">
+<h3>{{ e.id }}</h3>
+<span class="badge">{{ e.status|status_label }}</span>
+<p>{{ e.hypothesis[:300] }}</p>
+{% if e.metric %}<p class="muted">Measuring: {{ e.metric[:200] }}</p>{% endif %}
+<form class="inline" hx-post="/experiments/{{ e.id }}/measurements" hx-target="#exp-{{ e.id }} .decision-result" hx-swap="innerHTML">
+<select name="decision">{% for d in decisions %}<option>{{ d }}</option>{% endfor %}</select>
+<input name="evidence_md" placeholder="What did you observe? (required)" required>
+<button>Record decision</button>
+</form>
+<div class="decision-result"></div>
+</div>
+{% else %}
+<div class="empty"><strong>No experiments yet.</strong>Results will appear here once campaigns start running.</div>
+{% endfor %}
+<h2>Decisions so far</h2>
+{% for m in measurements %}<div class="card"><span class="badge">{{ m.decision }}</span> <span class="muted">{{ m.observed_at }} · {{ m.experiment_id }}</span><p>{{ m.evidence_md[:300] }}</p></div>
+{% else %}<div class="empty"><strong>No decisions recorded yet.</strong>Use the form above when you have results to judge.</div>{% endfor %}
+<h2>Learnings</h2>
+{% for l in learnings %}<div class="card"><p>{{ l.body_md[:300] }}</p><p class="muted">{{ l.observed_at }} · {{ l.source }}</p></div>
+{% else %}<div class="empty"><strong>No learnings yet.</strong>Your team will show useful learnings here after campaigns start collecting real results.</div>{% endfor %}
+{% endblock %}

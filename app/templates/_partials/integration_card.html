@@ -1,0 +1,33 @@
+{# DEV-007 W8: one Integrations card. Presence-only fields; never secrets. #}
+<div class="card integration-card" id="ic-{{ card.id }}" data-scope="{{ card.scope }}" data-cost="{{ card.cost }}" data-provider="{{ card.provider }}">
+<h3>{{ card.name }}</h3>
+<p>Status: <span class="badge {{ card.status_token }}">{{ card.status_label }}</span>{% if card.capability %} <span class="muted">{{ card.capability }}</span>{% endif %}</p>
+<p class="muted">Scope: {{ card.scope }} | Provider: {{ card.provider }} | Cost: {{ card.cost }}</p>
+<p class="muted">Connected account: {{ card.account if card.account else "none" }} | Configured: {{ "yes" if card.configured else "no" }} | Secret stored: {{ "yes" if card.has_secret else "no" }} | Last health: {{ "ok" if card.last_health else "unknown" }}</p>
+{% if card.note %}<p class="muted">{{ card.note }}</p>{% endif %}
+{% if card.custom == "project_handle" %}
+<form method="post" action="/settings/instagram-handle">
+<input type="hidden" name="project_id" value="{{ project_id }}">
+<input name="handle" placeholder="@yourproject (project's own handle)" value="{{ card.handle }}">
+<button class="btn-secondary" type="submit">Save handle</button>
+</form>
+{% elif card.custom == "platforms" %}
+{% for p in social_platforms %}
+<p>{{ p }}: <strong>{{ integrations[p].detail if integrations and p in integrations else "Not connected" }}</strong>{% if integrations and p in integrations and integrations[p].handle %} - @{{ integrations[p].handle }} ({{ integrations[p].status }}){% endif %}</p>
+{% endfor %}
+{% endif %}
+{% for a in card.actions %}
+<form class="inline integration-action" method="post" action="{{ a.endpoint }}" data-action="{{ a.kind }}" data-card="{{ card.id }}">
+<input type="hidden" name="project_id" value="{{ project_id }}">
+<input type="hidden" name="integration" value="{{ a.integration }}">
+{% if a.kind in ("verify", "research") %}
+<input type="hidden" name="mode" value="{{ a.kind }}">
+<input type="hidden" name="handle" value="{{ a.handle }}">
+{% endif %}
+{% if a.kind == "configure" %}
+<input type="password" name="token" placeholder="token (write-only)" autocomplete="new-password" value="">
+{% endif %}
+<button class="btn-secondary" type="submit">{{ a.label }}</button>
+</form>
+{% endfor %}
+</div>
