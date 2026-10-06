@@ -341,6 +341,10 @@ def run_backend() -> int:
             port=port,
             log_level="warning",
             access_log=False,
+            # A PyInstaller windowed executable has no console streams on
+            # Windows. Uvicorn's default dictConfig constructs a stream
+            # formatter against sys.stderr and can fail before binding.
+            log_config=None,
         )
     except OSError as exc:
         raise LaunchError(

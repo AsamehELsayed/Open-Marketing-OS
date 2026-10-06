@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from types import ModuleType
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,25 @@ def test_serve_module_binds_loopback():
     source = (LAUNCHER_DIR / "serve.py").read_text(encoding="utf-8")
     assert "0.0.0.0" not in source
     assert '"127.0.0.1"' in source
+
+
+def test_frozen_backend_disables_uvicorn_console_logging(launcher, monkeypatch):
+    """Windowed Windows builds have no stderr for Uvicorn's default formatter."""
+    import app.main
+    from app import paths
+
+    uvicorn = ModuleType("uvicorn")
+    calls = {}
+    uvicorn.run = lambda app, **kwargs: calls.update(app=app, **kwargs)
+    monkeypatch.setitem(sys.modules, "uvicorn", uvicorn)
+    monkeypatch.setattr(paths, "ensure_writable_dirs", lambda: None)
+    monkeypatch.setattr(paths, "user_data_root", lambda: Path("test-data"))
+    monkeypatch.setattr(app.main, "create_app", lambda: object())
+    monkeypatch.setenv("OMOS_PORT", "43210")
+
+    assert launcher.run_backend() == 0
+    assert calls["host"] == "127.0.0.1"
+    assert calls["log_config"] is None
 
 
 # ----------------------------------------------------------------- errors
