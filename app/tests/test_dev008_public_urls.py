@@ -116,10 +116,10 @@ def test_version_is_consistent_everywhere():
 
     version = paths.APP_VERSION
     iss = (REPO_ROOT / "packaging" / "omos.iss").read_text(encoding="utf-8")
-    match = re.search(r'#define\s+AppVersion\s+"([^"]+)"', iss)
+    match = re.search(r'#define\s+AppVersion\s+([A-Za-z][A-Za-z0-9_]*)', iss)
     assert match, "omos.iss must define AppVersion"
-    assert match.group(1) == "{#ReleaseVersion}", (
-        "omos.iss must use the build-time ReleaseVersion supplied from app/paths.py"
+    assert match.group(1) == "ReleaseVersion", (
+        "omos.iss must alias AppVersion to the build-time ReleaseVersion supplied from app/paths.py"
     )
     installer_script = (
         REPO_ROOT / "scripts" / "package" / "build_installer.ps1"

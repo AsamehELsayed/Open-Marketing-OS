@@ -88,7 +88,7 @@ def test_inno_installs_profile_descriptor_and_local_runtime_only_for_local():
     iss = (PACKAGING / "omos.iss").read_text(encoding="utf-8")
     assert "AppId={{7C4E1B2A-9F3D-4A6E-8B21-0D5E7C9A4F13}" in iss
     assert 'DestName: "edition-profile.json"' in iss
-    assert '#define AppVersion     "{#ReleaseVersion}"' in iss
+    assert "#define AppVersion     ReleaseVersion" in iss
     assert "AppVersion={#AppVersion}" in iss
     assert "AppVerName={#AppName} {#AppVersion} ({#EditionDisplayName})" in iss
     assert "AppComments=OMOS edition profile: {#ProfileId}" in iss

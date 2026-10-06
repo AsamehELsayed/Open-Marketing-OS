@@ -19,7 +19,7 @@
 #define AppName        "Open Marketing OS"
 #define AppShortName   "OpenMarketingOS"
 #define AppExeName     "OpenMarketingOS.exe"
-#define AppVersion     "{#ReleaseVersion}"
+#define AppVersion     ReleaseVersion
 #define AppPublisher   "Open Marketing OS"
 #define MinWindows     "10.0"
 #if EditionProfile == "local"
