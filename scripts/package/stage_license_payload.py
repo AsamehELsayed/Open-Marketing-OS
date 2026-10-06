@@ -32,10 +32,10 @@ def canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "", name).lower()
 
 
-def _copy(source: Path, target: Path) -> str:
+def _copy(source: Path, target: Path, payload_root: Path) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return target.as_posix()
+    return target.resolve().relative_to(payload_root).as_posix()
 
 
 def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
@@ -45,16 +45,16 @@ def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
         source = repo / name
         if not source.is_file():
             raise FileNotFoundError(f"Required recipient notice is missing: {source}")
-        _copy(source, payload / name)
+        _copy(source, payload / name, payload)
 
     htmx = repo / "LICENSES" / "htmx-0BSD.txt"
     if not htmx.is_file():
         raise FileNotFoundError(f"Required htmx 0BSD text is missing: {htmx}")
-    _copy(htmx, payload / "LICENSES" / htmx.name)
+    _copy(htmx, payload / "LICENSES" / htmx.name, payload)
     skills_license = repo / ".agents" / "LICENSE"
     if not skills_license.is_file():
         raise FileNotFoundError(f"Required vendored-skills license is missing: {skills_license}")
-    _copy(skills_license, payload / "THIRD-PARTY-LICENSES" / "marketing-skills" / "LICENSE")
+    _copy(skills_license, payload / "THIRD-PARTY-LICENSES" / "marketing-skills" / "LICENSE", payload)
 
     fallback_root = repo / "scripts" / "package" / "notices" / "python"
     fallback_files: dict[str, Path] = {}
@@ -87,7 +87,7 @@ def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
         for source in dist_path.rglob("*"):
             if not source.is_file() or not LICENSE_FILE.match(source.name):
                 continue
-            files.append(_copy(source, dest_base / source.relative_to(dist_path)))
+            files.append(_copy(source, dest_base / source.relative_to(dist_path), payload))
             copied_sources.add(source.resolve())
         # Some wheels declare their license and third-party notices beside the
         # import package rather than inside dist-info (for example, onnxruntime).
@@ -104,13 +104,13 @@ def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
                 raise RuntimeError(
                     f"Package license file is outside the isolated site-packages: {source}"
                 ) from exc
-            files.append(_copy(source, dest_base / "distribution" / source_relative))
+            files.append(_copy(source, dest_base / "distribution" / source_relative, payload))
             copied_sources.add(source)
         fallback_names = FALLBACKS.get(canonical(package), [])
         if not files and not fallback_names:
             raise RuntimeError(f"No exact license text found for locked package {package}=={version}")
         for fallback_name in fallback_names:
-            files.append(_copy(fallback_files[fallback_name], dest_base / fallback_name))
+            files.append(_copy(fallback_files[fallback_name], dest_base / fallback_name, payload))
         python_records.append({"name": package, "version": version, "license_files": files})
 
     frontend_lock = json.loads((repo / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
@@ -127,7 +127,7 @@ def stage(repo: Path, payload: Path, site_packages: Path) -> dict:
         if not license_sources:
             raise RuntimeError(f"No exact license text found for emitted frontend package {locator}")
         package_dest = payload / "THIRD-PARTY-LICENSES" / "frontend" / locator.removeprefix("node_modules/")
-        files = [_copy(p, package_dest / p.relative_to(source_dir)) for p in license_sources]
+        files = [_copy(p, package_dest / p.relative_to(source_dir), payload) for p in license_sources]
         frontend_records.append({"package": locator.removeprefix("node_modules/"), "version": package_info.get("version"), "license": package_info.get("license"), "license_files": files})
 
     manifest = {

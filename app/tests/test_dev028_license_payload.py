@@ -63,6 +63,14 @@ def test_stage_copies_project_python_frontend_and_vendored_notices(tmp_path: Pat
     assert (payload / manifest["python_packages"][0]["license_files"][0]).is_file()
     assert any(path.endswith("distribution/sample_pkg/LICENSE") for path in manifest["python_packages"][0]["license_files"])
     assert any(path.endswith("distribution/sample_pkg/ThirdPartyNotices.txt") for path in manifest["python_packages"][0]["license_files"])
+    manifest_text = json.dumps(manifest)
+    assert all(
+        not Path(path).is_absolute()
+        for package in [*manifest["python_packages"], *manifest["frontend_packages"]]
+        for path in package["license_files"]
+    )
+    assert "C:\\Users\\" not in manifest_text
+    assert str(site_packages) not in manifest_text
     assert (payload / manifest["frontend_packages"][0]["license_files"][0]).is_file()
     assert manifest["python_package_count"] == 1
     assert manifest["frontend_package_count"] == 1
