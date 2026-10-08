@@ -29,7 +29,7 @@ _CANONICAL = {
     "list": "list", "get": "get", "read": "get", "site": "website",
     "sites": "website", "websites": "website", "campaigns": "campaign",
     "accounts": "account", "current": "current", "latest": "current",
-    "what": "get", "which": "get", "who": "get", "where": "get",
+    "which": "get", "who": "get", "where": "get",
     "when": "get", "how": "get",
 }
 
