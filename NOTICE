@@ -34,7 +34,11 @@ catalog disclosure does not grant additional model rights or approve weight
 redistribution.
 
 Vendored skills and web asset
-The vendored Marketing Skills library is MIT-licensed; preserve .agents/LICENSE.
+The vendored Marketing Skills library is from coreyhaines31/marketingskills
+(https://github.com/coreyhaines31/marketingskills), pinned at upstream tag
+v2.11.1 and commit 5b2c0007766c6a1cf1d53fd8fc73e979e0821022, and is MIT-licensed.
+The complete upstream permission and copyright notice is preserved in
+.agents/LICENSE.
 The bundled htmx 2.0.4 asset is Zero-Clause BSD (0BSD); its exact upstream license
 text is in LICENSES/htmx-0BSD.txt and its version-pinned source is listed in
 THIRD-PARTY-NOTICES.
