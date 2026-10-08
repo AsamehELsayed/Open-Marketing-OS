@@ -54,9 +54,36 @@ def _explicit_write_intents(text: str) -> dict:
     lowered = value.lower()
     if not value or any(word in lowered for word in ("brainstorm", "what if", "ideas for", "could we")):
         return {}
-    create = any(term in lowered for term in (
-        "create", "build", "draft", "prepare", "propose", "launch",
-        "اعمل", "أنشئ", "انشئ", "جهز", "جهّز", "اقترح"))
+    if _current_turn_write_constraints(value).get("analysis_only"):
+        return {}
+    governed_proposal = any(phrase in lowered for phrase in (
+        "please approve and send", "submit this work for approval",
+        "submit for approval", "request approval"))
+    external_action = _external_action_request(value)
+    if external_action and not governed_proposal:
+        return {"campaign": None, "task": None, "experiment": None,
+                "external_action": external_action, "requires_approval": True}
+    direct_request = bool(re.match(
+        r"^\s*(?:(?:please|can you|could you)\s+)?"
+        r"(?:create|build|prepare|propose|start)\b|"
+        r"^\s*(?:(?:please|can you|could you)\s+)?draft\s+"
+        r"(?:a|an|the|this|new|small|marketing)\b", lowered
+    ))
+    lookup_question = bool(re.match(
+        r"^\s*(?:what|which|why|how|show|list|find|search|view|read|"
+        r"do we have|do i have|are there|tell me about)\b", lowered
+    ))
+    if lookup_question and not direct_request:
+        return {}
+    create = governed_proposal or bool(re.search(
+        r"\b(?:create|build|prepare|propose|start)\b.{0,60}"
+        r"\b(?:campaign|campaigns|experiment|experiments|task|tasks|"
+        r"حملة|حمله|حملات|تجربة|تجربه|تجارب|مهمة|مهام)\b|"
+        r"\bdraft\s+(?:a|an|the|this|new|small|marketing)\b.{0,45}"
+        r"\b(?:campaign|experiment|task)\b|"
+        r"\b(?:اعمل|أنشئ|انشئ|جهز|جهّز|اقترح)\b.{0,50}"
+        r"(?:حملة|حمله|حملات|تجربة|تجربه|تجارب|مهمة|مهام)", lowered
+    ))
     campaign_requested = create and any(x in lowered for x in ("campaign", "حملة", "حمله", "حملات"))
     experiment_requested = create and any(x in lowered for x in ("experiment", "تجربة", "تجربه", "تجارب"))
     task_requested = create and any(x in lowered for x in (
@@ -104,6 +131,26 @@ def _explicit_write_intents(text: str) -> dict:
     }
 
 
+def _external_action_request(text: str) -> dict | None:
+    """Detect explicit third-party publishing or spend requests."""
+    value = str(text or "").strip()
+    lowered = value.lower()
+    patterns = (
+        r"\b(?:launch|publish|post|send)\b.{0,55}\b(?:campaign|ad|ads|meta|facebook|instagram|google|linkedin|tiktok)\b",
+        r"\b(?:campaign|ad|ads)\b.{0,55}\b(?:launch|publish|post|send)\b",
+        r"\bspend\b.{0,45}\b(?:budget|ad|ads|meta|facebook|google)\b",
+        r"\b(?:boost|run)\b.{0,45}\b(?:ad|ads|campaign)\b.{0,35}\b(?:meta|facebook|instagram|google|linkedin|tiktok)\b",
+    )
+    if not any(re.search(pattern, lowered) for pattern in patterns):
+        return None
+    platform = next((name for name in (
+        "Meta", "Facebook", "Instagram", "Google", "LinkedIn", "TikTok"
+    ) if name.lower() in lowered), "third-party platform")
+    action = next((name for name in ("publish", "post", "send", "launch", "spend", "boost", "run")
+                   if re.search(rf"\b{name}\b", lowered)), "publish")
+    return {"platform": platform, "action": action, "request": value[:300]}
+
+
 def _current_turn_write_constraints(text: str) -> dict:
     """Extract explicit current-turn write prohibitions in a small vocabulary.
 
@@ -119,6 +166,7 @@ def _current_turn_write_constraints(text: str) -> dict:
     global_read_only = bool(re.search(
         r"\b(?:read[- ]only|analysis[- ]only|analy[sz]e only|just analyze|"
         r"do not save anything|don't save anything|dont save anything|"
+        r"do not create anything|don't create anything|dont create anything|"
         r"without saving anything|no writes?)\b|"
         r"\b(?:do not|don['’]t|dont)\s+save\s+this\b|"
         r"\b(?:do not|don['’]t|dont)\s+make\s+changes?\b", value
@@ -203,7 +251,7 @@ def _filter_forbidden_write_intents(intents: dict, constraints: dict) -> tuple[d
             clean["experiment"] = None
             blocked.append("experiment")
     if not any(clean.get(key) for key in ("campaign", "task", "experiment")):
-        clean["requires_approval"] = False
+        clean["requires_approval"] = bool(clean.get("external_action"))
     return clean, list(dict.fromkeys(blocked))
 
 
@@ -1028,6 +1076,29 @@ def build_account_manager_graph(
                     "write_intents": write_intents,
                     "write_constraints": write_constraints,
                     "tool_capability_name": str(intent.get("capability", "") or "")}
+        if write_intents.get("external_action") or any(
+                write_intents.get(k) for k in ("campaign", "task", "experiment")):
+            return {"route": "campaign_operation", "model_route": "campaign_operation",
+                    "write_intents": write_intents,
+                    "write_constraints": write_constraints}
+        try:
+            from app.graphs.adapters import ToolRegistryAdapter
+            from app.services.tools.selector import select_registered_tool
+
+            selected = select_registered_tool(
+                text,
+                catalog=ToolRegistryAdapter().catalog(),
+                project_state=state.get("project_state") or {},
+            )
+        except Exception:
+            selected = None
+        if selected:
+            return {"intent": selected, "route": "tool_capability",
+                    "model_route": "tool_capability",
+                    "intent_type": "TOOL_CAPABILITY",
+                    "tool_capability_name": selected["capability"],
+                    "write_intents": write_intents,
+                    "write_constraints": write_constraints}
         route = classify_to_route(
             text, deep="deep research" in (text or "").lower())
         if any(write_intents.get(k) for k in ("campaign", "task", "experiment")) and route in ("state_only", "knowledge"):
@@ -1160,6 +1231,27 @@ def build_account_manager_graph(
         intent = state.get("intent") or {}
         cap = str(intent.get("capability") or "instagram_public_profile")
         args = dict(intent.get("arguments") or {})
+        missing = [str(name).strip() for name in (intent.get("missing") or [])
+                   if str(name).strip()]
+        # The long-standing website and Instagram executors can fill these
+        # fields from authoritative project records; only the generic registry
+        # path needs to stop before invoking a handler with incomplete args.
+        project_resolvable = (cap.startswith("website_") or cap in (
+            "instagram_public_profile", "instagram_owned_insights"))
+        if missing and not project_resolvable:
+            detail = (f"To run {cap}, please provide: " + ", ".join(
+                name.replace("_", " ") for name in missing) + ".")
+            _emit_graph_event(config, "tool_started", {
+                "tool": cap, "tool_id": cap, "status": "RUNNING", "args": {},
+            })
+            _emit_graph_event(config, "tool_failed", {
+                "tool": cap, "tool_id": cap, "status": "BLOCKED",
+                "ok": False, "error": detail,
+            })
+            return {
+                "capability_answer": f"Tool execution: {cap} — Blocked\n\n{detail}",
+                "tool_run_id": "", "social_results": [],
+            }
         try:
             conn, owned = _conn_for_nodes()
             try:
@@ -1790,7 +1882,8 @@ def build_account_manager_graph(
         if not isinstance(intents, dict):
             return {}
         blocked_actions = list(intents.get("_blocked_actions") or [])
-        if not any(intents.get(k) for k in ("campaign", "task", "experiment")) and not blocked_actions:
+        if (not any(intents.get(k) for k in ("campaign", "task", "experiment"))
+                and not intents.get("external_action") and not blocked_actions):
             return {}
         pid = str(state.get("project_id") or "")
         turn_id = str(state.get("turn_id") or "")
@@ -1809,6 +1902,28 @@ def build_account_manager_graph(
             from app.graphs.adapters import ToolRegistryAdapter
             adapter = ToolRegistryAdapter()
             callback = _event_callback(config)
+
+            external = intents.get("external_action")
+            if isinstance(external, dict):
+                platform = str(external.get("platform") or "third-party platform")
+                action = str(external.get("action") or "publish")
+                external_tools = [record for record in adapter.catalog()
+                                  if record.get("side_effect") == "external_action"
+                                  and platform.lower() in str(
+                                      record.get("name", "") + " " +
+                                      record.get("description", "")).lower()]
+                if external_tools:
+                    detail = (f"The {platform} action needs a connected publishing integration "
+                              "and explicit approval before it can run.")
+                else:
+                    detail = (f"No {platform} campaign publishing tool is available in this build. "
+                              "Connect the required service under Settings → Integrations; "
+                              "publishing or spending will still require your explicit approval.")
+                results["external_action"] = {
+                    "ok": False, "status": "blocked", "action": action,
+                    "platform": platform, "error": detail,
+                    "approval_required": True,
+                }
 
             def execute(name: str, args: dict):
                 tree = _tree_of(config)
@@ -1913,7 +2028,10 @@ def build_account_manager_graph(
                         "campaign_id": campaign_id,
                         "idempotency_key": f"{turn_id}:approval"}
         if failed or results.get("error"):
-            results["write_error"] = "One or more proposals could not be saved."
+            campaign_error = ((results.get("campaign") or {}).get("error")
+                              if isinstance(results.get("campaign"), dict) else "")
+            results["write_error"] = (str(campaign_error).strip()[:300]
+                                      or "One or more proposals could not be saved.")
         return {"write_results": results, "approval_state": approval}
 
     def synthesis_complete(state: LangGraphState, config=None) -> dict:
@@ -1929,6 +2047,31 @@ def build_account_manager_graph(
         writes = state.get("write_results") or {}
         if not writes:
             return {}
+        campaign = writes.get("campaign")
+        if isinstance(campaign, dict):
+            if campaign.get("ok") and campaign.get("campaign_id"):
+                campaign_id = str(campaign["campaign_id"])
+                return {"final_answer": (
+                    "Campaign draft created successfully.\n\n"
+                    f"Campaign ID: {campaign_id}\n\n"
+                    f"[Open Campaign](/app/campaigns/{campaign_id})"
+                )}
+            if campaign.get("status") == "blocked_by_user_constraint":
+                return {"final_answer":
+                        "No campaign draft was created. Skipped saving the campaign draft "
+                        "because your instructions prohibited that write."}
+            detail = str(campaign.get("error") or writes.get("write_error") or
+                         "The campaign draft could not be saved.").strip()[:300]
+            return {"final_answer": f"Campaign draft could not be saved, so it was not created. {detail}"}
+        external = writes.get("external_action")
+        if isinstance(external, dict):
+            detail = str(external.get("error") or "This external action is blocked.").strip()
+            return {"final_answer": (
+                f"{str(external.get('platform') or 'External')} "
+                f"{str(external.get('action') or 'action')} blocked. {detail} "
+                "No content was published and no budget was spent. "
+                "Other project tools that do not use this integration remain available."
+            )}
         ids = []
         for key, id_key in (("campaign", "campaign_id"), ("task", "task_id"), ("experiment", "experiment_id")):
             item = writes.get(key) or {}

@@ -88,14 +88,27 @@ def t_propose_campaign(conn, *, project_id, root, args):
     except ValueError as e:
         return {"ok": False, "error": str(e), "status": "failed"}
     row = {"id": rid, "project_id": project_id, "title": title,
-           "status": "proposed", "impact": 0, "confidence": 0, "effort": 0, "cost": 0,
+           "status": "drafted", "impact": 0, "confidence": 0, "effort": 0, "cost": 0,
            "approval_level": level, "measurement_window": None, "result": None,
            "learning_ref": None, "workflow_json": json.dumps(workflow, sort_keys=True), "updated_at": _now()}
     try:
-        row = repos.Campaigns.insert_proposal(conn, row)
+        existing = repos.Campaigns.get(conn, rid, project_id)
+        if existing and existing.get("status") == "proposed":
+            old_content = {k: v for k, v in existing.items()
+                           if k not in ("status", "updated_at")}
+            new_content = {k: v for k, v in row.items()
+                           if k not in ("status", "updated_at")}
+            if old_content == new_content:
+                existing.update({"status": "drafted", "updated_at": row["updated_at"]})
+                repos.Campaigns.upsert(conn, existing)
+                row = existing
+            else:
+                row = repos.Campaigns.insert_proposal(conn, row)
+        else:
+            row = repos.Campaigns.insert_proposal(conn, row)
     except ValueError as e:
         return {"ok": False, "error": str(e), "status": "failed"}
-    return {"ok": True, "campaign_id": row["id"], "status": "proposed"}
+    return {"ok": True, "campaign_id": row["id"], "status": row.get("status", "drafted")}
 
 
 def t_request_approval(conn, *, project_id, root, args):
@@ -193,7 +206,7 @@ def register_propose_tools(registry):
                                                          "acceptance": {"type": "string"},
                                                          "campaign_id": {"type": "string"}, **workflow_props}},
                               side_effect="green", handler=t_propose_task))
-    registry.register(ToolDef(name="propose_campaign", description="Draft a campaign (status proposed, GREEN).",
+    registry.register(ToolDef(name="propose_campaign", description="Create a local campaign draft (status drafted, GREEN).",
                               parameters={"type": "object", "required": ["title"],
                                           "properties": {"title": {"type": "string"},
                                                          "rationale_md": {"type": "string"},

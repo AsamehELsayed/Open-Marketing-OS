@@ -572,17 +572,36 @@ def _on_loop_event(db_path, pid, convo_id, turn_id, et, pl, tree=None):
     elif et == "tool_started":
         name = pl.get("tool", "")
         spec = _TOOL_LABELS.get(name)
-        if spec is None:
-            return  # unknown tools stay out of the user-visible trace
-        etype, label, det = spec
+        label = (spec[1] if spec else str(name or "tool").replace("_", " "))
+        if label in ("Website audit ready", "Proposal prepared", "Experiment proposed"):
+            label = str(name or "tool").replace("_", " ")
         try:
-            detail = det(pl.get("args", {}) or {}, {})
+            detail = spec[2](pl.get("args", {}) or {}, {}) if spec else ""
         except Exception:
             detail = ""
         emit_event(db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
-                   event_type=etype, label=label, detail=detail)
+                   event_type="tool_started", label=f"Running {label}", detail=detail,
+                   metadata={"tool": str(name or "")[:128], "status": "RUNNING"})
     elif et == "tool_completed":
         name, obs = pl.get("tool", ""), pl.get("obs", {}) or {}
+        status = str(pl.get("status") or "").lower()
+        blocked = "block" in status
+        succeeded = bool(pl.get("ok", obs.get("ok", True))) and not blocked
+        if name not in ("rag_search", "search_project_knowledge", "web_search",
+                        "instagram_audit", "delegate_to_marketing_pm",
+                        "request_approval"):
+            label = str(name or "Tool").replace("_", " ")
+            detail = str(pl.get("error") or "")[:300]
+            emit_event(
+                db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
+                event_type=("tool_failed" if blocked or not succeeded else "tool_completed"),
+                label=(f"Blocked: {label}" if blocked else
+                       f"Failed: {label}" if not succeeded else f"Completed: {label}"),
+                detail=detail,
+                metadata={"tool": str(name or "")[:128],
+                          "status": "BLOCKED" if blocked else
+                                   "FAILED" if not succeeded else "COMPLETED"},
+            )
         if name in ("rag_search", "search_project_knowledge"):
             n = len(obs.get("hits", []) or [])
             emit_event(db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
@@ -630,10 +649,15 @@ def _on_loop_event(db_path, pid, convo_id, turn_id, et, pl, tree=None):
                        metadata={"approval_id": obs["approval_id"]})
     elif et == "tool_failed":
         name = pl.get("tool", "")
-        if name in _TOOL_LABELS:
-            emit_event(db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
-                       event_type="tool_failed",
-                       label="One lookup didn't work, trying another way")
+        status = str(pl.get("status") or "").lower()
+        blocked = "block" in status
+        label = str(name or "Tool").replace("_", " ")
+        emit_event(db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
+                   event_type="tool_failed",
+                   label=(f"Blocked: {label}" if blocked else f"Failed: {label}"),
+                   detail=str(pl.get("error") or "")[:300],
+                   metadata={"tool": str(name or "")[:128],
+                             "status": "BLOCKED" if blocked else "FAILED"})
 
 
 def _job_title(conn, job_id):

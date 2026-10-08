@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import StatusBadge from "../chrome/StatusBadge";
-import { excerptOf, score, str } from "./format";
+import { excerptOf, optionalScore, str } from "./format";
 
 export interface CampaignCounts {
   prospects: number;
@@ -22,15 +22,18 @@ export default function CampaignCard({
 }) {
   const id = str(campaign.id);
   const title = str(campaign.title).trim() || "Untitled campaign";
-  const status = str(campaign.status).trim() || "unknown";
+  const rawStatus = str(campaign.status).trim() || "unknown";
+  const status = ["drafted", "proposed"].includes(rawStatus.toLowerCase())
+    ? "Draft"
+    : rawStatus;
   // Repo rows carry no `goal` field; impact/result text is the closest
   // human-readable summary — labelled as focus, never invented.
   const focus = excerptOf(campaign, ["result", "measurement_window"]);
   const scores = (
     [
-      ["Impact", score(campaign.impact)],
-      ["Confidence", score(campaign.confidence)],
-      ["Effort", score(campaign.effort)],
+      ["Impact", optionalScore(campaign.impact)],
+      ["Confidence", optionalScore(campaign.confidence)],
+      ["Effort", optionalScore(campaign.effort)],
     ] as const
   ).filter(([, v]) => v !== null);
 
@@ -49,6 +52,9 @@ export default function CampaignCard({
         <p className="mt-1.5 line-clamp-2 text-bodysm text-inksecondary">
           {focus}
         </p>
+      )}
+      {!focus && scores.length === 0 && !counts && (
+        <p className="mt-2.5 text-meta text-inkmuted">Draft details not set</p>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-inkmuted">
         {scores.map(([label, v]) => (

@@ -10,6 +10,12 @@ export function score(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** Campaign rows use zero as the database default for scores not yet supplied. */
+export function optionalScore(v: unknown): number | null {
+  const value = score(v);
+  return value === 0 ? null : value;
+}
+
 export function listOf(v: unknown): Record<string, unknown>[] {
   return Array.isArray(v)
     ? v.filter(

@@ -5,7 +5,12 @@ import EmptyState from "../components/chrome/EmptyState";
 import PageHeader from "../components/chrome/PageHeader";
 import StatusBadge from "../components/chrome/StatusBadge";
 import Tabs from "../components/chrome/Tabs";
-import { excerptOf, listOf, score, str } from "../components/workspace/format";
+import {
+  excerptOf,
+  listOf,
+  optionalScore,
+  str,
+} from "../components/workspace/format";
 
 /**
  * DEV-004 W5: campaign detail — header (title, status, goal) + six tabs.
@@ -110,8 +115,19 @@ export default function CampaignDetail() {
   }
 
   const title = str(campaign.title).trim() || "Untitled campaign";
-  const status = str(campaign.status).trim() || "unknown";
+  const rawStatus = str(campaign.status).trim() || "unknown";
+  const status = ["drafted", "proposed"].includes(rawStatus.toLowerCase())
+    ? "Draft"
+    : rawStatus;
   const goal = excerptOf(campaign, ["result", "measurement_window"], 240);
+  const campaignScores = [
+    ["impact", optionalScore(campaign.impact)],
+    ["confidence", optionalScore(campaign.confidence)],
+    ["effort", optionalScore(campaign.effort)],
+    ["cost", optionalScore(campaign.cost)],
+  ]
+    .filter(([, value]) => value !== null)
+    .map(([label, value]) => `${label} ${String(value)}`);
 
   return (
     <div>
@@ -128,22 +144,7 @@ export default function CampaignDetail() {
             <Field label="Approval level" value={str(campaign.approval_level)} />
             <Field
               label="Scores"
-              value={[
-                score(campaign.impact) !== null
-                  ? `impact ${String(campaign.impact)}`
-                  : "",
-                score(campaign.confidence) !== null
-                  ? `confidence ${String(campaign.confidence)}`
-                  : "",
-                score(campaign.effort) !== null
-                  ? `effort ${String(campaign.effort)}`
-                  : "",
-                score(campaign.cost) !== null
-                  ? `cost ${String(campaign.cost)}`
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+              value={campaignScores.length ? campaignScores.join(" · ") : "Not set"}
             />
             <Field
               label="Measurement window"
