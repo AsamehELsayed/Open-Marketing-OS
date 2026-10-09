@@ -26,6 +26,7 @@ const Knowledge = lazy(() => import("./routes/Knowledge"));
 const Settings = lazy(() => import("./routes/Settings"));
 const StartHere = lazy(() => import("./routes/StartHere"));
 const CreateBusiness = lazy(() => import("./routes/CreateBusiness"));
+const Workspace = lazy(() => import("./routes/Workspace"));
 
 // DEV-004 W4: ActivityPanel owns the AppShell right slot (per W2 handoff).
 // Location-aware (reads /app/chat/:id itself) so no ChatThread wiring needed.
@@ -64,6 +65,7 @@ function KeyedRoutes() {
       <Route path="/app" element={<ChatHome />} />
       <Route path="/app/start" element={<StartHere />} />
       <Route path="/app/business/new" element={<CreateBusiness />} />
+      <Route path="/app/workspace" element={<Workspace />} />
       <Route path="/app/chat/new" element={<NewChat />} />
       <Route path="/app/chat/:id" element={<Chat />} />
       <Route path="/app/campaigns" element={<Campaigns />} />

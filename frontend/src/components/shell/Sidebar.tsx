@@ -4,6 +4,7 @@ import ChatList from "./ChatList";
 import ProjectSwitcher from "./ProjectSwitcher";
 
 const PRIMARY: { to: string; label: string; icon: string; end?: boolean }[] = [
+  { to: "/app/workspace", label: "Client workspace", icon: "▦" },
   { to: "/app", label: "Account Manager", icon: "💬", end: true },
   { to: "/app/campaigns", label: "Campaigns", icon: "🚀" },
   { to: "/app/approvals", label: "Approvals", icon: "✅" },

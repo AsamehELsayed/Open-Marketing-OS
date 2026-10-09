@@ -145,6 +145,8 @@ def test_every_project_id_column_default_is_generic(tmp_path: Path):
     NO_DEFAULT_PROJECT_ID_TABLES = frozenset({
         "mcp_tools_allowlist", "tool_runs", "project_files",
         "turn_attachment_selections", "turn_file_bindings",
+        # Client profiles must always name their owning project explicitly.
+        "business_profiles",
     })
     conn = connect(tmp_path / "synthetic_gate_tmp.db")
     try:

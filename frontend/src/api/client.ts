@@ -20,6 +20,19 @@ export interface ApiEnvelope<T> {
   data: T;
 }
 
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly provider?: string,
+    readonly model?: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 export interface SpaProject {
   id: string;
   name: string;
@@ -181,6 +194,45 @@ export interface CreateBusinessResult {
   starting_points: Array<{ title: string; prompt: string }>;
 }
 
+export interface BusinessProfile {
+  project_id: string;
+  business_name: string;
+  website: string;
+  industry: string;
+  description: string;
+  audience: string;
+  location: string;
+  offer: string;
+  differentiators: string;
+  profile_revision: number;
+  brief_md: string;
+  brief_revision: number;
+  sources_json: string;
+  generation_json: string;
+}
+
+export interface BusinessBrief {
+  project_id: string;
+  brief_md: string;
+  brief_revision: number;
+  profile_revision?: number;
+  sources_json: string;
+  generation_json: string;
+}
+
+export interface CreateProjectBody {
+  business_name: string;
+  website?: string;
+  industry?: string;
+  description?: string;
+  audience?: string;
+  location?: string;
+  offer?: string;
+  differentiators?: string;
+}
+
+export type CreateProjectResult = BusinessProfile;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -193,13 +245,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let detail = "";
+    let provider: string | undefined;
+    let model: string | undefined;
+    let code: string | undefined;
     try {
       const body = (await res.clone().json()) as { detail?: unknown; error?: unknown; message?: unknown };
+      const detailObject = body.detail && typeof body.detail === "object"
+        ? body.detail as { message?: unknown; error?: unknown; code?: unknown; provider?: unknown; model?: unknown }
+        : null;
+      provider = typeof detailObject?.provider === "string" ? detailObject.provider : undefined;
+      model = typeof detailObject?.model === "string" ? detailObject.model : undefined;
+      code = typeof detailObject?.code === "string" ? detailObject.code : undefined;
       const nestedError = body.error && typeof body.error === "object"
         ? (body.error as { message?: unknown; code?: unknown })
         : null;
       detail = typeof body.detail === "string"
         ? body.detail
+        : typeof detailObject?.message === "string"
+          ? detailObject.message
+          : typeof detailObject?.error === "string"
+            ? detailObject.error
+            : typeof detailObject?.code === "string"
+              ? detailObject.code.replace(/_/g, " ")
         : typeof body.message === "string"
           ? body.message
           : typeof nestedError?.message === "string"
@@ -209,10 +276,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
               : typeof body.error === "string"
                 ? body.error
                 : "";
+      if (detailObject && typeof detailObject.error === "string") {
+        const route = [detailObject.provider, detailObject.model].filter((item): item is string => typeof item === "string" && Boolean(item)).join(" / ");
+        if (route) detail = `${detail} (${route})`;
+      }
     } catch {
       // Keep the status-based fallback when the server did not return JSON.
     }
-    throw new Error(detail || `Request failed (${res.status}). Please try again.`);
+    throw new ApiRequestError(detail || `Request failed (${res.status}). Please try again.`, res.status, provider, model, code);
   }
   const json = (await res.json()) as ApiEnvelope<T>;
   if (!json || json.ok !== true) {
@@ -615,6 +686,17 @@ export const api = {
       body: JSON.stringify({ version }),
     }),
   getProjects: () => request<SpaProject[]>("/api/projects"),
+  createProject: (body: CreateProjectBody) => request<CreateProjectResult>("/api/projects", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  getBusinessProfile: (id: string) => request<BusinessProfile>(`/api/projects/${encodeURIComponent(id)}/business-profile`),
+  saveBusinessProfile: (id: string, body: Partial<CreateProjectBody> & { expected_revision: number }) =>
+    request<BusinessProfile>(`/api/projects/${encodeURIComponent(id)}/business-profile`, { method: "PUT", body: JSON.stringify(body) }),
+  getBusinessBrief: (id: string) => request<BusinessBrief>(`/api/projects/${encodeURIComponent(id)}/business-brief`),
+  saveBusinessBrief: (id: string, body: { brief_md: string; expected_revision: number; sources?: unknown[] }) =>
+    request<BusinessBrief>(`/api/projects/${encodeURIComponent(id)}/business-brief`, { method: "PUT", body: JSON.stringify(body) }),
+  generateBusinessBrief: (id: string, body: { overwrite_confirmed: boolean }) =>
+    request<BusinessBrief>(`/api/projects/${encodeURIComponent(id)}/business-brief/generate`, { method: "POST", body: JSON.stringify(body) }),
   getChats: (params: { project_id?: string; q?: string; status?: string } = {}) => {
     const qs = new URLSearchParams();
     if (params.project_id) qs.set("project_id", params.project_id);

@@ -92,6 +92,18 @@ class IndexingService:
             raise ValueError("project_id is required for workspace indexing")
 
     def _iter_files(self):
+        # New client workspaces are intentionally isolated from shared root
+        # company/knowledge files. Their searchable material comes from the
+        # project_files upload path, indexed separately by knowledge_index.
+        project = self.conn.execute("SELECT settings_json FROM projects WHERE id=?",
+                                    (self.project_id,)).fetchone()
+        if project:
+            try:
+                import json
+                if json.loads(project["settings_json"] or "{}").get("isolated_client_workspace") is True:
+                    return
+            except (ValueError, TypeError):
+                pass
         for entry in DEFAULT_ROOTS:
             path = self.root / entry
             if path.is_file():

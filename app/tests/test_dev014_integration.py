@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app import deps
 from app.database import repos
-from app.database.sqlite import connect, get_user_version
+from app.database.sqlite import SCHEMA_VERSION, connect, get_user_version
 from app.routes.files import router as files_router
 from app.services.rag.scoped_retrieval import retrieve_scoped
 from app.services.files import repo as files_repo
@@ -65,7 +65,7 @@ def test_v9_to_v10_migration_preserves_rows_and_is_idempotent(tmp_path):
     conn.close()
 
     migrated = connect(path)
-    assert get_user_version(migrated) == 12
+    assert get_user_version(migrated) == SCHEMA_VERSION
     row = migrated.execute("SELECT id,project_id,path,file_sha,status_tag,indexed_at,source_kind,source_ref FROM documents WHERE id='legacy-upload'").fetchone()
     assert tuple(row) == ("legacy-upload", "audit014-a", "project-files/audit014-a/file-9", "sha", "TXT", "when", "project_file", "file-9")
     first = tuple(migrated.execute("SELECT file_id,project_id,original_name,index_status,indexed FROM project_files").fetchone())
