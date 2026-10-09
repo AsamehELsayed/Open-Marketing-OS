@@ -23,7 +23,10 @@ DIST_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 INDEX_FILE = DIST_DIR / "index.html"
 ASSETS_DIR = DIST_DIR / "assets"
 FAVICON_FILE = DIST_DIR / "favicon.ico"
-SOURCE_FAVICON_FILE = Path(__file__).resolve().parents[2] / "frontend" / "public" / "favicon.ico"
+SOURCE_FAVICON_FILE = (
+    Path(__file__).resolve().parent.parent.parent
+    / "frontend" / "public" / "favicon.ico"
+)
 
 BUILD_INSTRUCTIONS = (
     "SPA bundle not built. From the repo root run:\n"

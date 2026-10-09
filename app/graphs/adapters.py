@@ -88,6 +88,15 @@ class ToolRegistryAdapter:
         except Exception:
             return []
 
+    def catalog(self) -> list[dict]:
+        if self._registry is None:
+            return []
+        try:
+            rows = self._registry.catalog()
+        except Exception:
+            return []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
     def execute(self, conn, *, project_id: str, root, name: str, args: dict,
                 execution_context: dict | None = None) -> dict:
         try:

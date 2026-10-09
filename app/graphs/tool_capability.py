@@ -18,6 +18,7 @@ from __future__ import annotations
 import time as _time
 import urllib.parse
 import uuid
+import json
 from datetime import datetime, timezone
 
 # ------------------------------------------------------------------ synthesis
@@ -65,13 +66,18 @@ def _safe_failure_note(provider: str, error_code: str) -> str:
     code = str(error_code or "").strip().upper()
     if code == "AUTH_ERROR":
         detail = (
-            f"{label} needs a valid connection. Check the Instagram connection "
-            "in Settings and try again."
+            f"The Instagram integration returned an authorization error. Reconnect it "
+            "under Settings → Integrations, then try again."
         )
-    elif code in ("CONFIG_ERROR", "PROVIDER_NOT_FOUND"):
+    elif code == "CONFIG_ERROR":
         detail = (
-            f"{label} could not complete the Instagram request. Check the "
-            "connection settings or use another provider."
+            "The Instagram integration is missing required configuration. Connect the "
+            "provider under Settings → Integrations."
+        )
+    elif code == "PROVIDER_NOT_FOUND":
+        detail = (
+            "No Instagram provider is available in this build. Other project tools, "
+            "including website audits and project knowledge searches, remain available."
         )
     else:
         detail = (
@@ -89,10 +95,146 @@ def _safe_failure_detail(note: str) -> str:
             "auth_error", "unauthorized", "authentication failed",
             "traceback", "bearer ", "http://", "https://", "api.")):
         return (
-            "The Instagram connection needs attention. Check the connection "
-            f"in Settings and try again.\n\n{actions}"
+            "The Instagram connection needs attention. Reconnect it under "
+            f"Settings → Integrations and try again.\n\n{actions}"
         )
     return text
+
+
+def _execution_status(status: str) -> str:
+    value = str(status or "").strip().lower()
+    if value in ("success", "completed", "complete"):
+        return "Completed"
+    if value in ("needs_url", "needs_handle", "needs_input", "not_configured",
+                 "needs_approval", "blocked", "blocked_by_user_constraint"):
+        return "Blocked"
+    return "Failed"
+
+
+def _with_execution_summary(tool_name: str, status: str, answer: str) -> str:
+    return (f"Tool execution: {tool_name} — {_execution_status(status)}\n\n"
+            f"{str(answer or '').strip()}").strip()
+
+
+def _registered_result_text(result: dict) -> str:
+    """Render a bounded, secret-scrubbed registered-tool result."""
+    from app.contracts.events import sanitize_metadata
+
+    safe = sanitize_metadata(result)
+    if not isinstance(safe, dict):
+        return "The tool returned no displayable result."
+    for key in ("ok", "status", "provider", "tool_run_id", "latency_ms"):
+        safe.pop(key, None)
+    if not safe:
+        return "The tool completed without additional details."
+    try:
+        return json.dumps(safe, ensure_ascii=False, sort_keys=True, default=str)[:6000]
+    except Exception:
+        return "The tool completed, but its result could not be displayed safely."
+
+
+def _registered_failure(tool_name: str, result: dict) -> tuple[str, str]:
+    """Map known gate/readiness failures to safe user guidance."""
+    status = str(result.get("status") or "failed").lower()
+    if status in ("needs_approval", "approval_required"):
+        return "blocked", (f"{tool_name} requires explicit approval before it can run. "
+                             "No action was taken.")
+    if status in ("not_configured", "missing_integration", "invalid_credentials"):
+        integration = str(result.get("integration") or tool_name).replace("_", " ")
+        condition = ("has an invalid or expired connection" if status == "invalid_credentials"
+                     else "is not configured")
+        return "blocked", (
+            f"To run this tool, connect the {integration} integration under "
+            f"Settings → Integrations; it {condition}. Other project tools that do not "
+            "use this connection, including saved campaign reads and public-page checks, "
+            "remain available.")
+    if status in ("blocked", "blocked_by_user_constraint"):
+        return "blocked", str(result.get("error") or "This request is blocked by your instructions.")
+    return "failed", str(result.get("error") or "The selected service is unavailable right now.")
+
+
+def _execute_registered_read_tool(conn, *, project_id: str, tool_name: str,
+                                  args: dict, on_event=None, registry=None) -> dict:
+    """Execute a catalog-selected read tool after readiness and safety checks."""
+    from app.graphs.adapters import ToolRegistryAdapter
+    from app.contracts.events import safe_error_message
+
+    adapter = ToolRegistryAdapter(registry)
+    record = next((item for item in adapter.catalog()
+                   if item.get("name") == tool_name), None)
+    _emit_event(on_event, "tool_started", {
+        "tool": tool_name, "tool_id": tool_name,
+        "status": "RUNNING", "args": {},
+    })
+    if record is None:
+        result = {"ok": False, "status": "blocked",
+                  "error": "The selected tool is no longer registered."}
+        status, detail = _registered_failure(tool_name, result)
+    elif not record.get("enabled") or not record.get("handler_available"):
+        result = {"ok": False, "status": "blocked",
+                  "error": "The selected tool is currently unavailable."}
+        status, detail = _registered_failure(tool_name, result)
+    elif record.get("side_effect") != "read":
+        result = {"ok": False, "status": "blocked",
+                  "error": "Automatic execution is limited to read-only tools."}
+        status, detail = _registered_failure(tool_name, result)
+    elif record.get("permission_level") in ("yellow", "red"):
+        result = {"ok": False, "status": "needs_approval"}
+        status, detail = _registered_failure(tool_name, result)
+    elif record.get("auth_required"):
+        try:
+            from app.services.integrations.registry import (
+                IntegrationNotFound, resolve_integration,
+            )
+            integration = resolve_integration(tool_name, project_id, conn=conn)
+            if integration.status != "connected":
+                result = {"ok": False,
+                          "status": ("invalid_credentials" if integration.status == "error"
+                                     else "not_configured"),
+                          "integration": tool_name}
+                status, detail = _registered_failure(tool_name, result)
+            else:
+                result = adapter.execute(conn, project_id=project_id, root="",
+                                         name=tool_name, args=args or {})
+                status = "success" if result.get("ok") else "failed"
+                detail = _registered_result_text(result) if result.get("ok") else \
+                    _registered_failure(tool_name, result)[1]
+        except IntegrationNotFound:
+            result = {"ok": False, "status": "not_configured", "integration": tool_name}
+            status, detail = _registered_failure(tool_name, result)
+        except Exception:
+            result = {"ok": False, "status": "failed"}
+            status, detail = _registered_failure(tool_name, result)
+    else:
+        result = adapter.execute(conn, project_id=project_id, root="",
+                                 name=tool_name, args=args or {})
+        status = "success" if result.get("ok") else "failed"
+        detail = (_registered_result_text(result) if result.get("ok") else
+                  _registered_failure(tool_name, result)[1])
+
+    if not result.get("ok"):
+        result["error"] = safe_error_message(
+            result.get("error") or detail,
+            "The selected tool could not be completed.", force_generic=True,
+        ) if status == "failed" else detail
+    event_type = "tool_completed" if result.get("ok") else "tool_failed"
+    _emit_event(on_event, event_type, {
+        "tool": tool_name, "tool_id": tool_name,
+        "status": status.upper(), "ok": bool(result.get("ok")),
+        "error": str(result.get("error") or "")[:300],
+        "tool_run_id": str(result.get("tool_run_id") or ""),
+        "obs": result if result.get("ok") else {},
+    })
+    answer = (f"{detail}" if not result.get("ok") else
+              _registered_result_text(result))
+    return {
+        "answer": _with_execution_summary(tool_name, status, answer),
+        "tool_run_id": str(result.get("tool_run_id") or ""),
+        "provider": str(result.get("provider") or ""),
+        "status": status,
+        "capability": tool_name,
+        "tool": tool_name,
+    }
 
 
 def _fmt_num(v) -> str:
@@ -271,6 +413,11 @@ def resolve_and_execute(conn, *, project_id: str, capability: str,
             conn, project_id=project_id, capability=capability,
             args=args, turn_id=turn_id, on_event=on_event)
 
+    if capability not in ("instagram_public_profile", "instagram_owned_insights"):
+        return _execute_registered_read_tool(
+            conn, project_id=project_id, tool_name=capability,
+            args=args or {}, on_event=on_event)
+
     from app.services.social.instagram.base import normalize_handle
 
     handle = normalize_handle(str((args or {}).get("handle", "") or "")).lstrip("@")
@@ -280,7 +427,9 @@ def resolve_and_execute(conn, *, project_id: str, capability: str,
         from app.services.tools.instagram_tools import _handle_from_project
         handle, owned = _handle_from_project(conn, project_id)
     if not handle:
-        return {"answer": _NEEDS_HANDLE, "route_note": "NEEDS_HANDLE",
+        return {"answer": _with_execution_summary(
+                    "instagram_audit", "needs_handle", _NEEDS_HANDLE),
+                "route_note": "NEEDS_HANDLE",
                 "tool_run_id": "", "provider": "", "status": "needs_handle"}
 
     _emit_event(on_event, "tool_started", {
@@ -319,13 +468,25 @@ def resolve_and_execute(conn, *, project_id: str, capability: str,
     provider = ok_attempt.get("provider", "") if ok_attempt else \
         ((audit.get("primary_failure") or {}).get("provider", "") or
          (attempts[0].get("provider", "") if attempts else ""))
-    run_status = "success" if succeeded else "failed"
+    run_status = ("success" if succeeded else
+                  "blocked" if not audit.get("has_configured_provider") else
+                  "failed")
     tool_run_id = persist_tool_run(
         conn, project_id=project_id, tool_id=capability, provider=provider,
         status=run_status, latency_ms=latency_ms)
-    _emit_event(on_event, "tool_completed", {
+    failure_detail = ""
+    if not succeeded and not audit.get("has_configured_provider"):
+        failure_detail = (
+            "No Instagram provider is connected, so this audit did not run. "
+            "Connect an Instagram provider under Settings → Integrations. "
+            "The connection is required to read Instagram profiles; website audits "
+            "and project knowledge searches remain available.")
+    _emit_event(on_event, "tool_completed" if succeeded else "tool_failed", {
         "tool": "instagram_audit",
         "tool_run_id": tool_run_id,
+        "status": run_status.upper(),
+        "ok": succeeded,
+        "error": failure_detail,
         "obs": {
             "ok": succeeded,
             "audit": audit,
@@ -344,12 +505,15 @@ def resolve_and_execute(conn, *, project_id: str, capability: str,
                 str(primary.get("provider") or ""),
                 str(primary.get("error_code") or ""))
         else:
-            note = ("No Instagram provider is connected yet.\n\n"
-                    "[Configure in Settings]")
+            note = ("No Instagram provider is connected, so this audit did not run. "
+                    "Connect an Instagram provider under Settings → Integrations. "
+                    "The connection is required to read Instagram profiles; "
+                    "website audits and project knowledge searches remain available.")
         answer = synthesize_failure(handle, note)
         social_rows = []
 
-    return {"answer": answer, "tool_run_id": tool_run_id, "provider": provider,
+    return {"answer": _with_execution_summary("instagram_audit", run_status, answer),
+            "tool_run_id": tool_run_id, "provider": provider,
             "status": run_status, "capability": capability,
             "handle": handle, "social_results": social_rows}
 
@@ -371,7 +535,8 @@ def _resolve_and_execute_website(conn, *, project_id: str, capability: str,
     else:
         url = _website_project_url(conn, project_id)
     if not url:
-        return {"answer": _NEEDS_URL, "route_note": "NEEDS_URL",
+        return {"answer": _with_execution_summary(capability, "needs_url", _NEEDS_URL),
+                "route_note": "NEEDS_URL",
                 "tool_run_id": "", "provider": "", "status": "needs_url",
                 "capability": capability, "url": "", "social_results": []}
 
@@ -430,7 +595,11 @@ def _resolve_and_execute_website(conn, *, project_id: str, capability: str,
         else:
             answer = synthesize_website_fetch(url, result)
 
-    return {"answer": answer, "tool_run_id": tool_run_id,
+    if not succeeded:
+        answer += ("\n\nThe public website fetch was unavailable or blocked; this operation "
+                   "does not require an API key. No findings were inferred from memory.")
+    return {"answer": _with_execution_summary(capability, run_status, answer),
+            "tool_run_id": tool_run_id,
             "provider": "website_fetcher" if succeeded else "",
             "status": run_status, "capability": capability, "url": url,
             "social_results": []}

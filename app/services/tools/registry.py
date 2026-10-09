@@ -559,6 +559,32 @@ class Registry:
                  "parameters": rec.parameters, "side_effect": rec.permission_level}
                 for rec in self._advertised()]
 
+    def catalog(self) -> list[dict]:
+        """Return executable capability metadata for application-side routing.
+
+        ``specs()`` is the frozen legacy model-facing shape.  The Account
+        Manager also needs the actual safety and availability fields when it
+        selects a tool without relying on provider-native function calling.
+        This catalog contains no handlers, credentials, or secret values.
+        """
+        return [
+            {
+                "name": tool_id,
+                "description": rec.description,
+                "parameters": rec.parameters,
+                "side_effect": rec.side_effect,
+                "permission_level": rec.permission_level,
+                "auth_required": rec.auth_required,
+                "credential_scope": rec.credential_scope,
+                "cost_type": rec.cost_type,
+                "source_type": rec.source_type,
+                "enabled": rec.enabled,
+                "handler_available": self._handlers.get(tool_id) is not None,
+            }
+            for tool_id in self._order
+            if (rec := self._records.get(tool_id)) is not None
+        ]
+
     def names(self) -> list[str]:
         return sorted(rec.tool_id for rec in self._advertised())
 
