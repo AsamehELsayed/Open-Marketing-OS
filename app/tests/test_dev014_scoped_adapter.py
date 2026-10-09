@@ -50,18 +50,22 @@ def _retrieval_db():
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE documents (id TEXT PRIMARY KEY, path TEXT UNIQUE, project_id TEXT,
-            file_sha TEXT, status_tag TEXT);
+            file_sha TEXT, status_tag TEXT,
+            source_kind TEXT NOT NULL DEFAULT 'legacy_unknown',
+            source_ref TEXT NOT NULL DEFAULT '');
         CREATE TABLE chunks (document_id TEXT, chunk_id TEXT, header TEXT, text TEXT);
         CREATE VIRTUAL TABLE chunks_fts USING fts5(path, header, text);
     """)
     # More than top-k foreign-project distractors contain the same phrase.
     for n in range(12):
         pid, path = "audit014-b", f"b/{n}.txt"
-        conn.execute("INSERT INTO documents VALUES(?,?,?,?,?)", (f"b{n}", path, pid, "bsha", "BODY"))
+        conn.execute("INSERT INTO documents(id,path,project_id,file_sha,status_tag) VALUES(?,?,?,?,?)",
+                     (f"b{n}", path, pid, "bsha", "BODY"))
         conn.execute("INSERT INTO chunks VALUES(?,?,?,?)", (f"b{n}", f"b{n}", "body", "ORANGE ELEPHANT distractor"))
         conn.execute("INSERT INTO chunks_fts VALUES(?,?,?)", (path, "body", "ORANGE ELEPHANT distractor"))
     path = "a/target.txt"
-    conn.execute("INSERT INTO documents VALUES(?,?,?,?,?)", ("a1", path, "audit014-a", "asha", "BODY"))
+    conn.execute("INSERT INTO documents(id,path,project_id,file_sha,status_tag) VALUES(?,?,?,?,?)",
+                 ("a1", path, "audit014-a", "asha", "BODY"))
     conn.execute("INSERT INTO chunks VALUES(?,?,?,?)", ("a1", "a1", "body", "ORANGE ELEPHANT selected project"))
     conn.execute("INSERT INTO chunks_fts VALUES(?,?,?)", (path, "body", "ORANGE ELEPHANT selected project"))
     conn.commit()
