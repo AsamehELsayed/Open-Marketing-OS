@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+if not (ROOT / "scripts" / "runtime_identity.py").is_file():
+    pytest.skip(
+        "requires the DEV-024 runtime identity script, which the public export omits",
+        allow_module_level=True,
+    )
 SPEC = importlib.util.spec_from_file_location("runtime_identity", ROOT / "scripts" / "runtime_identity.py")
 runtime_identity = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
