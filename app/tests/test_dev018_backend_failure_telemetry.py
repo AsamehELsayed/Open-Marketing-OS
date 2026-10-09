@@ -117,10 +117,12 @@ def test_knowledge_graph_passes_exact_retrieval_counts_to_completion(tmp_path, m
     conn = connect(tmp_path / "retrieval-counts.db")
     monkeypatch.setattr(RetrievalAdapter, "retrieve", lambda *_: SimpleNamespace(
         mode="HYBRID", search_mode="HYBRID", lexical_hits=4, vector_hits=3,
-        fused_hits=5, hits=[SimpleNamespace(
-            path="project-files/file-a", chunk_id="c000", text="test evidence",
-            score=0.9, sources=["fts", "semantic"], project_id="dev018-synthetic",
-            file_id="file-a")]))
+        fused_hits=5, hits=[{
+            "path": "project-files/file-a", "chunk_id": "c000",
+            "text": "test evidence", "score": 0.9,
+            "sources": ["fts", "semantic"], "project_id": "dev018-synthetic",
+            "file_id": "file-a",
+        }]))
     contexts = []
     graph = build_account_manager_graph(
         known_projects={"dev018-synthetic"}, conn_factory=lambda: conn,
@@ -130,10 +132,11 @@ def test_knowledge_graph_passes_exact_retrieval_counts_to_completion(tmp_path, m
         turn_id="dev018-turn", user_request="What is in the project evidence?"),
         config={"configurable": {"thread_id": "dev018-thread"}})
     telemetry = result["retrieval_telemetry"]
-    assert telemetry["mode"] == "HYBRID"
+    assert telemetry["retrieval_mode"] == "HYBRID"
     assert (telemetry["lexical_hits"], telemetry["vector_hits"],
             telemetry["fused_hits"]) == (4, 3, 5)
-    assert telemetry["selected_chunks"] == [{"chunk_id": "c000", "file_id": "file-a"}]
+    assert telemetry["selected_chunk_ids"] == ["c000"]
+    assert telemetry["source_file_ids"] == ["file-a"]
     assert contexts[0]["retrieval_telemetry"] == telemetry
     assert result["final_answer"] == "fake answer"
     conn.close()

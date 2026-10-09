@@ -120,47 +120,26 @@ def test_license_audit_still_records_the_adapter_as_nonexistent():
 # 2. Local AI must be labelled unavailable, not implied available
 # --------------------------------------------------------------------------
 
-def test_readme_labels_quick_available_now_and_local_a_future_beta():
-    readme = _read("README.md")
-    assert "OMOS Quick" in readme
-    quick_at = readme.index("OMOS Quick")
-    local_at = readme.index("OMOS Local")
-    assert quick_at < local_at, "Quick must be presented first; it is what ships"
-
-    quick_block = readme[quick_at:local_at].lower()
-    assert "available now" in quick_block, (
-        "the shipping edition must say plainly that it is available now"
-    )
-    # The cloud providers the beta actually uses must be named up front.
-    for provider in ("openrouter", "openai"):
-        assert provider in quick_block, f"{provider} missing from the Quick section"
-
-    local_block = readme[local_at:local_at + 1200].lower()
-    assert "future beta" in local_block or "not part of this beta" in local_block
-    assert "openrouter" in local_block or "openai" in local_block, (
-        "the Local section should say what the beta uses instead"
-    )
-
-
-def test_readme_does_not_promise_a_local_model_or_weights():
+def test_readme_labels_the_local_and_openrouter_editions():
     readme = _read("README.md").lower()
-    for promise in (
-        "run entirely on your machine with no api key",
-        "no api key at all, available now",
-        "download the model",
-        "includes the model",
-        "bundled model",
-    ):
-        assert promise not in readme, f"README promises {promise!r}"
+    assert "**omos local**" in readme and "**omos openrouter**" in readme
+    assert "no provider key is needed" in readme
+    assert "prompts and selected evidence go to openrouter" in readme
+    assert "the model is not included in the installer" in readme
 
 
-def test_changelog_states_cloud_only_and_is_honest_about_signing():
+def test_readme_says_local_model_weights_are_user_downloaded_and_not_bundled():
+    readme = _read("README.md").lower()
+    assert "the model is not included in the installer" in readme
+    assert "explicitly select **download model**" in readme
+    assert "starting the runtime does not download the model" in readme
+
+
+def test_changelog_describes_both_editions_and_is_honest_about_signing():
     changelog = _read("CHANGELOG.md").lower()
-    assert "no local-model edition in this beta" in changelog
-    assert "unknown" in changelog and "publisher" in changelog, (
-        "the changelog must state the installer is unsigned so SmartScreen's "
-        "'Unknown publisher' warning is expected rather than alarming"
-    )
+    assert "two windows editions: omos local and omos openrouter" in changelog
+    assert "model weights are not bundled" in changelog
+    assert "the beta installers are not code-signed" in changelog
     # And it must not tell users to weaken their machine.
     for harmful in (
         "disable windows defender",
@@ -181,13 +160,12 @@ def test_architecture_doc_does_not_present_local_as_an_edition():
 # 3. The Settings UI must not offer a control that cannot work
 # --------------------------------------------------------------------------
 
-def test_settings_ui_marks_local_ai_as_a_later_beta():
+def test_settings_ui_exposes_explicit_local_model_setup():
     settings = _read("frontend/src/routes/Settings.tsx")
-    assert "Coming in a later beta" in settings, (
-        "the Local Intelligence section must be visibly labelled as not available "
-        "in this beta"
-    )
-    assert "not available in this beta" in settings
+    setup = _read("frontend/src/components/settings/LocalModelSetup.tsx")
+    assert '{ id: "local", label: "Local Model"' in settings
+    assert 'choose Download Model' in setup
+    assert "Starting the runtime never downloads a model." in setup
 
 
 def test_settings_ui_does_not_promise_local_execution():

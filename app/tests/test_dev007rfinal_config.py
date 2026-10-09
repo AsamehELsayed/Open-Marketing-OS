@@ -71,6 +71,7 @@ ENV_ALLOWLIST = {
         "OPENAI_SERVER_WEBSEARCH", "OPENROUTER_CATALOG_TTL_S",
         "OPENAI_MAX_TOOL_ITERS", "OPENAI_TURN_TIMEOUT_S",
         "OPENAI_PER_CALL_TIMEOUT_S", "OPENAI_MAX_CONTEXT_TOKENS",
+        "OMOS_MODEL_CACHE",
         "VISION_LOCAL_WEIGHTS", "IG_BROWSER_PROFILE", "META_IG_API_VERSION",
         "APIFY_IG_PROFILE_ACTOR", "APIFY_IG_POST_ACTOR",
     }),
@@ -108,6 +109,8 @@ DYNAMIC_ENV_ALLOWLIST = {
     "app/services/vision/local_provider.py": "ADVANCED_SELF_HOST",
     "app/services/llm/local_config.py": "ADVANCED_SELF_HOST",
     "app/services/llm/config.py": "ADVANCED_SELF_HOST",
+    "app/services/llm/local_runtime_manager.py": "ADVANCED_SELF_HOST",
+    "app/services/rag/embeddings.py": "ADVANCED_SELF_HOST",
     # DEV-007R-HOTFIX-3: dev-only RAG debug trace env reads (graphs layer).
     "app/graphs/account_manager_graph.py": "CI_TEST",
     # DEV-008: OMOS_SKILLS_DIR is a library-location override, not a product
@@ -526,7 +529,10 @@ def test_openrouter_streaming_preserves_order_and_vault_identity(isolated_client
         assert openrouter_provider.get_key() == token
         return fake_client
 
-    monkeypatch.setattr(openrouter_provider.OpenRouterProvider, "_open_client", lambda self, timeout: open_client(timeout))
+    monkeypatch.setattr(
+        openrouter_provider.OpenRouterProvider, "_open_client",
+        lambda self, timeout, **kwargs: open_client(timeout),
+    )
     response = openrouter_provider.OpenRouterProvider(model="fake/model").complete_streaming(
         system="system",
         messages=[{"role": "user", "content": "hello"}],

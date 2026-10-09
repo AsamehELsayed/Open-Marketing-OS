@@ -59,7 +59,8 @@ def _fts_query(conn: sqlite3.Connection, query: str, k: int, project_id: str | N
     hits = []
     for i, r in enumerate(rows):
         chunk = conn.execute(
-            "SELECT c.chunk_id, c.text, d.file_sha, d.status_tag, d.project_id FROM chunks c"
+            "SELECT c.chunk_id, c.text, d.file_sha, d.status_tag, d.project_id,"
+            " d.source_kind, d.source_ref FROM chunks c"
             " JOIN documents d ON d.id = c.document_id"
             " WHERE d.path = ? AND c.header = ? LIMIT 1",
             (r["path"], r["header"]),
@@ -70,8 +71,12 @@ def _fts_query(conn: sqlite3.Connection, query: str, k: int, project_id: str | N
                     continue
             except Exception:
                 pass
+        logical_path = r["path"]
+        public_path = (chunk["source_ref"] if chunk and chunk["source_kind"] == "workspace"
+                       else logical_path)
         hits.append({
-            "path": r["path"], "header": r["header"], "snippet": r["snippet"],
+            "path": public_path, "_logical_path": logical_path,
+            "header": r["header"], "snippet": r["snippet"],
             "rank": i,
             "chunk_id": chunk["chunk_id"] if chunk else "?",
             "text": chunk["text"] if chunk else "",
@@ -86,22 +91,35 @@ def _semantic_query(conn: sqlite3.Connection, store, provider, query: str, k: in
                     project_id: str | None = None) -> list[dict]:
     if store is None or store.mode != "HYBRID":
         return []
+    if not project_id:
+        # Chroma requires the project filter before top-k, so never query it
+        # without an explicit scope.
+        return []
     vector = provider.embed(query)
     hits = []
-    for i, (key, meta, _dist) in enumerate(store.query(vector, k)):
+    for i, (key, meta, _dist) in enumerate(
+        store.query(vector, k, where={"project_id": project_id})
+    ):
         if project_id is not None and (meta or {}).get("project_id"):
             if (meta or {}).get("project_id") != project_id:
                 continue
-        path = (meta or {}).get("path", "")
+        logical_path = (meta or {}).get("path", "")
         chunk_id = (meta or {}).get("chunk_id", key.split(":")[-1])
         chunk = conn.execute(
             "SELECT c.header, c.text, d.file_sha, d.status_tag FROM chunks c"
             " JOIN documents d ON d.id = c.document_id"
             " WHERE d.path = ? AND c.chunk_id = ? LIMIT 1",
-            (path, chunk_id),
+            (logical_path, chunk_id),
         ).fetchone()
+        source = conn.execute(
+            "SELECT source_kind,source_ref FROM documents WHERE path=? AND project_id=? LIMIT 1",
+            (logical_path, project_id or (meta or {}).get("project_id", "")),
+        ).fetchone()
+        public_path = (source["source_ref"] if source and source["source_kind"] == "workspace"
+                       else logical_path)
         hits.append({
-            "path": path, "header": chunk["header"] if chunk else "",
+            "path": public_path, "_logical_path": logical_path,
+            "header": chunk["header"] if chunk else "",
             "snippet": (chunk["text"][:200] if chunk else "") + "...",
             "rank": i, "chunk_id": chunk_id,
             "text": chunk["text"] if chunk else "",
@@ -119,8 +137,9 @@ def retrieve(conn: sqlite3.Connection, query: str, store=None, provider=None,
     sem_hits = _semantic_query(conn, store, provider, query, k_sem, project_id) if provider else []
     fused: dict[tuple[str, str], dict] = {}
     for h in fts_hits + sem_hits:
-        key = (h["path"], h["chunk_id"])
-        score = 1.0 / (RRF_K + h["rank"]) + hierarchy_boost(h["path"])
+        logical_path = h.get("_logical_path") or h["path"]
+        key = (logical_path, h["chunk_id"])
+        score = 1.0 / (RRF_K + h["rank"]) + hierarchy_boost(logical_path)
         if key in fused:
             fused[key]["score"] += score
             fused[key]["sources"] = sorted(set(fused[key]["sources"]) | {h["source"]})
@@ -129,4 +148,6 @@ def retrieve(conn: sqlite3.Connection, query: str, store=None, provider=None,
             h["sources"] = [h["source"]]
             fused[key] = h
     hits = sorted(fused.values(), key=lambda h: -h["score"])
+    for hit in hits:
+        hit.pop("_logical_path", None)
     return {"hits": hits, "mode": store.mode if store else "FTS_ONLY"}

@@ -37,7 +37,7 @@ def _fts_scoped_query(conn: sqlite3.Connection, query: str, k: int,
     if not safe:
         return []
     sql = (
-        "SELECT f.path AS path, f.header AS header, f.text AS text,"
+        "SELECT f.path AS logical_path, f.header AS header, f.text AS text,"
         " snippet(chunks_fts, 0, '<b>', '</b>', '...', 12) AS snippet,"
         " bm25(chunks_fts) AS rank FROM chunks_fts AS f"
         " JOIN documents d ON d.path = f.path"
@@ -50,20 +50,24 @@ def _fts_scoped_query(conn: sqlite3.Connection, query: str, k: int,
     hits = []
     for i, r in enumerate(rows):
         chunk = conn.execute(
-            "SELECT d.id AS document_id,c.chunk_id, c.text, d.file_sha, d.status_tag, d.project_id FROM chunks c"
+            "SELECT d.id AS document_id,c.chunk_id,c.text,d.file_sha,d.status_tag,"
+            "d.project_id,d.source_kind,d.source_ref FROM chunks c"
             " JOIN documents d ON d.id = c.document_id"
             " WHERE d.path = ? AND c.header = ? AND c.text = ? AND d.project_id = ? LIMIT 1",
-            (r["path"], r["header"], r["text"], project_id),
+            (r["logical_path"], r["header"], r["text"], project_id),
         ).fetchone()
         if chunk is None:
             continue  # orphan FTS row: fail closed, never surface unscopable evidence
+        public_path = (chunk["source_ref"] if chunk["source_kind"] == "workspace"
+                       else r["logical_path"])
         hits.append({
-            "path": r["path"], "header": r["header"], "snippet": r["snippet"],
+            "path": public_path, "header": r["header"], "snippet": r["snippet"],
             "rank": i, "chunk_id": chunk["chunk_id"], "text": chunk["text"],
             "file_sha": chunk["file_sha"], "status_tag": chunk["status_tag"],
             "project_id": project_id, "source": "fts",
             "document_id": chunk["document_id"],
-            "file_id": r["path"].rsplit("/", 1)[-1] if r["path"].startswith("project-files/") else "",
+            "file_id": (r["logical_path"].rsplit("/", 1)[-1]
+                        if r["logical_path"].startswith("project-files/") else ""),
         })
     return hits
 
@@ -84,21 +88,27 @@ def _semantic_scoped_query(conn: sqlite3.Connection, store, provider,
         meta = meta or {}
         if meta.get("project_id") != project_id:
             continue
-        path = meta.get("path", "")
+        logical_path = meta.get("path", "")
         chunk_id = meta.get("chunk_id", "")
-        if not path or not chunk_id:
+        if not logical_path or not chunk_id:
             continue
         chunk = conn.execute(
             "SELECT d.id AS document_id,c.header, c.text, d.file_sha, d.status_tag, d.project_id FROM chunks c"
             " JOIN documents d ON d.id = c.document_id"
             " WHERE d.path = ? AND c.chunk_id = ? AND d.project_id = ? LIMIT 1",
-            (path, chunk_id, project_id),
+            (logical_path, chunk_id, project_id),
         ).fetchone()
         if (chunk is None or chunk["project_id"] != project_id or meta.get("file_sha") != chunk["file_sha"]
                 or key != f"{chunk['document_id']}:{chunk_id}"):
             continue
+        source = conn.execute(
+            "SELECT source_kind,source_ref FROM documents WHERE path=? AND project_id=? LIMIT 1",
+            (logical_path, project_id),
+        ).fetchone()
+        public_path = (source["source_ref"] if source and source["source_kind"] == "workspace"
+                       else logical_path)
         hits.append({
-            "path": path, "header": chunk["header"] if chunk else "",
+            "path": public_path, "header": chunk["header"] if chunk else "",
             "snippet": (chunk["text"][:200] if chunk else "") + "...",
             "rank": i, "chunk_id": chunk_id,
             "text": chunk["text"] if chunk else "",
@@ -106,7 +116,8 @@ def _semantic_scoped_query(conn: sqlite3.Connection, store, provider,
             "status_tag": chunk["status_tag"] if chunk else meta.get("status_tag", "UNKNOWN"),
             "project_id": project_id, "source": "semantic",
             "document_id": chunk["document_id"],
-            "file_id": path.rsplit("/", 1)[-1] if path.startswith("project-files/") else "",
+            "file_id": (logical_path.rsplit("/", 1)[-1]
+                        if logical_path.startswith("project-files/") else ""),
         })
     return hits
 

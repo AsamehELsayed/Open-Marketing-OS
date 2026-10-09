@@ -463,11 +463,20 @@ def _retrieval_telemetry_from_result(result, selected_hits: list[dict],
         sources = hit.get("sources") or [hit.get("source", "")]
         return source in sources
 
+    def count(name: str, source: str) -> int:
+        value = getattr(result, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return sum(1 for hit in fused if contributes(hit, source))
+
+    fused_count = getattr(result, "fused_hits", None)
     telemetry = {
         "retrieval_mode": str(getattr(result, "mode", "") or ""),
-        "lexical_hits": sum(1 for hit in fused if contributes(hit, "fts")),
-        "vector_hits": sum(1 for hit in fused if contributes(hit, "semantic")),
-        "fused_hits": len(fused),
+        "lexical_hits": count("lexical_hits", "fts"),
+        "vector_hits": count("vector_hits", "semantic"),
+        "fused_hits": (fused_count if isinstance(fused_count, int)
+                       and not isinstance(fused_count, bool) and fused_count >= 0
+                       else len(fused)),
         "selected_chunk_ids": [str(hit.get("chunk_id", ""))
                                for hit in selected_hits if hit.get("chunk_id")],
     }

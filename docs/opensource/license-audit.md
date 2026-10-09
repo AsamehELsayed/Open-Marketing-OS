@@ -13,6 +13,8 @@
 | Frontend | `frontend/package-lock.json` contains 11 production entries, including React ecosystem, Marked and DOMPurify 3.4.15 `(MPL-2.0 OR Apache-2.0)`. The packaging stage copies exact package license files for the 11 production lock entries and records them in the manifest. | **SOURCE REMEDIATION IMPLEMENTED; installer verification pending.** |
 | htmx | Candidate includes `app/static/htmx.min.js` version 2.0.4. Upstream v2.0.4 license is 0BSD; exact text is in `LICENSES/htmx-0BSD.txt`, source URL in `THIRD-PARTY-NOTICES`. The staging step copies it into the install payload. | **SOURCE REMEDIATION IMPLEMENTED; installer verification pending.** |
 | Vendored skills | `.agents/skills/**` and `.agents/LICENSE` are included. Marketing Skills v2.11.1, commit `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`, is MIT; prior provenance evidence reports identity after line-ending normalization. | **PASS** subject to retaining `.agents/LICENSE`. Keep `.agents/product-marketing.md` excluded. |
+| Marketing Skills provenance | The library is `coreyhaines31/marketingskills` v2.11.1 at commit `5b2c0007766c6a1cf1d53fd8fc73e979e0821022`, with `Copyright (c) 2025 Corey Haines`. Its verbatim MIT grant is `.agents/LICENSE`; the generated manifest and lock record file checksums. `.agents/product-marketing.md` is OMOS-authored and not upstream. | **PASS** while the notice, manifest, lock and narrow export rule remain present. |
+| Historical marketing adapter claim | `OMOS-Qwen2.5-7B-Marketing-v1` does not exist and no trained adapter weights are included. The current Local edition uses the separately disclosed Qwen2.5-7B-Instruct base model, which the user downloads explicitly; no model weights are bundled. | **PASS** for the source candidate disclosure; no adapter or base-model weight redistribution is implied. |
 | Fonts and private creative | Cairo/Zain font binaries and private client imagery are absent from W1 candidate allowlist. | **PASS** as excluded; do not add without documented rights. |
 | Inno Setup | DEV-029 compiler output shows “Non-commercial use only.” Installed vendor license text permits commercial applications; the vendor commercial licensing page requests commercial users to purchase a commercial license; its FAQ says purchase is not strictly required and may wait until the installers are production-ready. Sources: `https://jrsoftware.org/isorder.php`, `https://jrsoftware.org/isinfo.php`. | **NEEDS-FOUNDER-CONFIRMATION / PRE-PRODUCTION.** No legal conclusion or production-confirmed claim. |
 
@@ -26,6 +28,7 @@
 - `scripts/package/notices/llama.cpp-LICENSE`: exact staged llama.cpp MIT notice bytes required by the packaging script.
 - `scripts/package/stage_license_payload.py` and `scripts/package/notices/python/`: stage all exact locked Python and production frontend license files, required project notices, and a path manifest in the frozen payload.
 - `runtime/licenses/llama.cpp/LICENSE` and `LICENSE-LLVM-OpenMP`: staged runtime notice copies for traceability.
+- `LICENSE:189` retains the unfilled Apache-2.0 copyright-owner template; project attribution is supplied in `NOTICE`.
 
 ## Release disposition
 

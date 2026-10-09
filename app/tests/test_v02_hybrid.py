@@ -175,7 +175,8 @@ def test_provider_error_attaches_snapshot(tmp_path):
 
 def test_schema_v3_job_contract_columns(tmp_path):
     conn = _db(tmp_path, "hy8.db")
-    assert get_user_version(conn) == 9
+    from app.database.sqlite import SCHEMA_VERSION
+    assert get_user_version(conn) == SCHEMA_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(background_jobs)").fetchall()}
     assert {"job_type", "brief_md", "created_at", "updated_at"} <= cols
     conn.close()

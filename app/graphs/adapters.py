@@ -151,8 +151,8 @@ class RetrievalAdapter:
         root = None
         if self._store is None or self._provider is None:
             try:
-                from app import deps
-                root = deps.ROOT
+                from app.paths import user_data_root
+                root = user_data_root()
                 from app.services.knowledge_index import retrieval_runtime
                 self._store, self._provider = retrieval_runtime(root, pid)
             except Exception:

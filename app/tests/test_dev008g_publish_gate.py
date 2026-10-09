@@ -131,19 +131,22 @@ def test_every_project_id_column_default_is_generic(tmp_path: Path):
 
     - ``credentials_refs`` / ``integrations`` are empty-scoped global registries
       (see above);
-    - ``mcp_tools_allowlist`` / ``tool_runs`` / ``project_files`` have **no**
+    - ``mcp_tools_allowlist`` / ``tool_runs`` / ``project_files`` /
+      ``turn_attachment_selections`` / ``turn_file_bindings`` have **no**
       default at all. Each is ``NOT NULL`` with a composite primary key and/or a
       foreign key to ``projects``: a tool grant, a tool run and a stored file must
       each name their project, and defaulting them would silently attribute work
-      to whichever project happened to be active. A missing default there is a
-      safety property, so this test pins the shape rather than demanding
-      uniformity.
+      to whichever project happened to be active. Attachment selections also
+      require explicit scope because they can carry user-selected content into a
+      turn. A missing default there is a safety property, so this test pins the
+      shape rather than demanding uniformity.
     """
     #: Tables where "no default" is the correct, safer design.
     NO_DEFAULT_PROJECT_ID_TABLES = frozenset({
         "mcp_tools_allowlist", "tool_runs", "project_files",
+        "turn_attachment_selections", "turn_file_bindings",
     })
-    conn = connect(tmp_path / "njm_gate_tmp.db")
+    conn = connect(tmp_path / "synthetic_gate_tmp.db")
     try:
         audited = 0
         starter_defaults = 0

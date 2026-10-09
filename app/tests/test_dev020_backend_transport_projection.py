@@ -140,10 +140,13 @@ def test_failure_telemetry_projects_through_existing_sse_event_type():
     assert wire["event"] == "synthesis_completed"
 
 
-def test_model_router_passes_call_and_turn_ids_to_adapter_observer(tmp_path):
+def test_model_router_passes_call_and_turn_ids_to_adapter_observer(tmp_path, monkeypatch):
     from app.database.sqlite import connect
     from app.services.llm.base import LLMResponse
+    from app.services.llm import model_router as model_router_module
     from app.services.llm.model_router import ModelRouter
+
+    monkeypatch.setattr(model_router_module, "openrouter_configured_default", lambda: True)
 
     class ObservedProvider:
         model = "stealth/space-bunny-alpha"

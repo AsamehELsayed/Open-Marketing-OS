@@ -279,7 +279,8 @@ def test_v02_approval_safety(tmp_path):
 # ---- 8. migration ----
 def test_v02_migration_backfill(tmp_path):
     conn = _db(tmp_path)
-    assert get_user_version(conn) == 9
+    from app.database.sqlite import SCHEMA_VERSION
+    assert get_user_version(conn) == SCHEMA_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(campaigns)").fetchall()}
     assert "project_id" in cols
     assert repos.Projects.get(conn, "starter") is not None
