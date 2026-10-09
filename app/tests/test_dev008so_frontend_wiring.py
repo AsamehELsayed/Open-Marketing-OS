@@ -323,15 +323,12 @@ def test_skills_tab_is_in_the_tabs_array():
 
 
 def test_deep_link_effect_is_unchanged_and_generic():
-    """The effect is reused, not forked; it reads TABS, so no per-tab branch."""
+    """The generic query-param effect resolves every id from the tab source."""
     source = read(SETTINGS_TSX)
-    effect = re.search(
-        r"const\s+sec\s*=\s*params\.get\(\"section\"\);(?P<body>.*?)\n\s*\},?\s*\[\]\);",
-        source,
-        re.S,
-    )
-    assert effect, "the ?section= deep-link effect was not found"
-    assert "TABS.some((t) => t.id === sec)" in effect.group("body")
+    assert 'new URLSearchParams(window.location.search)' in source
+    assert 'const sec = params.get("section");' in source
+    assert "if (sec && TABS.some((t) => t.id === sec))" in source
+    assert "setTab(sec as SectionTab)" in source
 
 
 def test_skills_section_body_renders_the_registry():
@@ -555,7 +552,9 @@ def test_lifecycle_rows_carry_meta():
 
 
 def test_settings_tab_bar_and_union_were_not_forked():
-    """Six extension points, not a second tab bar."""
+    """The edition-filtered tab bar remains derived from the single tab list."""
     source = read(SETTINGS_TSX)
-    assert source.count("{TABS.map(") == 1, "a second hand-rolled tab bar was added"
+    assert re.search(r"const\s+visibleTabs\s*=\s*editionKind\s*===", source)
+    assert "TABS.filter((item) => item.id !== \"local\")" in source
+    assert source.count("{visibleTabs.map(") == 1, "a second hand-rolled tab bar was added"
     assert len(re.findall(r"type\s+SectionTab\s*=", source)) == 1

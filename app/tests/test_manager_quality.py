@@ -172,13 +172,17 @@ def test_submit_guard_in_react_new_chat():
     assert "sending || sendLockRef.current" in chat
     assert "sendLockRef.current = true;" in chat
     assert "sendLockRef.current = false;" in chat
-    assert re.search(r"sendChatTurn\(convoId,\s*clean,\s*newClientId\(\)\)", chat)
+    assert "const clientId = pendingSendRef.current.clientId;" in chat
+    assert re.search(
+        r"sendChatTurn\(convoId,\s*clean,\s*clientId,\s*attachmentIds\)",
+        chat,
+    )
 
     # Composer availability and submit behavior both require explicit binding.
     assert "scopeKey={scopeKey}" in chat
     assert "canSubmit={Boolean(" in chat
     assert "conversationBinding.projectId === projectId" in chat
-    assert "if (!text || sending || !canSubmit) return;" in composer
+    assert "if (!text || sending || !canSubmit || uploadLockRef.current) return;" in composer
     assert "disabled={!canSend || !canSubmit}" in composer
 
 

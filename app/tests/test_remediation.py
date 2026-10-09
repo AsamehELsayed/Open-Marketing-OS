@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from app.database import repos
-from app.database.sqlite import connect, get_user_version
+from app.database.sqlite import SCHEMA_VERSION, connect, get_user_version
 from app.services.adapters import importer, parsers
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +13,7 @@ def test_r1_updated_at_columns_exist(tmp_path):
     for table in ("tasks", "approvals", "experiments"):
         cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         assert "updated_at" in cols, table
-    assert get_user_version(conn) == 9
+    assert get_user_version(conn) == SCHEMA_VERSION
     conn.close()
 
 
@@ -31,7 +31,7 @@ def test_r1_old_db_upgraded_in_place(tmp_path):
         cols = {r[1] for r in conn2.execute(f"PRAGMA table_info({table})").fetchall()}
         assert "updated_at" in cols, table
     assert repos.Campaigns.get(conn2, "opp-01")["title"] == "Keep me"
-    assert get_user_version(conn2) == 9
+    assert get_user_version(conn2) == SCHEMA_VERSION
     conn2.close()
 
 

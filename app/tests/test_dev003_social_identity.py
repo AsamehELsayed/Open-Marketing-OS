@@ -14,7 +14,7 @@ import pytest
 from app import deps
 from app.database import repos
 from app.database.seed import ensure_seed
-from app.database.sqlite import connect, get_user_version
+from app.database.sqlite import SCHEMA_VERSION, connect, get_user_version
 
 SECRET_KEYS = ("APIFY_API_TOKEN", "BRIGHTDATA_API_TOKEN", "BRIGHTDATA_IG_DATASET",
                "META_IG_ACCESS_TOKEN", "META_IG_ACCOUNT_ID", "IG_BROWSER_PROFILE")
@@ -34,7 +34,7 @@ def _clear_provider_env(monkeypatch):
 # ---- T1 migration fresh + v5->v6 (W1) ----
 def test_dev003_t1_migration_fresh_and_v5_to_v6(tmp_path):
     conn = _db(tmp_path, "t1.db")
-    assert get_user_version(conn) == 9
+    assert get_user_version(conn) == SCHEMA_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(social_accounts)").fetchall()}
     assert {"id", "project_id", "platform", "handle", "url", "status",
             "source", "evidence_url", "observed_at", "created_at", "updated_at"} <= cols

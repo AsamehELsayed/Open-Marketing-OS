@@ -58,7 +58,7 @@ def test_ordered_and_repeated_delta_fragments_are_preserved_and_reconciled():
 
 
 def test_split_byte_and_string_sse_chunks_preserve_mixed_arabic_english():
-    answer = "مرحباً — NJM: growth 42%"
+    answer = "مرحباً — Acme: growth 42%"
     blob = _event({"choices": [{"delta": {"content": answer}}]}) + b"data: [DONE]\n"
     # Split within the Arabic UTF-8 bytes and also provide a string chunk.
     split = blob.index("ر".encode("utf-8")) + 1
@@ -108,7 +108,7 @@ def test_openrouter_adapter_preserves_sdk_content_fragment_order_offline():
         SimpleNamespace(model="fixture/actual", usage=None, choices=[SimpleNamespace(
             delta=SimpleNamespace(content="أهلاً ", reasoning="hidden", tool_calls=["ignored"]))]),
         SimpleNamespace(model="fixture/actual", usage=None, choices=[SimpleNamespace(
-            delta=SimpleNamespace(content="NJM 42%", reasoning_content="hidden too"))]),
+            delta=SimpleNamespace(content="Acme 42%", reasoning_content="hidden too"))]),
     ]
 
     class FakeCompletions:
@@ -124,8 +124,8 @@ def test_openrouter_adapter_preserves_sdk_content_fragment_order_offline():
         system="", messages=[], tools=[], opts={},
         on_event=lambda kind, text: events.append((kind, text)))
 
-    assert response.text == "أهلاً NJM 42%"
+    assert response.text == "أهلاً Acme 42%"
     assert response.usage["actual_model"] == "fixture/actual"
     assert [text for kind, text in events if kind == "delta"] == [
-        "أهلاً ", "أهلاً NJM 42%"]
+        "أهلاً ", "أهلاً Acme 42%"]
 

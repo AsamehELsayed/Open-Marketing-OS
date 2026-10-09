@@ -161,6 +161,7 @@ jobs:
       - name: Run the DPAPI and Windows-only tests
         run: |
           python -m pytest -q -rs `
+            app/tests/test_dev007_hardening.py `
             app/tests/test_dev007_vault.py `
             app/tests/test_dev008_distribution.py `
             app/tests/test_dev008_launcher.py `
