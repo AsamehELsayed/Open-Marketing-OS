@@ -33,6 +33,17 @@ def test_generic_attention_question_does_not_select_an_unrelated_tool():
     assert selected and selected["capability"] == "get_campaigns"
 
 
+def test_generic_strategy_check_does_not_select_an_unrelated_audit():
+    catalog = build_default_registry().catalog()
+    assert select_registered_tool("Strategy check", catalog=catalog) is None
+
+    selected = select_registered_tool(
+        "Check our website", catalog=catalog,
+        project_state={"website": "https://example.test"},
+    )
+    assert selected and selected["capability"] == "website_marketing_audit"
+
+
 def test_slash_command_remains_optional_for_website_audit():
     natural = classify_to_route("Analyze my website SEO.")
     slash = classify_to_route("/audit https://example.test")

@@ -580,7 +580,8 @@ def _on_loop_event(db_path, pid, convo_id, turn_id, et, pl, tree=None):
         except Exception:
             detail = ""
         emit_event(db_path, project_id=pid, conversation_id=convo_id, turn_id=turn_id,
-                   event_type="tool_started", label=f"Running {label}", detail=detail,
+                   event_type=spec[0] if spec else "tool_started",
+                   label=f"Running {label}", detail=detail,
                    metadata={"tool": str(name or "")[:128], "status": "RUNNING"})
     elif et == "tool_completed":
         name, obs = pl.get("tool", ""), pl.get("obs", {}) or {}

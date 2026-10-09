@@ -37,6 +37,7 @@ _ACTION_WORDS = frozenset({
     "audit", "search", "fetch", "crawl", "list", "get", "current",
     "compare", "summarize", "report", "weather", "forecast",
 })
+_ACTION_VERBS = _ACTION_WORDS - {"weather", "forecast"}
 _URL_RE = re.compile(r"(?:https?://)?(?:www\.)?[a-z0-9-]+\.[a-z]{2,}(?:/[^\s]*)?", re.I)
 _HANDLE_RE = re.compile(r"@([A-Za-z0-9_.]{2,40})")
 
@@ -124,6 +125,14 @@ def select_registered_tool(text: str, *, catalog: list[dict],
         if not isinstance(record, dict):
             continue
         if record.get("side_effect") != "read":
+            continue
+        name_terms = _tokens(str(record.get("name") or "").replace("_", " "))
+        description_terms = _tokens(str(record.get("description") or ""))
+        parameter_terms = _tokens(" ".join(
+            str(key) for key in (record.get("parameters") or {}).get("properties", {})
+        ))
+        subject_terms = request_terms - _ACTION_VERBS
+        if not subject_terms.intersection(name_terms | description_terms | parameter_terms):
             continue
         score = _score(request_terms, record)
         if score >= 2.5:

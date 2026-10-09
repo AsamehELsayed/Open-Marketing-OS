@@ -23,6 +23,10 @@ DIST_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 INDEX_FILE = DIST_DIR / "index.html"
 ASSETS_DIR = DIST_DIR / "assets"
 FAVICON_FILE = DIST_DIR / "favicon.ico"
+SOURCE_FAVICON_FILE = (
+    Path(__file__).resolve().parent.parent.parent
+    / "frontend" / "public" / "favicon.ico"
+)
 
 BUILD_INSTRUCTIONS = (
     "SPA bundle not built. From the repo root run:\n"
@@ -51,9 +55,11 @@ def _safe_under(candidate: Path, root: Path) -> bool:
 
 @router.get("/favicon.ico", include_in_schema=False)
 def spa_favicon():
-    """Serve the small local icon copied into the packaged frontend bundle."""
+    """Serve the packaged icon, falling back to the checked-in source asset."""
     if FAVICON_FILE.is_file():
         return FileResponse(str(FAVICON_FILE), media_type="image/x-icon")
+    if SOURCE_FAVICON_FILE.is_file():
+        return FileResponse(str(SOURCE_FAVICON_FILE), media_type="image/x-icon")
     return PlainTextResponse("not found", status_code=404)
 
 
