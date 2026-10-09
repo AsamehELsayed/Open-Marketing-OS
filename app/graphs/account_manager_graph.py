@@ -1090,17 +1090,23 @@ def build_account_manager_graph(
             return {"route": "campaign_operation", "model_route": "campaign_operation",
                     "write_intents": write_intents,
                     "write_constraints": write_constraints}
-        try:
-            from app.graphs.adapters import ToolRegistryAdapter
-            from app.services.tools.selector import select_registered_tool
+        selected = None
+        # Keep knowledge questions on the established project-RAG path. The
+        # registry selector scores catalog descriptions, so incidental terms
+        # like "website" or "project" must not turn an explanation request
+        # into an unrelated audit or metadata lookup.
+        if prior.get("intent_class") != "KNOWLEDGE":
+            try:
+                from app.graphs.adapters import ToolRegistryAdapter
+                from app.services.tools.selector import select_registered_tool
 
-            selected = select_registered_tool(
-                text,
-                catalog=ToolRegistryAdapter().catalog(),
-                project_state=state.get("project_state") or {},
-            )
-        except Exception:
-            selected = None
+                selected = select_registered_tool(
+                    text,
+                    catalog=ToolRegistryAdapter().catalog(),
+                    project_state=state.get("project_state") or {},
+                )
+            except Exception:
+                selected = None
         if selected:
             return {"intent": selected, "route": "tool_capability",
                     "model_route": "tool_capability",
