@@ -174,7 +174,8 @@ def test_submit_guard_in_react_new_chat():
     assert "sendLockRef.current = false;" in chat
     assert "const clientId = pendingSendRef.current.clientId;" in chat
     assert re.search(
-        r"sendChatTurn\(convoId,\s*clean,\s*clientId,\s*attachmentIds\)",
+        r"sendChatTurn\(convoId,\s*clean,\s*clientId,\s*attachmentIds,\s*"
+        r"modelSelection\.model_provider,\s*modelSelection\.model_id\)",
         chat,
     )
 

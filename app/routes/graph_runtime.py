@@ -333,8 +333,10 @@ def _make_complete_fn(router):
         return None
 
     def _complete(*, turn_id: str, project_id: str, user_request: str, route: str,
-                  conversation_id: str = "", context=None):
+                  conversation_id: str = "", context=None,
+                  model_provider: str = "AUTO", model_id: str = ""):
         import uuid
+        import inspect
         from app.services.marketing_guardrails import (
             MARKETING_NUMERIC_GUARDRAIL_PROMPT,
             enforce_numeric_guardrail,
@@ -354,7 +356,13 @@ def _make_complete_fn(router):
             ai_mode = str(_get_setting("ai_mode", "AUTO") or "AUTO").strip().upper()
             manager_provider = str(
                 _get_setting("manager_provider", "auto") or "auto").strip().lower()
-            if ai_mode == "CLOUD":
+            selected_provider = str(model_provider or "AUTO").strip().upper()
+            model_override = str(model_id or "").strip()
+            if selected_provider == "LOCAL":
+                mode = "LOCAL"
+            elif selected_provider == "OPENROUTER":
+                mode = "OPENROUTER"
+            elif ai_mode == "CLOUD":
                 mode = _cloud_provider(manager_provider).upper()
             elif ai_mode in {
                 "AUTO", "LOCAL", "OPENAI", "OPENROUTER", "BASE", "MARKETING_LORA",
@@ -389,7 +397,14 @@ def _make_complete_fn(router):
                     # AUTO's concrete provider is chosen inside ModelRouter.
                     # Resolve the same pure route decision before wiring its
                     # optional observer so telemetry follows that provider.
-                    resolved_route = route_selector(mode, None)
+                    import inspect
+                    params = inspect.signature(route_selector).parameters.values()
+                    accepts_override = any(p.name == "model_override" or
+                                            p.kind == inspect.Parameter.VAR_KEYWORD
+                                            for p in params)
+                    resolved_route = (route_selector(
+                        mode, None, model_override=model_override or None)
+                        if accepts_override else route_selector(mode, None))
                 except Exception:
                     resolved_route = None
             openrouter_invocation = (
@@ -399,7 +414,7 @@ def _make_complete_fn(router):
             transport_events = []
             resolved_model = getattr(resolved_route, "model", None)
             requested_transport_model = str(
-                resolved_model or _get_setting("openrouter_default_model", "openrouter/auto")
+                model_override or resolved_model or _get_setting("openrouter_default_model", "openrouter/auto")
                 or "openrouter/auto").strip()
 
             def _on_transport_event(event: dict):
@@ -471,9 +486,21 @@ def _make_complete_fn(router):
                         system=system_prompt,
                         messages=[{"role": "user", "content": user_content}],
                         tools=[], mode=mode, adapter=adapter_to_pass,
+                        model_override=model_override or None,
                         behavior_profile=profile_to_pass, quantization=quant,
                         call_id=cid, on_token=_on_token,
                     )
+                    try:
+                        params = inspect.signature(streaming_method).parameters.values()
+                        accepts_override = any(p.name == "model_override" or
+                                               p.kind == inspect.Parameter.VAR_KEYWORD
+                                               for p in params)
+                    except (TypeError, ValueError):
+                        accepts_override = False
+                    if model_override and not accepts_override:
+                        raise RuntimeError("The active router cannot use the selected model.")
+                    if not accepts_override:
+                        stream_kwargs.pop("model_override", None)
                     stream_kwargs.update(_transport_kwargs(streaming_method))
                     resp, mcall = streaming_method(conn, **stream_kwargs)
                 else:
@@ -483,9 +510,21 @@ def _make_complete_fn(router):
                         system=system_prompt,
                         messages=[{"role": "user", "content": user_content}],
                         tools=[], mode=mode, adapter=adapter_to_pass,
+                        model_override=model_override or None,
                         behavior_profile=profile_to_pass, quantization=quant,
                         call_id=cid,
                     )
+                    try:
+                        params = inspect.signature(complete_method).parameters.values()
+                        accepts_override = any(p.name == "model_override" or
+                                               p.kind == inspect.Parameter.VAR_KEYWORD
+                                               for p in params)
+                    except (TypeError, ValueError):
+                        accepts_override = False
+                    if model_override and not accepts_override:
+                        raise RuntimeError("The active router cannot use the selected model.")
+                    if not accepts_override:
+                        complete_kwargs.pop("model_override", None)
                     complete_kwargs.update(_transport_kwargs(complete_method))
                     resp, mcall = complete_method(conn, **complete_kwargs)
                     if resp and resp.text:
@@ -1207,7 +1246,9 @@ def execute_thread(thread_id: str, request: Request,
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         state = initial_state(project_id=pid, conversation_id=cid,
-                              turn_id=tid, user_request=text)
+                              turn_id=tid, user_request=text,
+                              model_provider=str(turn.get("model_provider") or "AUTO"),
+                              model_id=str(turn.get("model_id") or ""))
         state["attachment_evidence"] = attachment_evidence
         try:
             from app.services.skills.tree import TreeEmitter
@@ -1327,6 +1368,7 @@ def execute_thread(thread_id: str, request: Request,
             _emit(conn, project_id=pid, conversation_id=cid, turn_id=tid,
                   node="synthesize", detail=final[:6000], metadata=dict(meta))
         asst = {"id": turnsvc._new_id(), "conversation_id": cid,
+                "turn_id": tid,
                 "role": "assistant", "body_md": final,
                 "citations_json": _json.dumps(citations, ensure_ascii=False),
                 "client_message_id": "",
@@ -1467,6 +1509,7 @@ def resume_thread(thread_id: str, body: ResumeRequest, request: Request,
             try:
                 repos.Messages.insert(conn, {
                     "id": turnsvc._new_id(), "conversation_id": cid,
+                    "turn_id": tid,
                     "role": "assistant", "body_md": final,
                     "citations_json": "[]", "client_message_id": "",
                     "created_at": _now()})
@@ -1668,6 +1711,7 @@ def compat_approval_resume(approval_id: str, body: CompatResumeRequest):
                 repos.Messages.insert(conn, {
                     "id": turnsvc._new_id(),
                     "conversation_id": str(workflow.get("conversation_id") or ""),
+                    "turn_id": tid,
                     "role": "assistant", "body_md": final,
                     "citations_json": "[]", "client_message_id": "",
                     "created_at": _now()})

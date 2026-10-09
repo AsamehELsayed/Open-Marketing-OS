@@ -65,7 +65,7 @@ def test_v9_to_v10_migration_preserves_rows_and_is_idempotent(tmp_path):
     conn.close()
 
     migrated = connect(path)
-    assert get_user_version(migrated) == 11
+    assert get_user_version(migrated) == 12
     row = migrated.execute("SELECT id,project_id,path,file_sha,status_tag,indexed_at,source_kind,source_ref FROM documents WHERE id='legacy-upload'").fetchone()
     assert tuple(row) == ("legacy-upload", "audit014-a", "project-files/audit014-a/file-9", "sha", "TXT", "when", "project_file", "file-9")
     first = tuple(migrated.execute("SELECT file_id,project_id,original_name,index_status,indexed FROM project_files").fetchone())

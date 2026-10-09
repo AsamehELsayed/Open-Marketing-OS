@@ -28,7 +28,7 @@ def test_v10_to_v11_attachment_tables_migrate_idempotently_and_round_trip(tmp_pa
     conn.close()
 
     reopened = connect(path)
-    assert get_user_version(reopened) == 11
+    assert get_user_version(reopened) == 12
     assert files_repo.list_turn_files(reopened, ["file-1"], project_id="project-a",
                                       conversation_id="conversation-a")[0]["file_id"] == "file-1"
     assert files_repo.list_turn_files(reopened, ["file-1"], project_id="project-a",

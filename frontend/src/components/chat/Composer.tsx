@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, uploadChatAttachment } from "../../api/client";
 import type { AttachmentScope, FileCapabilities, ProjectKnowledgeFile } from "../../api/client";
 
@@ -13,6 +13,7 @@ export interface ComposerProps {
   placeholder?: string;
   projectId?: string | null;
   conversationId?: string;
+  modelSelector?: ReactNode;
 }
 
 interface PendingAttachment {
@@ -70,7 +71,7 @@ const SLASH_COMMANDS = [
   { cmd: "/crawl", arg: "site.com", desc: "Crawl several pages" },
 ];
 
-export default function Composer({ onSend, sending, scopeKey, projectLoading, migrateFromScopeKey, canSubmit = true, placeholder, projectId, conversationId }: ComposerProps) {
+export default function Composer({ onSend, sending, scopeKey, projectLoading, migrateFromScopeKey, canSubmit = true, placeholder, projectId, conversationId, modelSelector }: ComposerProps) {
   // Keep drafts in memory by project/conversation scope. A route/provider
   // update can change the active scope without exposing the previous draft.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -321,6 +322,7 @@ export default function Composer({ onSend, sending, scopeKey, projectLoading, mi
         </ul>
       )}
       {fileError && <p role="alert" className="mx-auto mb-2 max-w-[min(46rem,100%)] text-meta text-err">{fileError}</p>}
+      {modelSelector && <div className="mx-auto mb-2 w-full max-w-[min(46rem,100%)]">{modelSelector}</div>}
       {showSlash && matches.length > 0 && (
         <div
           role="listbox"

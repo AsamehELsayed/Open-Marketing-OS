@@ -2223,6 +2223,8 @@ def build_account_manager_graph(
                 "user_request": str(state.get("user_request") or ""),
                 "route": str(state.get("route") or "state_only"),
                 "conversation_id": str(state.get("conversation_id") or ""),
+                "model_provider": str(state.get("model_provider") or "AUTO"),
+                "model_id": str(state.get("model_id") or ""),
                 "context": context,
             }
             try:

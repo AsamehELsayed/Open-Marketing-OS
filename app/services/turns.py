@@ -157,7 +157,8 @@ def _new_id() -> str:
 
 
 def create_turn(conn, db_path, *, conversation_id: str, project_id: str,
-                text: str, client_message_id: str = "", attachment_ids=None) -> dict:
+                text: str, client_message_id: str = "", attachment_ids=None,
+                model_provider: str = "AUTO", model_id: str = "") -> dict:
     """Idempotent turn creation. One (conversation, client_message_id) yields
     exactly one user message and one turn, even on retry/reconnect."""
     text = (text or "").strip()
@@ -181,7 +182,9 @@ def create_turn(conn, db_path, *, conversation_id: str, project_id: str,
                                            project_id=project_id, conversation_id=conversation_id)
         return {"turn": existing, "created": False,
                 "user_message": repos.Messages.by_client_id(conn, conversation_id, cmid)}
-    user_msg = {"id": _new_id(), "conversation_id": conversation_id, "role": "user",
+    turn_id = _new_id()
+    user_msg = {"id": _new_id(), "conversation_id": conversation_id,
+                "turn_id": turn_id, "role": "user",
                 "body_md": text, "citations_json": "[]", "client_message_id": cmid,
                 "created_at": _now()}
     repos.Messages.insert(conn, user_msg)
@@ -190,8 +193,10 @@ def create_turn(conn, db_path, *, conversation_id: str, project_id: str,
         _store.maybe_title_conversation(conn, conversation_id, text)
     except Exception:
         pass
-    turn = {"id": _new_id(), "conversation_id": conversation_id, "project_id": project_id,
+    turn = {"id": turn_id, "conversation_id": conversation_id, "project_id": project_id,
             "client_message_id": cmid, "user_message_id": user_msg["id"],
+            "model_provider": str(model_provider or "AUTO").strip().upper(),
+            "model_id": str(model_id or "").strip(),
             "status": "running", "provider": "", "error": "",
             "created_at": _now(), "updated_at": _now()}
     repos.Turns.upsert(conn, turn)
@@ -260,13 +265,21 @@ def _run_turn(db_path: str, root: str, turn_id: str) -> None:
         selected_attachment_ids = files_repo.selected_for_turn(
             conn, turn_id=turn_id, project_id=pid, conversation_id=convo_id)
         res, used = None, "deterministic"
-        if get_ai_runtime() == "langgraph":
+        ai_runtime = get_ai_runtime()
+        explicit_provider = str(turn.get("model_provider") or "AUTO").upper()
+        if explicit_provider != "AUTO" and ai_runtime != "langgraph":
+            raise RuntimeError("Selected models require the graph runtime.")
+        if ai_runtime == "langgraph":
             graph_res = _run_graph_turn(
                 conn, db_path, pid, convo_id, turn_id, text,
                 on_event=lambda et, pl: _on_loop_event(
                     db_path, pid, convo_id, turn_id, et, pl))
             if graph_res is not None:
                 res, used = graph_res, "langgraph"
+            elif str(turn.get("model_provider") or "AUTO").upper() != "AUTO":
+                # An explicit provider/model is fail-closed. Never recover by
+                # silently switching to legacy or deterministic generation.
+                raise RuntimeError("Selected model provider is unavailable.")
             elif selected_attachment_ids:
                 raise AttachmentExecutionError(
                     "The selected attachment could not be processed safely. "
@@ -390,6 +403,7 @@ def _finish_turn(db_path, root, turn, res, used, text, elapsed_ms=None):
         assistant = {
             "id": _new_id(),
             "conversation_id": convo_id,
+            "turn_id": turn_id,
             "role": "assistant",
             "body_md": reply,
             "citations_json": json.dumps(provenance, ensure_ascii=False),
@@ -399,6 +413,8 @@ def _finish_turn(db_path, root, turn, res, used, text, elapsed_ms=None):
         message_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()
         }
+        if "turn_id" not in message_columns:
+            assistant.pop("turn_id", None)
         if "client_message_id" not in message_columns:
             assistant.pop("client_message_id", None)
         event_rows = []
@@ -725,8 +741,12 @@ def _run_graph_turn(conn, db_path, pid, convo_id, turn_id, text, on_event=None):
         attachment_evidence = assemble_attachment_evidence(
             conn, root=deps.ROOT, project_id=pid,
             conversation_id=convo_id, file_ids=selected_ids)
-        state = initial_state(project_id=pid, conversation_id=convo_id,
-                              turn_id=turn_id, user_request=text)
+        turn = repos.Turns.get(conn, turn_id) or {}
+        state = initial_state(
+            project_id=pid, conversation_id=convo_id,
+            turn_id=turn_id, user_request=text,
+            model_provider=str(turn.get("model_provider") or "AUTO"),
+            model_id=str(turn.get("model_id") or ""))
         state["attachment_evidence"] = attachment_evidence
         try:
             from app.services.skills.tree import TreeEmitter

@@ -1,10 +1,29 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+
+type ActivityPlacement = "left" | "right";
+interface ActivityPreference {
+  visible: boolean;
+  placement: ActivityPlacement;
+}
+
+const ACTIVITY_PREFERENCE_KEY = "omos.activity-rail.v1";
+
+function readActivityPreference(): ActivityPreference {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(ACTIVITY_PREFERENCE_KEY) || "null");
+    if (saved && typeof saved === "object") {
+      return {
+        visible: saved.visible === true,
+        placement: saved.placement === "left" ? "left" : "right",
+      };
+    }
+  } catch { /* storage may be unavailable; keep the hidden default */ }
+  return { visible: false, placement: "right" };
+}
 
 /**
- * DEV-004 W1 AppShell: left / center / right 3-pane with a collapsible
- * right panel. On narrow screens the left nav becomes a drawer and the
- * right panel becomes an overlay — pure CSS + a tiny toggle, no JS layout
- * framework. Downstream workers fill the `sidebar` / `activity` slots.
+ * The existing Live Activity rail is optional and user-positionable. Its
+ * visibility and placement persist independently from project/Git data.
  */
 export default function AppShell({
   sidebar,
@@ -16,15 +35,44 @@ export default function AppShell({
   children: ReactNode;
 }) {
   const [leftOpen, setLeftOpen] = useState(false);
-  // Open by default on desktop widths; closed on smaller screens so the
-  // chat stays primary and the panel becomes an on-demand drawer.
-  const [rightOpen, setRightOpen] = useState<boolean>(() => {
+  const [activityOpen, setActivityOpen] = useState(() => readActivityPreference().visible);
+  const [activityPlacement, setActivityPlacement] = useState<ActivityPlacement>(() => readActivityPreference().placement);
+
+  useEffect(() => {
     try {
-      return window.matchMedia("(min-width: 1280px)").matches;
-    } catch {
-      return true;
-    }
-  });
+      window.localStorage.setItem(ACTIVITY_PREFERENCE_KEY, JSON.stringify({
+        visible: activityOpen,
+        placement: activityPlacement,
+      } satisfies ActivityPreference));
+    } catch { /* persistence is best-effort in restricted browser contexts */ }
+  }, [activityOpen, activityPlacement]);
+
+  const placementSelect = (className: string) => (
+    <label className={className}>
+      <span className="sr-only">Live activity placement</span>
+      <select
+        aria-label="Live activity placement"
+        value={activityPlacement}
+        onChange={(event) => setActivityPlacement(event.target.value as ActivityPlacement)}
+        className="rounded-sm border border-linedefault bg-raised px-2 py-1 text-meta text-inksecondary"
+      >
+        <option value="right">Activity on right</option>
+        <option value="left">Activity on left</option>
+      </select>
+    </label>
+  );
+
+  const desktopActivity = activityOpen ? (
+    <aside
+      className="hidden w-80 shrink-0 flex-col border-linesubtle bg-raised xl:flex"
+      style={{
+        borderInlineStartWidth: activityPlacement === "right" ? 1 : 0,
+        borderInlineEndWidth: activityPlacement === "left" ? 1 : 0,
+      }}
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto">{activity}</div>
+    </aside>
+  ) : null;
 
   return (
     <div className="flex h-full bg-base text-ink">
@@ -42,11 +90,12 @@ export default function AppShell({
         <span className="flex-1" />
         <button
           type="button"
-          aria-label="Toggle activity panel"
-          onClick={() => setRightOpen((v) => !v)}
+          aria-label={activityOpen ? "Hide live activity" : "Show live activity"}
+          aria-expanded={activityOpen}
+          onClick={() => setActivityOpen((v) => !v)}
           className="rounded-sm border border-linedefault px-2 py-1 text-bodysm text-inksecondary"
         >
-          {rightOpen ? "Hide activity" : "Activity"}
+          {activityOpen ? "Hide activity" : "Activity"}
         </button>
       </div>
 
@@ -86,48 +135,37 @@ export default function AppShell({
         />
       )}
 
+      {activityPlacement === "left" ? desktopActivity : null}
+
       {/* center pane */}
-      <main className="min-w-0 flex-1 overflow-y-auto pt-12 lg:pt-0">
-        {children}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden pt-12 lg:pt-0">
+        <div className="hidden h-10 shrink-0 items-center justify-end gap-2 border-b border-linesubtle bg-base px-4 lg:flex">
+          {placementSelect("")}
+          <button
+            type="button"
+            onClick={() => setActivityOpen((v) => !v)}
+            aria-label={activityOpen ? "Hide live activity" : "Show live activity"}
+            aria-expanded={activityOpen}
+            className="rounded-sm border border-linedefault px-2 py-1 text-meta text-inksecondary hover:border-accent"
+          >
+            {activityOpen ? "Hide activity" : "Show activity"}
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </main>
 
-      {/* right pane (collapsible; header owned by ActivityPanel) */}
-      {rightOpen && (
-        <aside className="hidden w-80 shrink-0 flex-col border-l border-linesubtle bg-raised xl:flex">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {activity ?? (
-              <div className="p-4 text-bodysm text-inksecondary">
-                Activity is owned by W4.
-              </div>
-            )}
-          </div>
-        </aside>
-      )}
-      {!rightOpen && (
-        <button
-          type="button"
-          onClick={() => setRightOpen(true)}
-          className="hidden shrink-0 border-l border-linesubtle bg-raised px-2 text-meta text-inksecondary xl:block"
-          aria-label="Expand activity panel"
-        >
-          ▶
-        </button>
-      )}
+      {activityPlacement === "right" ? desktopActivity : null}
 
-      {/* mobile activity overlay (panel header lives in ActivityPanel) */}
-      {rightOpen && (
-        <div className="fixed inset-x-0 bottom-0 z-30 max-h-[45%] overflow-y-auto border-t border-linesubtle bg-raised xl:hidden">
-          <div className="flex items-center justify-end px-4 py-1">
-            <button
-              type="button"
-              onClick={() => setRightOpen(false)}
-              className="rounded-sm px-2 py-1 text-meta text-inksecondary"
-            >
-              Hide
-            </button>
+      {/* On small screens the same rail becomes an anchored overlay drawer. */}
+      {activityOpen && <button type="button" aria-label="Close live activity drawer" onClick={() => setActivityOpen(false)} className="fixed inset-0 z-30 bg-black/40 xl:hidden" />}
+      {activityOpen && (
+        <aside className={`fixed bottom-0 top-12 z-40 w-[min(22rem,88vw)] overflow-y-auto border-linesubtle bg-raised shadow-xl xl:hidden ${activityPlacement === "left" ? "left-0 border-r" : "right-0 border-l"}`}>
+          <div className="flex items-center justify-between border-b border-linesubtle px-3 py-2">
+            {placementSelect("")}
+            <button type="button" onClick={() => setActivityOpen(false)} aria-label="Close live activity" className="rounded-sm border border-linedefault px-2 py-1 text-meta text-inksecondary">Close</button>
           </div>
           {activity}
-        </div>
+        </aside>
       )}
     </div>
   );
