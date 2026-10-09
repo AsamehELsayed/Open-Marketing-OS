@@ -1,7 +1,7 @@
 """W2 acceptance: schema version, tables, idempotent seed (D1/D2)."""
 from app.database import repos
 from app.database.seed import ensure_seed
-from app.database.sqlite import connect, get_user_version
+from app.database.sqlite import SCHEMA_VERSION, connect, get_user_version
 
 EXPECTED_TABLES = {
     "companies", "conversations", "messages", "campaigns", "tasks",
@@ -12,7 +12,7 @@ EXPECTED_TABLES = {
 
 def test_schema_version_and_tables(tmp_path):
     conn = connect(tmp_path / "t.db")
-    assert get_user_version(conn) == 12
+    assert get_user_version(conn) == SCHEMA_VERSION
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert EXPECTED_TABLES <= tables
     assert {"projects", "memories"} <= tables

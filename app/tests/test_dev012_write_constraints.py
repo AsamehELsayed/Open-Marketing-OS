@@ -96,7 +96,29 @@ def test_campaign_suggestion_without_creation_does_not_call_proposal_tool(tmp_pa
     assert repos.ToolRuns.for_tool(conn, "propose_campaign", "p1") == []
 
 
-def test_allowed_website_read_runs_with_campaign_suggestion_and_no_write(tmp_path):
+def test_allowed_website_read_runs_with_campaign_suggestion_and_no_write(
+    tmp_path, monkeypatch
+):
+    from app.services.tools import web_tools
+
+    def fake_website_transport(url, _timeout_s=10):
+        return {
+            "url": url,
+            "final_url": url,
+            "status": "fetched",
+            "http_status": 200,
+            "title": "Example Domain",
+            "meta_description": "",
+            "h1": "Example Domain",
+            "text_head": "Example Domain",
+            "links": [],
+            "has_viewport": False,
+            "latency_ms": 1,
+        }
+
+    monkeypatch.setattr(
+        web_tools, "_default_website_transport", fake_website_transport
+    )
     conn = _db(tmp_path)
     out = _invoke(
         _graph(conn),

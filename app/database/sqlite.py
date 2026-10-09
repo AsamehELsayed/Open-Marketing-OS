@@ -5,7 +5,7 @@ from pathlib import Path
 from app.database.identity import DEFAULT_PROJECT_ID
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Columns added post-foundation (Gate 2 Required 1). Fresh DBs get them from
 # DDL; DBs created by the older schema are upgraded in place below.
@@ -456,6 +456,21 @@ def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
+    """DEV-031 project-keyed client profile and editable brief."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS business_profiles (
+        project_id TEXT PRIMARY KEY NOT NULL, business_name TEXT NOT NULL DEFAULT '',
+        website TEXT NOT NULL DEFAULT '', industry TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+        location TEXT NOT NULL DEFAULT '', offer TEXT NOT NULL DEFAULT '',
+        differentiators TEXT NOT NULL DEFAULT '', profile_json TEXT NOT NULL DEFAULT '{}',
+        brief_md TEXT NOT NULL DEFAULT '', sources_json TEXT NOT NULL DEFAULT '[]',
+        generation_json TEXT NOT NULL DEFAULT '{}', profile_revision INTEGER NOT NULL DEFAULT 1,
+        brief_revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )""")
+    conn.commit()
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,6 +492,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     _migrate_v9_to_v10(conn)
     _migrate_v10_to_v11(conn)
     _migrate_v11_to_v12(conn)
+    _migrate_v12_to_v13(conn)
     _migrate_model_calls_hotfix3(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION};")
     conn.commit()

@@ -1,0 +1,25 @@
+{
+  "max_concurrency": 2,
+  "execution_backend": "separate collaboration Task executions; OpenCode CLI is unavailable because it cannot open its protected local log state",
+  "shared_checkout_reason": "The two scopes are strictly disjoint: backend worker owns backend/database/backend tests; frontend worker owns frontend/src and frontend acceptance files. OpenCode's scheduler requires the unavailable CLI, so the separate worker executions share the isolated public-main checkout but must not edit outside their assigned paths.",
+  "workers": [
+    {
+      "worker_id": "W1-backend",
+      "role": "implementer",
+      "lane": "feature",
+      "model": "gpt-6-luna",
+      "depends_on": [],
+      "files_or_scope": ["app/database/", "app/routes/", "app/services/", "app/main.py", "backend tests"],
+      "can_run_parallel": true
+    },
+    {
+      "worker_id": "W2-frontend",
+      "role": "implementer",
+      "lane": "feature",
+      "model": "gpt-6-luna",
+      "depends_on": [],
+      "files_or_scope": ["frontend/src/", "frontend acceptance files"],
+      "can_run_parallel": true
+    }
+  ]
+}

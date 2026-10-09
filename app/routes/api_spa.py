@@ -1448,7 +1448,22 @@ def spa_settings_instagram(body: InstagramSettingsBody):
 def spa_settings_reimport(body: WorkspaceActionBody):
     with deps.get_db() as conn:
         pid = body.project_id or store.active_project_id(conn)
-        _project_or_404(conn, pid)
+        project = _project_or_404(conn, pid)
+        try:
+            settings = _json.loads(project.get("settings_json") or "{}")
+        except (AttributeError, TypeError, ValueError):
+            settings = {}
+        if settings.get("isolated_client_workspace") is True:
+            return _ok({
+                "status": "skipped",
+                "scope": "workspace_data",
+                "project_id": pid,
+                "message": (
+                    "Shared workspace files are not imported into this client. "
+                    "Upload client-specific files from Settings → Files."
+                ),
+                "stats": {},
+            })
         stats = store.run_imports(conn, deps.ROOT)
     return _ok({"status": "synced", "scope": "workspace_data", "project_id": pid,
                 "message": "Structured workspace data imported. Project knowledge files were not reindexed.",

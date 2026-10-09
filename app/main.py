@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
         today,
         files,
         skills,
+        business_workspace,
     )
 
     for router in (
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
         # Settings > Skills tab with no signal at all. If it fails to import the
         # app must not start.
         skills.router,
+        business_workspace.router,
     ):
         app.include_router(router)
 

@@ -147,6 +147,7 @@ def test_react_route_inventory_is_exactly_the_frozen_set():
         "/app",
         "/app/start",
         "/app/business/new",
+        "/app/workspace",
         "/app/chat/new",
         "/app/chat/:id",
         "/app/campaigns",

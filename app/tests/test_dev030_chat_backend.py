@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app import deps
 from app.database import repos
-from app.database.sqlite import SCHEMA_PATH, connect, get_user_version
+from app.database.sqlite import SCHEMA_PATH, SCHEMA_VERSION, connect, get_user_version
 from app.main import create_app
 from app.services import state as store
 
@@ -55,7 +55,7 @@ def test_v12_migration_adds_preferences_and_turn_linkage(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert get_user_version(conn) == 12
+    assert get_user_version(conn) == SCHEMA_VERSION
     for table, expected in {
         "conversations": {"model_provider", "model_id"},
         "turns": {"model_provider", "model_id"},
@@ -66,7 +66,7 @@ def test_v12_migration_adds_preferences_and_turn_linkage(tmp_path):
     conn.close()
     # Idempotent on the next startup.
     conn = connect(path)
-    assert get_user_version(conn) == 12
+    assert get_user_version(conn) == SCHEMA_VERSION
     conn.close()
 
 

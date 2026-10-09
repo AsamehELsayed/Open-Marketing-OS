@@ -1,5 +1,10 @@
 """DEV-015 I1 canonical conversation attachment schema migration tests."""
-from app.database.sqlite import _migrate_v10_to_v11, connect, get_user_version
+from app.database.sqlite import (
+    SCHEMA_VERSION,
+    _migrate_v10_to_v11,
+    connect,
+    get_user_version,
+)
 from app.services.files import repo as files_repo
 from app.services.rag.chroma_store import ChromaStore
 from app.services.rag.embeddings import LocalMultilingualE5Embeddings
@@ -28,7 +33,7 @@ def test_v10_to_v11_attachment_tables_migrate_idempotently_and_round_trip(tmp_pa
     conn.close()
 
     reopened = connect(path)
-    assert get_user_version(reopened) == 12
+    assert get_user_version(reopened) == SCHEMA_VERSION
     assert files_repo.list_turn_files(reopened, ["file-1"], project_id="project-a",
                                       conversation_id="conversation-a")[0]["file_id"] == "file-1"
     assert files_repo.list_turn_files(reopened, ["file-1"], project_id="project-a",

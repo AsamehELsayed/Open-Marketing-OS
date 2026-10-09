@@ -59,7 +59,7 @@ export default function ProjectSwitcher() {
       return;
     }
     if (id === "action:create") {
-      navigate("/app/chat/new");
+      navigate("/app/business/new?mode=client");
       return;
     }
     if (id === "action:settings") {
