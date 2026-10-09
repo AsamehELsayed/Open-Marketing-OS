@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, parseTurnIdFromAck, sendChatTurn } from "../api/client";
+import type { ChatModelCatalog, ChatModelSelection, SpaMessage } from "../api/client";
 import { useTurnStream } from "../hooks/useTurnStream";
 import type { TurnStatus } from "../hooks/useTurnStream";
 import { usePersistedTurnTree } from "../hooks/usePersistedTurnTree";
 import { publish } from "../components/activity/liveBus";
 import ChatMessage from "../components/chat/ChatMessage";
 import Composer from "../components/chat/Composer";
+import ChatModelSelector from "../components/chat/ChatModelSelector";
 import EmptyChat from "../components/chat/EmptyChat";
 import TurnRuntimePanel from "../components/runtime/TurnRuntimePanel";
 import ExecutionTree from "../components/skills/ExecutionTree";
@@ -63,6 +65,7 @@ interface Msg {
   streaming?: boolean;
   latencyMs?: number | null;
   citations?: unknown[];
+  model?: SpaMessage["model"];
 }
 
 function newClientId(): string {
@@ -112,6 +115,17 @@ export default function Chat() {
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [approvalsCount, setApprovalsCount] = useState(0);
+  const [modelCatalog, setModelCatalog] = useState<ChatModelCatalog | null>(null);
+  const [modelState, setModelState] = useState<{
+    conversationId: string;
+    loading: boolean;
+    saving: boolean;
+    selection: ChatModelSelection | null;
+    error: string | null;
+  }>({ conversationId: "", loading: true, saving: false, selection: null, error: null });
+  const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const stream = useTurnStream(activeTurnId);
   // DEV-008-SKILLS-OPS W12: when there is NO live active turn (reload,
@@ -125,6 +139,82 @@ export default function Chat() {
   );
   const publishedRef = useRef<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const currentModelState = modelState.conversationId === convoId ? modelState : null;
+  const modelSelection = currentModelState?.selection ?? null;
+  const modelLoading = !currentModelState || currentModelState.loading || !modelCatalog;
+  const modelSaving = currentModelState?.saving ?? false;
+  const modelError = currentModelState?.error ?? modelCatalogError;
+  const selectedModelProvider = modelCatalog?.providers.find((provider) => provider.provider === modelSelection?.model_provider);
+  const modelSelectionReady = Boolean(
+    convoId && modelSelection && !modelLoading && !modelSaving && !modelError &&
+    (modelSelection.model_provider === "AUTO" || (
+      selectedModelProvider?.available &&
+      selectedModelProvider.models.some((model) => model.id === modelSelection.model_id)
+    )),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setModelCatalog(null);
+    setModelCatalogError(null);
+    setModelState({ conversationId: convoId, loading: true, saving: false, selection: null, error: null });
+    if (!convoId) return;
+    api.getChatModelCatalog().then((catalog) => {
+      if (!cancelled) setModelCatalog(catalog);
+    }).catch((error: unknown) => {
+      if (!cancelled) setModelCatalogError(error instanceof Error ? error.message : "Model options could not be loaded.");
+    });
+    api.getChatModelSelection(convoId).then((selection) => {
+      if (!cancelled) setModelState({ conversationId: convoId, loading: false, saving: false, selection, error: null });
+    }).catch((error: unknown) => {
+      if (!cancelled) setModelState({
+        conversationId: convoId,
+        loading: false,
+        saving: false,
+        selection: null,
+        error: error instanceof Error ? error.message : "This conversation's model selection could not be loaded.",
+      });
+    });
+    return () => { cancelled = true; };
+  }, [convoId]);
+
+  const saveModelSelection = useCallback(async (selection: ChatModelSelection) => {
+    if (!convoId || modelState.conversationId !== convoId || modelState.loading || modelState.saving) return;
+    setModelState((current) => current.conversationId === convoId
+      ? { ...current, saving: true, error: null }
+      : current);
+    try {
+      const saved = await api.saveChatModelSelection(convoId, selection);
+      setModelState((current) => current.conversationId === convoId
+        ? { ...current, selection: saved, saving: false, error: null }
+        : current);
+    } catch (error) {
+      setModelState((current) => current.conversationId === convoId
+        ? { ...current, saving: false, error: error instanceof Error ? error.message : "Model selection could not be saved." }
+        : current);
+    }
+  }, [convoId, modelState.conversationId, modelState.loading, modelState.saving]);
+
+  const downloadMarkdown = useCallback(async () => {
+    if (!convoId || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await api.downloadChatMarkdown(convoId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Conversation export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }, [convoId, exporting]);
 
   useEffect(() => {
     sendLockRef.current = false;
@@ -194,6 +284,7 @@ export default function Chat() {
             role: m.role === "user" ? "user" : "assistant",
             bodyMd: m.body_md ?? "",
             citations: Array.isArray(m.citations) ? m.citations : [],
+            model: m.model ?? undefined,
           })),
         );
       })
@@ -271,7 +362,11 @@ export default function Chat() {
         const latestAssistant = rows.filter((row) => row.role !== "user").pop();
         if (!latestAssistant) return;
         setMessages((prev) => prev.map((message) => message.key === key && message.turnId === completedTurnId
-          ? { ...message, citations: Array.isArray(latestAssistant.citations) ? latestAssistant.citations : [] }
+          ? {
+              ...message,
+              citations: Array.isArray(latestAssistant.citations) ? latestAssistant.citations : [],
+              model: latestAssistant.model ?? undefined,
+            }
           : message));
       }).catch(() => {
         hydratedProvenanceRef.current.delete(completedTurnId);
@@ -290,7 +385,7 @@ export default function Chat() {
       const clean = text.trim();
       const submittedScope = scopeKey;
       const submittedVersion = scopeVersionRef.current;
-      if (!clean || !convoId || !projectId || sending || sendLockRef.current) return false;
+      if (!clean || !convoId || !projectId || !modelSelectionReady || !modelSelection || sending || sendLockRef.current) return false;
       if (
         conversationBinding?.conversationId !== convoId ||
         conversationBinding.projectId !== projectId ||
@@ -308,7 +403,7 @@ export default function Chat() {
       const clientId = pendingSendRef.current.clientId;
       // Optimistic user bubble: visible immediately, before POST resolves.
       setMessages((prev) => [...prev, { key: userKey, role: "user", bodyMd: clean }]);
-      return sendChatTurn(convoId, clean, clientId, attachmentIds)
+      return sendChatTurn(convoId, clean, clientId, attachmentIds, modelSelection.model_provider, modelSelection.model_id)
         .then(({ turnId }) => {
           if (activeScopeRef.current !== submittedScope || scopeVersionRef.current !== submittedVersion) return false;
           pendingSendRef.current = null;
@@ -331,7 +426,7 @@ export default function Chat() {
           return false;
         });
     },
-    [convoId, conversationBinding, projectId, scopeKey, sending],
+    [convoId, conversationBinding, projectId, scopeKey, sending, modelSelection, modelSelectionReady],
   );
 
   const handleRetry = useCallback(
@@ -371,6 +466,18 @@ export default function Chat() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 items-center gap-3 border-b border-linesubtle px-4 py-2.5">
+        <h1 className="min-w-0 flex-1 truncate text-bodysm font-semibold text-ink">Chat</h1>
+        {exportError && <span role="alert" className="min-w-0 truncate text-meta text-err">{exportError}</span>}
+        <button
+          type="button"
+          onClick={downloadMarkdown}
+          disabled={!convoId || exporting}
+          className="shrink-0 rounded-sm border border-linedefault px-2.5 py-1.5 text-meta text-inksecondary hover:border-accent disabled:opacity-50"
+        >
+          {exporting ? "Preparing…" : "Download .md"}
+        </button>
+      </header>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="mx-auto flex w-full max-w-[min(46rem,100%)] flex-col gap-4">
           {loading ? (
@@ -392,6 +499,7 @@ export default function Chat() {
                 role={m.role}
                 bodyMd={m.bodyMd}
                 citations={m.citations}
+                model={m.model}
                 projectId={projectId}
                 conversationId={convoId}
                 failed={m.failed}
@@ -437,6 +545,16 @@ export default function Chat() {
         scopeKey={scopeKey}
         projectId={projectId}
         conversationId={convoId}
+        modelSelector={(
+          <ChatModelSelector
+            catalog={modelCatalog}
+            selection={modelSelection}
+            loading={modelLoading}
+            saving={modelSaving}
+            error={modelError}
+            onChange={saveModelSelection}
+          />
+        )}
         projectLoading={projectLoading}
         migrateFromScopeKey={
           !hasExplicitProjectSelection && conversationBinding?.conversationId === convoId
@@ -445,6 +563,7 @@ export default function Chat() {
         }
         canSubmit={Boolean(
           projectId &&
+          modelSelectionReady &&
           conversationBinding?.conversationId === convoId &&
           conversationBinding.projectId === projectId
         )}

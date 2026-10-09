@@ -14,6 +14,8 @@ class GraphState(TypedDict, total=False):
     conversation_id: str
     turn_id: str
     user_request: str
+    model_provider: str
+    model_id: str
     project_context: dict
     state_results: dict
     retrieved_evidence: list
@@ -39,6 +41,8 @@ GRAPH_STATE_FIELDS = (
     "conversation_id",
     "turn_id",
     "user_request",
+    "model_provider",
+    "model_id",
     "project_context",
     "state_results",
     "retrieved_evidence",
@@ -98,12 +102,15 @@ LIST_FIELDS = frozenset({
 
 
 def initial_state(*, project_id: str, conversation_id: str,
-                  turn_id: str, user_request: str) -> GraphState:
+                  turn_id: str, user_request: str,
+                  model_provider: str = "AUTO", model_id: str = "") -> GraphState:
     return {
         "project_id": project_id,
         "conversation_id": conversation_id,
         "turn_id": turn_id,
         "user_request": user_request,
+        "model_provider": model_provider,
+        "model_id": model_id,
         "project_context": {},
         "state_results": {},
         "retrieved_evidence": [],
@@ -169,6 +176,8 @@ class LangGraphState(TypedDict, total=False):
     conversation_id: str
     turn_id: str
     user_request: str
+    model_provider: str
+    model_id: str
     project_context: dict
     state_results: dict
     retrieved_evidence: Annotated[list, operator.add]

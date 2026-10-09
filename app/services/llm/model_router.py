@@ -404,7 +404,7 @@ def decide_route(mode: str, *, local_available: bool = True,
         or_ok = openrouter_configured if openrouter_configured is not None \
             else openrouter_configured_default()
         if not or_ok:
-            raise RuntimeError("OpenRouter user selection requested but openrouter_configured=False in decide_route call")
+            raise RuntimeError("OpenRouter is not connected. Add an OpenRouter key in Settings.")
         return ModelRoute(mode="OPENROUTER", provider="openrouter",
                           model=openrouter_model,
                           reason="explicit user selection")
@@ -517,11 +517,13 @@ class ModelRouter:
         model = getattr(provider, "model", "") or fallback
         return str(model) if str(model).strip() else fallback
 
-    def _route_decision(self, route_mode: str, escalation_reason: str | None):
+    def _route_decision(self, route_mode: str, escalation_reason: str | None,
+                        model_override: str | None = None):
         has_key = openai_configured()
         or_cfg = openrouter_configured_default()
         manager_provider = "auto"
         cloud_escalation = False
+        local_model = self.default_local_model
         openrouter_model = self.default_openrouter_model
         saved_openrouter_model = ""
         try:
@@ -547,6 +549,13 @@ class ModelRouter:
         else:
             cloud_provider = "openai"
         local_available = self.local_provider is not None and _local_model_enabled()
+        selected_model = str(model_override or "").strip()
+        if route_mode == "AUTO" and selected_model:
+            raise ValueError("AUTO does not accept a specific model.")
+        if route_mode == "LOCAL" and selected_model:
+            local_model = selected_model
+        elif route_mode == "OPENROUTER" and selected_model:
+            openrouter_model = selected_model
         if (
             route_mode == "AUTO"
             and cloud_escalation
@@ -562,7 +571,7 @@ class ModelRouter:
             cloud_provider=cloud_provider,
             escalation_reason=escalation_reason,
             allow_cloud_escalation=cloud_escalation,
-            local_model=self.default_local_model,
+            local_model=local_model,
             openai_model=self.default_openai_model,
             openrouter_model=openrouter_model,
         )
@@ -588,6 +597,7 @@ class ModelRouter:
     def complete(self, conn, *, turn_id: str, project_id: str, system: str,
                  messages: list, tools: list, mode: str = "AUTO",
                  opts: dict | None = None, escalation_reason: str | None = None,
+                 model_override: str | None = None,
                  call_id: str | None = None, adapter: str | None = None,
                  quantization: str = "", as_of: str | None = None,
                  behavior_profile: str = "", on_transport_event=None):
@@ -600,7 +610,7 @@ class ModelRouter:
         cid = call_id or f"mc-{uuid.uuid4().hex[:12]}"
         route_mode = _normalize_mode(mode)
         local_available = self.local_provider is not None
-        route = self._route_decision(route_mode, escalation_reason)
+        route = self._route_decision(route_mode, escalation_reason, model_override)
         try:
             provider = self._provider_for(route.provider)
         except Exception as exc:
@@ -626,6 +636,8 @@ class ModelRouter:
 
         call_opts = dict(opts or {})
         if route.provider == "local":
+            if model_override:
+                call_opts["model"] = model_name
             if target_adapter is not None:
                 call_opts["adapter"] = target_adapter
         else:
@@ -722,6 +734,7 @@ class ModelRouter:
     def complete_streaming(self, conn, *, turn_id: str, project_id: str, system: str,
                            messages: list, tools: list, mode: str = "AUTO",
                            opts: dict | None = None, escalation_reason: str | None = None,
+                           model_override: str | None = None,
                            call_id: str | None = None, adapter: str | None = None,
                            quantization: str = "", as_of: str | None = None,
                            behavior_profile: str = "", on_token=None,
@@ -735,7 +748,7 @@ class ModelRouter:
         cid = call_id or f"mc-{uuid.uuid4().hex[:12]}"
         route_mode = _normalize_mode(mode)
         local_available = self.local_provider is not None
-        route = self._route_decision(route_mode, escalation_reason)
+        route = self._route_decision(route_mode, escalation_reason, model_override)
         try:
             provider = self._provider_for(route.provider)
         except Exception as exc:
@@ -761,6 +774,8 @@ class ModelRouter:
 
         call_opts = dict(opts or {})
         if route.provider == "local":
+            if model_override:
+                call_opts["model"] = model_name
             if target_adapter is not None:
                 call_opts["adapter"] = target_adapter
         else:

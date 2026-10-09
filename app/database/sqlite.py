@@ -5,7 +5,7 @@ from pathlib import Path
 from app.database.identity import DEFAULT_PROJECT_ID
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Columns added post-foundation (Gate 2 Required 1). Fresh DBs get them from
 # DDL; DBs created by the older schema are upgraded in place below.
@@ -429,6 +429,33 @@ def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
+    """DEV-030 conversation model preferences and message-turn linkage."""
+    additions = {
+        "conversations": {
+            "model_provider": "TEXT NOT NULL DEFAULT 'AUTO'",
+            "model_id": "TEXT NOT NULL DEFAULT ''",
+        },
+        "turns": {
+            "model_provider": "TEXT NOT NULL DEFAULT 'AUTO'",
+            "model_id": "TEXT NOT NULL DEFAULT ''",
+        },
+        "messages": {"turn_id": "TEXT NOT NULL DEFAULT ''"},
+    }
+    for table, columns in additions.items():
+        existing = {row[1] for row in conn.execute(
+            f"PRAGMA table_info({table})").fetchall()}
+        for column, declaration in columns.items():
+            if column not in existing:
+                try:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+    conn.commit()
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -449,6 +476,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     _migrate_v8_to_v9(conn)
     _migrate_v9_to_v10(conn)
     _migrate_v10_to_v11(conn)
+    _migrate_v11_to_v12(conn)
     _migrate_model_calls_hotfix3(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION};")
     conn.commit()

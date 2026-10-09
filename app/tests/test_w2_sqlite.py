@@ -12,13 +12,18 @@ EXPECTED_TABLES = {
 
 def test_schema_version_and_tables(tmp_path):
     conn = connect(tmp_path / "t.db")
-    assert get_user_version(conn) == 11
+    assert get_user_version(conn) == 12
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert EXPECTED_TABLES <= tables
     assert {"projects", "memories"} <= tables
     assert {"turns", "execution_events"} <= tables
     cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
     assert "client_message_id" in cols
+    assert "turn_id" in cols
+    assert {r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()} >= {
+        "model_provider", "model_id"}
+    assert {r[1] for r in conn.execute("PRAGMA table_info(turns)").fetchall()} >= {
+        "model_provider", "model_id"}
     conn.close()
 
 

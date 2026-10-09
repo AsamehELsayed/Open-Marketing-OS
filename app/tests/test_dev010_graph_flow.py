@@ -133,6 +133,9 @@ def test_approval_route_resumes_its_recorded_graph_thread(tmp_path, monkeypatch)
     assert payload["thread_id"] == "t1"
     assert repos.Approvals.get(conn, aid, "p1")["status"] == "rejected"
     assert repos.Tasks.get(conn, task_id, "p1")["status"] == "rejected"
+    resumed_messages = repos.Messages.for_conversation(conn, "c1")
+    assert any(message.get("role") == "assistant"
+               and message.get("turn_id") == "t1" for message in resumed_messages)
 
 
 def test_graph_replay_uses_stable_proposal_keys_without_duplicate_rows(tmp_path):

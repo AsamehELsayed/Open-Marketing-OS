@@ -10,8 +10,11 @@ Existing Jinja routes, templates, and the streaming contract
 (POST /chat/turn + GET /chat/turns/{id}/events) are untouched.
 """
 import json as _json
+import re as _re
+from urllib.parse import quote as _quote
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app import deps
@@ -68,6 +71,133 @@ def _citations_of(msg: dict) -> list:
     ]
 
 
+def _chat_model_metadata(conn, conversation_id: str, project_id: str) -> dict[str, dict]:
+    """Actual model calls, joined through turns inside the owning project."""
+    rows = conn.execute(
+        """SELECT mc.turn_id, mc.provider, mc.model, mc.route_mode
+           FROM model_calls mc
+           JOIN turns t ON t.id = mc.turn_id AND t.project_id = mc.project_id
+           WHERE t.conversation_id = ? AND t.project_id = ? AND mc.project_id = ?
+           ORDER BY mc.rowid""",
+        (conversation_id, project_id, project_id),
+    ).fetchall()
+    result: dict[str, dict] = {}
+    for row in rows:
+        turn_id = str(row["turn_id"] or "")
+        if turn_id:
+            result[turn_id] = {
+                "provider": sanitize_user_text(row["provider"], 32),
+                "model": sanitize_user_text(row["model"], 200),
+                "route_mode": sanitize_user_text(row["route_mode"], 32),
+            }
+    return result
+
+
+def _markdown_citation(item) -> str:
+    if isinstance(item, str):
+        return sanitize_user_text(item, 2000)
+    if not isinstance(item, dict):
+        return ""
+    source = item.get("source")
+    if source in {"project_rag", "turn_attachment"}:
+        title = next((sanitize_user_text(item.get(k), 500) for k in
+                      ("file_name", "filename", "title", "name", "label")
+                      if item.get(k)), "Source")
+        details = [title]
+        if source == "project_rag" and item.get("scope") == "project":
+            details.append("Business Knowledge")
+        elif source == "turn_attachment":
+            details.append("This chat attachment")
+        for key, label in (("project_id", "Project"), ("chunk_id", "Chunk")):
+            value = item.get(key)
+            if isinstance(value, str) and _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value):
+                details.append(f"{label} {value}")
+        branches = item.get("retrieval_sources")
+        if source == "project_rag" and isinstance(branches, list):
+            labels = []
+            if "fts" in branches:
+                labels.append("FTS")
+            if "semantic" in branches:
+                labels.append("Semantic")
+            if labels:
+                details.append(" + ".join(labels))
+        return " · ".join(details)
+
+    title = next((sanitize_user_text(item.get(k), 500) for k in
+                  ("title", "name", "label") if item.get(k)), "Source")
+    url = str(item.get("url") or item.get("source_url") or "").strip()
+    if url.startswith(("https://", "http://")):
+        return f"[{title}]({sanitize_user_text(url, 2000, preserve_urls=True)})"
+    reference = next((sanitize_user_text(item.get(k), 1000) for k in
+                      ("path", "source", "id") if item.get(k)), "")
+    return f"{title}: {reference}" if reference else title
+
+
+def _chat_export_markdown(convo: dict, messages: list[dict], events: list[dict],
+                          models_by_turn: dict[str, dict]) -> str:
+    lines = [f"# {sanitize_user_text(convo.get('title') or 'Chat', 200)}", "",
+             f"Conversation ID: `{sanitize_user_text(convo.get('id', ''), 120)}`", "",
+             "## Conversation", ""]
+    for message in messages:
+        message_role = message.get("role")
+        if message_role not in {"user", "assistant"}:
+            continue
+        role = "User" if message_role == "user" else "Assistant"
+        timestamp = sanitize_user_text(message.get("created_at") or "", 80)
+        lines.extend((f"### {role} — {timestamp}" if timestamp else f"### {role}", "",
+                      sanitize_user_text(message.get("body_md") or "", 1_000_000), ""))
+        turn_id = str(message.get("turn_id") or "")
+        model = models_by_turn.get(turn_id)
+        if role == "Assistant" and model:
+            lines.extend((f"_Model: {model['provider']} / {model['model']} "
+                          f"({model['route_mode']})_", ""))
+        citations = [_markdown_citation(item) for item in _citations_of(message)]
+        citations = [item for item in citations if item]
+        if citations:
+            lines.append("**Sources**")
+            lines.extend(f"- {item}" for item in citations)
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    tool_events = []
+    for event in events:
+        if event.get("event_type") not in {"tool_started", "tool_completed", "tool_failed"}:
+            continue
+        safe = project_event_boundary(event)
+        try:
+            meta = _json.loads(event.get("metadata_json") or "{}")
+        except (TypeError, ValueError):
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        fields = []
+        status = meta.get("status")
+        if isinstance(status, str) and status.upper() in {
+                "QUEUED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED",
+                "RETRYING", "WAITING_FOR_APPROVAL", "CANCELLED"}:
+            fields.append(status.upper())
+        tool_id = meta.get("tool_id", meta.get("tool"))
+        if isinstance(tool_id, str) and tool_id:
+            fields.append(sanitize_user_text(tool_id, 128))
+        duration = meta.get("duration_ms")
+        if isinstance(duration, int) and 0 <= duration <= 86_400_000:
+            fields.append(f"{duration} ms")
+        label = sanitize_user_text(safe.get("label", ""), 300)
+        detail = sanitize_user_text(safe.get("detail", ""), 6000)
+        summary = " · ".join(fields) or label or event.get("event_type", "")
+        if detail:
+            summary += f" — {detail}"
+        when = sanitize_user_text(event.get("created_at") or "", 80)
+        tool_events.append((when, summary))
+    if tool_events:
+        lines.extend(("## Tool execution", ""))
+        for when, summary in tool_events:
+            lines.append(f"- {when} — {summary}" if when else f"- {summary}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 # ---------- projects ----------
 
 @router.get("/projects")
@@ -82,6 +212,42 @@ def spa_projects():
 
 
 # ---------- chats ----------
+
+class ChatModelSelectionBody(BaseModel):
+    model_provider: str
+    model_id: str = ""
+
+
+@router.get("/ai/chat-models")
+def spa_chat_models():
+    from app.services.chat_models import available_chat_models
+    return _ok(available_chat_models())
+
+
+@router.get("/chats/{convo_id}/model-selection")
+def spa_chat_model_selection(convo_id: str,
+                             project_id: str | None = Query(default=None)):
+    with deps.get_db() as conn:
+        convo = _convo_or_404(conn, convo_id, project_id)
+    return _ok({"model_provider": str(convo.get("model_provider") or "AUTO"),
+                "model_id": str(convo.get("model_id") or "")})
+
+
+@router.put("/chats/{convo_id}/model-selection")
+def spa_set_chat_model_selection(convo_id: str, body: ChatModelSelectionBody,
+                                 project_id: str | None = Query(default=None)):
+    from app.services.chat_models import normalize_chat_selection
+    try:
+        selection = normalize_chat_selection(body.model_provider, body.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=sanitize_user_text(str(exc), 300))
+    with deps.get_db() as conn:
+        convo = _convo_or_404(conn, convo_id, project_id)
+        convo["model_provider"] = selection["model_provider"]
+        convo["model_id"] = selection["model_id"]
+        convo["updated_at"] = store.now_iso()
+        repos.Conversations.upsert(conn, convo)
+    return _ok(selection)
 
 @router.get("/chats")
 def spa_chats(
@@ -173,14 +339,56 @@ def spa_chat_last_turn(convo_id: str, project_id: str | None = Query(default=Non
 @router.get("/chats/{convo_id}/messages")
 def spa_messages(convo_id: str, project_id: str | None = Query(default=None)):
     with deps.get_db() as conn:
-        _convo_or_404(conn, convo_id, project_id)
+        convo = _convo_or_404(conn, convo_id, project_id)
         rows = repos.Messages.for_conversation(conn, convo_id)
-    return _ok([
-        {"role": m["role"],
-         "body_md": sanitize_user_text(m.get("body_md", ""), 1_000_000),
-         "citations": _citations_of(m)}
-        for m in rows
-    ])
+        models = _chat_model_metadata(conn, convo_id, str(convo.get("project_id") or ""))
+    result = []
+    for message in rows:
+        item = {"role": message["role"],
+                "body_md": sanitize_user_text(message.get("body_md", ""), 1_000_000),
+                "citations": _citations_of(message)}
+        model = models.get(str(message.get("turn_id") or ""))
+        if model:
+            item["model"] = model
+        result.append(item)
+    return _ok(result)
+
+
+@router.get("/chats/{convo_id}/export.md")
+def spa_export_chat_markdown(convo_id: str,
+                             project_id: str | None = Query(default=None)):
+    with deps.get_db() as conn:
+        convo = _convo_or_404(conn, convo_id, project_id)
+        pid = str(convo.get("project_id") or "")
+        messages = conn.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? "
+            "AND role IN ('user', 'assistant') ORDER BY created_at, rowid",
+            (convo_id,),
+        ).fetchall()
+        # Include only rows whose conversation is the scoped conversation;
+        # project ownership is verified above and all event/model joins below
+        # repeat its immutable project id.
+        rows = [dict(row) for row in messages]
+        events = [dict(row) for row in conn.execute(
+            """SELECT * FROM execution_events
+               WHERE conversation_id = ? AND project_id = ?
+               ORDER BY created_at, id""", (convo_id, pid)).fetchall()]
+        models = _chat_model_metadata(conn, convo_id, pid)
+    body = _chat_export_markdown(convo, rows, events, models)
+    filename = _re.sub(r"[^\w.-]+", "-", str(convo.get("title") or "chat"),
+                       flags=_re.UNICODE).strip("-._") or "chat"
+    filename = filename[:80] + ".md"
+    ascii_base = _re.sub(r"[^A-Za-z0-9_-]+", "-", filename[:-3]).strip("-._") or "chat"
+    ascii_fallback = ascii_base + ".md"
+    content_disposition = (
+        f"attachment; filename=\"{ascii_fallback}\"; "
+        f"filename*=UTF-8''{_quote(filename, safe='')}"
+    )
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": content_disposition},
+    )
 
 
 # ---------- activity ----------

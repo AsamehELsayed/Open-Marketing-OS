@@ -1,5 +1,5 @@
 -- Open Marketing OS v0.2 — authoritative schema. Single source of DDL.
-PRAGMA user_version = 10;
+PRAGMA user_version = 12;
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   project_id TEXT NOT NULL DEFAULT 'starter',
   title TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
+  model_provider TEXT NOT NULL DEFAULT 'AUTO',
+  model_id TEXT NOT NULL DEFAULT '',
   archived_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -51,6 +53,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   body_md TEXT NOT NULL DEFAULT '',
   citations_json TEXT NOT NULL DEFAULT '[]',
+  turn_id TEXT NOT NULL DEFAULT '',
   client_message_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -63,6 +66,8 @@ CREATE TABLE IF NOT EXISTS turns (
   user_message_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'running',
   provider TEXT NOT NULL DEFAULT '',
+  model_provider TEXT NOT NULL DEFAULT 'AUTO',
+  model_id TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'

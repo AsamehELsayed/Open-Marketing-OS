@@ -1,4 +1,5 @@
 import json as _json
+import html as _html
 import time
 
 from fastapi import APIRouter, Form, Request
@@ -84,7 +85,9 @@ def _open_turn(conn, convo_id):
 @router.post("/chat/turn", response_class=HTMLResponse)
 def chat_turn(request: Request, conversation_id: str = Form(...),
               text: str = Form(...), client_message_id: str = Form(""),
-              attachment_ids: list[str] = Form(default=[])):
+              attachment_ids: list[str] = Form(default=[]),
+              model_provider: str = Form(default=""),
+              model_id: str = Form(default="")):
     """Fast ack: persists the user message + turn, starts background work,
     returns immediately with the user bubble + live assistant shell."""
     with deps.get_db() as conn:
@@ -94,11 +97,35 @@ def chat_turn(request: Request, conversation_id: str = Form(...),
         pid = convo.get("project_id") or DEFAULT_PROJECT_ID  # immutable: never global active
         if _project_or_404(conn, pid) is None:
             return HTMLResponse('<div class="error">project unavailable</div>', status_code=400)
+        from app.services.chat_models import normalize_chat_selection
+        submitted_selection = bool(str(model_provider or "").strip())
+        requested_provider = model_provider if submitted_selection else (
+            convo.get("model_provider") or "AUTO")
+        requested_model = model_id if submitted_selection else convo.get("model_id", "")
+        try:
+            selection = normalize_chat_selection(requested_provider, requested_model)
+        except ValueError as e:
+            message = _html.escape(safe_error_message(
+                str(e), "The selected model is unavailable."))
+            return HTMLResponse(f'<div class="error">{message}</div>', status_code=400)
+        if selection["model_provider"] != "AUTO":
+            from app.contracts.runtime import get_ai_runtime
+            if get_ai_runtime() != "langgraph":
+                return HTMLResponse(
+                    '<div class="error">Selected models require the graph runtime.</div>',
+                    status_code=503)
+        if submitted_selection:
+            convo["model_provider"] = selection["model_provider"]
+            convo["model_id"] = selection["model_id"]
+            convo["updated_at"] = store.now_iso()
+            repos.Conversations.upsert(conn, convo)
         try:
             made = turnsvc.create_turn(conn, str(deps.DB_PATH), conversation_id=conversation_id,
                                        project_id=pid, text=text,
                                        client_message_id=client_message_id,
-                                       attachment_ids=attachment_ids)
+                                       attachment_ids=attachment_ids,
+                                       model_provider=selection["model_provider"],
+                                       model_id=selection["model_id"])
         except ValueError as e:
             return HTMLResponse(
                 f'<div class="error">{safe_error_message(e, "The message could not be accepted.")}</div>',
@@ -135,6 +162,8 @@ def chat_retry(request: Request, turn_id: str):
                                    conversation_id=turn["conversation_id"],
                                    project_id=convo.get("project_id") or DEFAULT_PROJECT_ID,
                                    text=text, client_message_id=_uuid.uuid4().hex,
+                                   model_provider=str(turn.get("model_provider") or "AUTO"),
+                                   model_id=str(turn.get("model_id") or ""),
                                    attachment_ids=__import__("app.services.files.repo", fromlist=["selected_for_turn"]).selected_for_turn(
                                        conn, turn_id=turn_id, project_id=turn["project_id"],
                                        conversation_id=turn["conversation_id"]))

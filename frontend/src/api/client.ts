@@ -38,6 +38,35 @@ export interface SpaMessage {
   role: string;
   body_md: string;
   citations: unknown[];
+  created_at?: string | null;
+  model?: {
+    provider?: string | null;
+    model?: string | null;
+    route_mode?: string | null;
+  } | null;
+}
+
+export type ChatModelProvider = "AUTO" | "LOCAL" | "OPENROUTER";
+
+export interface ChatModelChoice {
+  id: string;
+  name: string;
+}
+
+export interface ChatModelProviderOption {
+  provider: ChatModelProvider;
+  available: boolean;
+  detail: string;
+  models: ChatModelChoice[];
+}
+
+export interface ChatModelSelection {
+  model_provider: ChatModelProvider;
+  model_id: string | null;
+}
+
+export interface ChatModelCatalog {
+  providers: ChatModelProviderOption[];
 }
 
 export interface SpaActivityEvent {
@@ -605,6 +634,36 @@ export const api = {
     }),
   getMessages: (id: string) =>
     request<SpaMessage[]>(`/api/chats/${encodeURIComponent(id)}/messages`),
+  getChatModelCatalog: () => request<ChatModelCatalog>("/api/ai/chat-models"),
+  getChatModelSelection: (id: string) =>
+    request<ChatModelSelection>(`/api/chats/${encodeURIComponent(id)}/model-selection`),
+  saveChatModelSelection: (id: string, selection: ChatModelSelection) =>
+    request<ChatModelSelection>(`/api/chats/${encodeURIComponent(id)}/model-selection`, {
+      method: "PUT",
+      body: JSON.stringify(selection),
+    }),
+  downloadChatMarkdown: async (id: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`/api/chats/${encodeURIComponent(id)}/export.md`);
+    if (!res.ok) {
+      let message = `Export failed (${res.status}). Please try again.`;
+      try {
+        const payload = await res.clone().json() as { detail?: unknown; message?: unknown };
+        if (typeof payload.detail === "string") message = payload.detail;
+        else if (typeof payload.message === "string") message = payload.message;
+      } catch { /* use the status-based message for non-JSON errors */ }
+      throw new Error(message);
+    }
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+    let filename = "conversation.md";
+    try {
+      const candidate = encodedName ? decodeURIComponent(encodedName) : plainName;
+      if (candidate) filename = candidate.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
+    } catch { /* retain the safe default filename */ }
+    if (!filename.toLowerCase().endsWith(".md")) filename = "conversation.md";
+    return { blob: await res.blob(), filename: filename || "conversation.md" };
+  },
   getActivity: (conversation_id: string) =>
     request<SpaActivityEvent[]>(
       `/api/activity?conversation_id=${encodeURIComponent(conversation_id)}`,
@@ -750,14 +809,26 @@ export async function sendChatTurn(
   text: string,
   clientMessageId: string,
   attachmentIds: string[] = [],
+  modelProvider: ChatModelProvider = "AUTO",
+  modelId: string | null = "",
 ): Promise<{ turnId: string; ackHtml: string }> {
   const form = new FormData();
   form.set("conversation_id", conversationId);
   form.set("text", text);
   form.set("client_message_id", clientMessageId);
+  form.set("model_provider", modelProvider);
+  form.set("model_id", modelId ?? "");
   attachmentIds.forEach((fileId) => form.append("attachment_ids", fileId));
   const res = await fetch("/chat/turn", { method: "POST", body: form });
-  if (!res.ok) throw new Error(`chat turn failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const payload = await res.clone().json() as { detail?: unknown; message?: unknown };
+      detail = typeof payload.detail === "string" ? payload.detail
+        : typeof payload.message === "string" ? payload.message : "";
+    } catch { /* keep a status-based message for non-JSON responses */ }
+    throw new Error(detail || `chat turn failed: ${res.status}`);
+  }
   const ackHtml = await res.text();
   return { turnId: parseTurnIdFromAck(ackHtml), ackHtml };
 }

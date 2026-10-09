@@ -30,6 +30,8 @@ export interface ChatMessageProps {
   onRetry?: (oldTurnId: string) => void;
   /** Sanitized provenance from GET /api/chats/{id}/messages (W3 contract). */
   citations?: unknown[];
+  /** Actual response model metadata, when the backend recorded it. */
+  model?: { provider?: string | null; model?: string | null; route_mode?: string | null } | null;
   projectId?: string | null;
   conversationId?: string | null;
 }
@@ -109,6 +111,7 @@ export default function ChatMessage({
   latencyMs,
   onRetry,
   citations,
+  model,
   projectId,
   conversationId,
 }: ChatMessageProps) {
@@ -211,6 +214,12 @@ export default function ChatMessage({
               </li>
             ))}
           </ul>
+        ) : null}
+        {!streaming && model && (model.provider || model.model) ? (
+          <p className="mt-2 text-meta text-inkmuted" data-testid="actual-model">
+            Used: {[model.provider, model.model].filter((value): value is string => Boolean(value?.trim())).join(" · ")}
+            {model.route_mode ? ` · ${model.route_mode}` : ""}
+          </p>
         ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-meta text-inkmuted">
           {streaming ? <span>Streaming…</span> : null}
