@@ -162,6 +162,7 @@ print(MARKER_PH + json.dumps(out))
 """.replace("MARKER_PH", repr(MARKER))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="DPAPI vault probes require Windows")
 def test_domain1_vault_refs_scopes_and_presence_only():
     data = run_probe("w5", VAULT_PROBE)
     assert data["ref_fmt"] is True
@@ -507,6 +508,7 @@ print(MARKER_PH + json.dumps(out))
 """.replace("MARKER_PH", repr(MARKER))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="DPAPI vault probes require Windows")
 def test_domain4_cross_project_isolation_vault_and_integrations():
     data = run_probe("w5", ISOLATION_W5_PROBE)
     assert data["vault_own"] is True

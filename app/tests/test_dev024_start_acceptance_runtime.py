@@ -9,6 +9,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+if not (ROOT / "scripts" / "start_acceptance_runtime.py").is_file():
+    pytest.skip(
+        "requires the DEV-024 runtime acceptance script, which the public export omits",
+        allow_module_level=True,
+    )
 sys.path.insert(0, str(ROOT / "scripts"))
 import start_acceptance_runtime as startup
 

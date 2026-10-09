@@ -6,6 +6,14 @@ The project source is licensed under Apache License 2.0. See LICENSE.
 
 THIRD-PARTY SOFTWARE AND ATTRIBUTION
 
+Marketing Skills
+The vendored skills under .agents/skills are from
+coreyhaines31/marketingskills, version v2.11.1, commit
+5b2c0007766c6a1cf1d53fd8fc73e979e0821022, under the MIT License.
+Copyright (c) 2025 Corey Haines. The accompanying permission notice is
+preserved verbatim in .agents/LICENSE. OMOS-authored .agents/product-marketing.md
+is not part of the upstream library and is excluded from distribution.
+
 The source-lock and selected-component inventory is in THIRD-PARTY-NOTICES and
 LICENSE-INVENTORY.md (machine-readable counterpart: LICENSE-INVENTORY.json).
 The Windows packaging step copies these recipient notices into the application

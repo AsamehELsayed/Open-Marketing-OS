@@ -264,7 +264,7 @@ def test_knowledge_route_invokes_rag_and_labeled_context(tmp_path, monkeypatch):
 # ------------------------------------------------------------ t6 clarification
 
 @pytest.mark.skipif(not LANGGRAPH, reason="langgraph not installed")
-def test_unresolvable_intent_empty_context_asks_clarification(tmp_path):
+def test_unresolvable_intent_empty_context_reports_unavailable_provider(tmp_path):
     from app.database.sqlite import connect
 
     plain = connect(tmp_path / "hfx3-t6-empty.db")
@@ -275,7 +275,8 @@ def test_unresolvable_intent_empty_context_asks_clarification(tmp_path):
     res = _invoke(graph, "zzq explaining the unusual violet badgers",
                   conversation_id="c-empty", turn_id="t6k6")
     final = str(res.get("final_answer") or "")
-    assert "Quick clarification" in final
+    assert "couldn't generate an answer" in final
+    assert "selected provider is available" in final
     assert res.get("context_sources_used") == ["user_turn"]
 
 

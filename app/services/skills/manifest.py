@@ -243,9 +243,13 @@ def verify_registry(
             f"{', '.join(stale)}"
         )
 
-    if manifest is not None:
+    if manifest is None:
+        problems.append("MANIFEST_DRIFT: marketing-skills manifest is missing or unreadable")
+    else:
         problems.extend(_verify_document("manifest", manifest, registry))
-    if lock is not None:
+    if lock is None:
+        problems.append("MANIFEST_DRIFT: skills lock is missing or unreadable")
+    else:
         problems.extend(_verify_document("lock", lock, registry))
     return problems
 

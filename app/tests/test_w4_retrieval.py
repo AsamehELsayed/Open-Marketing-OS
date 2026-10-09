@@ -22,6 +22,14 @@ CORPUS = {
 }
 
 
+class _SyntheticSemanticEmbeddings(LocalHashEmbeddings):
+    """Deterministic semantic-capable stand-in for Chroma integration tests."""
+
+    id = "synthetic-semantic"
+    semantic = True
+    ready = True
+
+
 def _corpus(tmp_path, extra=None):
     root = tmp_path / "ws"
     files = dict(CORPUS)
@@ -55,12 +63,13 @@ def test_r1_fts_hit_with_provenance(tmp_path):
 def test_r2_chroma_hit_or_skip(tmp_path):
     chromadb = pytest.importorskip("chromadb")
     conn, root, _ = _indexed(tmp_path)
-    provider = LocalHashEmbeddings()
+    provider = _SyntheticSemanticEmbeddings()
     store = ChromaStore(tmp_path / "chroma", provider)
-    assert store.mode == "HYBRID"
+    assert store.mode == "FTS_ONLY"  # no verified vectors exist before indexing
     svc = IndexingService(conn, root, vector_store=store, provider=provider)
     svc.build_or_update()
-    res = rag_service.retrieve(conn, "custom websites", store=store, provider=provider)
+    res = rag_service.retrieve(
+        conn, "custom websites", store=store, provider=provider, project_id="starter")
     assert res["mode"] == "HYBRID"
     assert res["hits"]
     conn.close()
@@ -100,9 +109,12 @@ def test_r6_sim_fixture_excluded(tmp_path):
 
 def test_r7_secret_quarantined(tmp_path):
     conn, root, report = _indexed(tmp_path)
-    assert any(q["path"] == "research/secret.md" for q in report["quarantined"])
+    assert report["quarantined"] == 1
+    assert any(q["source_ref"] == "research/secret.md"
+               and q["code"] == "secret_detected" for q in report["errors"])
     paths = {r[0] for r in conn.execute("SELECT path FROM documents").fetchall()}
-    assert "research/secret.md" not in paths
+    refs = {r[0] for r in conn.execute("SELECT source_ref FROM documents").fetchall()}
+    assert "research/secret.md" not in paths and "research/secret.md" not in refs
     conn.close()
 
 
@@ -145,21 +157,26 @@ def test_r4_provider_mismatch_rebuilds(tmp_path):
     chromadb = pytest.importorskip("chromadb")
     from app.services.rag.chroma_store import ChromaStore
 
-    class V1(LocalHashEmbeddings):
+    class V1(_SyntheticSemanticEmbeddings):
         id = "test-prov"
         version = "1"
 
-    class V2(LocalHashEmbeddings):
+    class V2(_SyntheticSemanticEmbeddings):
         id = "test-prov"
         version = "2"
 
+    conn, root, _ = _indexed(tmp_path)
     s1 = ChromaStore(tmp_path / "chroma", V1())
+    IndexingService(conn, root, vector_store=s1, provider=V1()).build_or_update()
     assert s1.mode == "HYBRID"
-    s1.upsert([("k1", V1().embed("hello"), {"path": "a.md"})])
     s2 = ChromaStore(tmp_path / "chroma", V2())
+    assert s2.mode == "FTS_ONLY"
+    assert s2._collection.count() == 0
+    IndexingService(conn, root, vector_store=s2, provider=V2()).build_or_update()
     assert s2.mode == "HYBRID"
-    assert s2._collection.metadata["provider_version"] == "2"
-    assert s2.query(V2().embed("hello")) == []  # old vectors gone, never mixed
+    assert s2._collection.metadata["embedding_version"] == "2"
+    assert s2.query(V2().embed("hello"), where={"project_id": "starter"})
+    conn.close()
 
 
 def test_embeddings_deterministic():

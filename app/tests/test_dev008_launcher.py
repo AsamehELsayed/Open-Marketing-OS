@@ -183,7 +183,10 @@ def test_single_instance_lock_blocks_a_second_launcher(launcher):
 def test_stale_lock_is_reclaimed(launcher):
     path = launcher._instance_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"pid": 999999, "port": 1}), encoding="utf-8")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        stale_port = probe.getsockname()[1]
+    path.write_text(json.dumps({"pid": 999999, "port": stale_port}), encoding="utf-8")
     handle = launcher.acquire_single_instance()
     assert handle is not None, "a stale lock from a dead pid must not block launch"
     launcher._release_lock(handle)

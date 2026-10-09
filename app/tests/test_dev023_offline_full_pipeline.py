@@ -1,6 +1,5 @@
 """Offline full-pipeline acceptance for DEV-023; all generation uses a fake local provider."""
 import json
-import importlib.util
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,12 +49,7 @@ def test_scoped_retrieval_to_graph_db_sse_react_and_durable_evidence(tmp_path, m
     from app.services.config_service import ConfigService
     from app.services.llm.model_router import ModelRouter
     from app.contracts.events import GraphExecutionEvent
-    evidence_module_path = (Path(__file__).resolve().parents[2]
-                            / "development" / "acceptance" / "DEV-023" / "evidence_schema.py")
-    spec = importlib.util.spec_from_file_location("dev023_evidence_schema", evidence_module_path)
-    evidence_schema = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(evidence_schema)
+    from app.tests.fixtures.dev023_evidence_schema import capture_persisted_turn
 
     # DEV-023 acceptance remains isolated from any installed/canonical DB.
     db_path = tmp_path / "dev023-offline.sqlite"
@@ -137,7 +131,7 @@ def test_scoped_retrieval_to_graph_db_sse_react_and_durable_evidence(tmp_path, m
                               "project_id": "dev023-pipeline", "user_message_id": "dev023-user",
                               "status": "completed", "created_at": "2026-10-03T00:00:00Z"})
     artifact = tmp_path / "turn-evidence.json"
-    captured = evidence_schema.capture_persisted_turn(
+    captured = capture_persisted_turn(
         conn, project_id="dev023-pipeline", conversation_id="dev023-convo",
         turn_id="dev023-turn", assistant_message_id="dev023-assistant",
         output_path=str(artifact))

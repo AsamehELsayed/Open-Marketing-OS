@@ -152,6 +152,8 @@ def test_missing_manifest_provenance_field_fails_closed():
 
     registry = load_registry(disabled="")
     assert registry.report.invalid_count == 0
+    missing_files = verify_registry(registry, manifest=None, lock=None)
+    assert sum(problem.startswith("MANIFEST_DRIFT:") for problem in missing_files) >= 2
     manifest = build_manifest(registry)
     lock = build_lock(registry)
 

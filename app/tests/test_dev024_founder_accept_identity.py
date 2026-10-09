@@ -7,6 +7,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+if not all(
+    (ROOT / "scripts" / name).is_file()
+    for name in ("founder_accept.py", "runtime_identity.py")
+):
+    pytest.skip(
+        "requires DEV-024 runtime acceptance scripts, which the public export omits",
+        allow_module_level=True,
+    )
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 import founder_accept as acceptance
