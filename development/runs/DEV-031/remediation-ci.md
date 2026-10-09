@@ -21,3 +21,12 @@
 - The first PR Actions run remains failed until a new run reports success. No claim of final CI success is made here.
 
 The targeted tests used the repository's normal test fixtures. Windows TestClient initialization required elevated local access under the workspace sandbox. No product runtime code changed in this CI remediation.
+
+## Second PR run and remediation
+
+- PR run `37985032794` at head `5dc8c3f0251553822ddf7420da657b431cab0ff2`: Windows, frontend, packaging, locked-runtime, skills provenance, and secret-hygiene jobs passed; both Python backend matrix jobs failed.
+- The Python test artifacts were listed by the GitHub API, but their download endpoint returned HTTP 401 even with the existing GitHub credential, so the failure logs were not available here.
+- The exact CI command, `python -m pytest -q`, was reproduced locally. Result: **2,601 passed, 99 skipped, 3 failed in 663.07 seconds**.
+- `test_dev015_i1_migration.py::test_v10_to_v11_attachment_tables_migrate_idempotently_and_round_trip` and `test_w2_sqlite.py::test_schema_version_and_tables` still expected schema version 12 despite Phase A correctly advancing the database to version 13. Both now compare against the canonical `SCHEMA_VERSION` constant.
+- `test_dev012_write_constraints.py::test_allowed_website_read_runs_with_campaign_suggestion_and_no_write` depended on a live `example.com` fetch. It now injects deterministic fetched-page evidence, keeping this test focused on the allowed-read/no-campaign-write behavior without external network variability.
+- All three exact failing tests passed locally after these changes (**3 passed in 12.26 seconds**). A full-suite rerun and fresh independent QA/review are pending, and public CI has not yet rerun on these corrections.

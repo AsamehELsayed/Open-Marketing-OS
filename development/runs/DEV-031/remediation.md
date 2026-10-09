@@ -20,3 +20,9 @@ The pre-review QA PASS is preserved in `qa-before-sol-remediation.md`. Final ind
 ## Initial GitHub CI remediation
 
 The first PR run found that any `development/runs/` directory enabled legacy private-artifact tests even though DEV-005/DEV-007 fixtures were absent. `internal_fixtures.py` now checks the exact parity and migration files those tests consume, and a regression test proves a DEV-031 run directory alone does not enable them. The backend's frozen React route inventory also lacked the approved `/app/workspace` route; its expected list now includes it. Local Windows CI tests and the focused backend/route tests pass. Independent QA and SOL re-review are required again; GitHub CI has not yet been rerun.
+
+## Backend matrix remediation
+
+- Replaced two stale hard-coded SQLite version `12` test assertions with `SCHEMA_VERSION`, which correctly resolves to `13` after Phase A.
+- Made the DEV-012 allowed website-read test deterministic by supplying a successful fake fetch response; the test continues to verify that a read audit may run while campaign creation remains blocked.
+- The local exact-failure rerun passed all three tests. Full-suite verification and a new public CI run remain required.

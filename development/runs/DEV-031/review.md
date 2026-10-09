@@ -1,79 +1,81 @@
 VERDICT: APPROVE
 
-# DEV-031 independent SOL re-review after CI remediation
+# DEV-031 independent SOL re-review after second CI remediation
 
-**Execution:** Separate `gpt-6.1-sol` review execution using the previously loaded code-review-and-quality rubric. Read-only on implementation; no delegation or provider calls.
+**Execution:** Fresh, separate `gpt-6.1-sol` review after final independent QA PASS. Applied the previously loaded code-review-and-quality skill and repository delegation policy. Read-only on implementation; no delegation or model call.
 
-**Started:** 2026-10-09 20:04:13 UTC
-**Completed:** 2026-10-09 20:06:27 UTC
-**Reviewed baseline:** public main `efbcb7582ca43ef35db70f462ee52a1d9136789b`
-**CI-remediation base:** `bedcb0c22866b1a9eb7676ae3dac13fa56e6500e`
+**Started:** 2026-10-09 20:37:34 UTC
+**Completed:** 2026-10-09 20:40:44 UTC
+**Reviewed public-main baseline:** `efbcb7582ca43ef35db70f462ee52a1d9136789b`
+**Second-remediation base:** `5dc8c3f0251553822ddf7420da657b431cab0ff2`
 
-No required code changes remain. APPROVE applies to the local code-review gate. Remote CI success and merge completion are separate requirements and have not been verified by this reviewer.
+No required code changes remain. APPROVE is the current local review verdict. It does not establish remote CI success, a merge, or release completion.
 
-## CI remediation
+## Three test changes
 
-### Exact private-fixture detection — approved
+### Canonical schema version — approved in both tests
 
-`app/tests/internal_fixtures.py:50-58` explicitly enumerates these seven files:
+`app/tests/test_dev015_i1_migration.py:2`, `:31` and `app/tests/test_w2_sqlite.py:4`, `:15` now import and compare against `SCHEMA_VERSION`, which is 13 at `app/database/sqlite.py:8`. The old literals expected 12 despite the approved v13 migration.
 
-- DEV-005 parity: `chat_corpus.json`, `rag_golden.json`, `state_cases.json`.
-- DEV-007 migrations: `w2.sql`, `w4.sql`, `w5.sql`, `w6.sql`.
+The migration test still reconstructs the v10 attachment-table boundary, applies the v10→v11 migration twice, persists attachment bindings/selections, reopens through the current `connect()`, and verifies both persistence and conversation scope. The fresh-schema test still checks its expected tables, message columns and conversation/turn model columns. No structural assertion was removed. Comparing the reopened current database with the canonical current schema is the appropriate contract; the change does not redefine the historical migration's behavior.
 
-At lines 97-109, the existing skip marker now depends on every required path being a file rather than the parent directory existing. Checked the actual consumers: `test_w0_contracts.py:341-369`, `test_dev007_files.py:486-497`, `test_dev007_tool_registry.py:436-440`, `test_dev007_vault.py:469-485`, and `test_dev007_mcp.py:712-715`. The enumerated paths match their private artifact reads.
+### Deterministic allowed-read/no-campaign-write test — approved
 
-The new `app/tests/test_internal_fixtures.py:7-16` verifies that a DEV-031 directory alone does not enable those tests, then verifies that supplying all required files enables them. This corrects a pre-existing availability assumption exposed by committing the required public run evidence. It does not skip general product or DPAPI tests merely because they are old; the existing decorated private-artifact tests keep their explicit skip reason, and execute when the required fixtures are present. Missing artifact contents are not fabricated.
+`app/tests/test_dev012_write_constraints.py:99-121` patches only `web_tools._default_website_transport` with a successful synthetic fetched-page response. It returns the page fields consumed by the existing audit, including URL, status, title/text, links and viewport flag. Pytest's `monkeypatch` restores the global after the test.
 
-### Workspace route inventory — approved
+Inspected the real seam: `app/services/tools/web_tools.py:210-225` calls the injected transport with positional URL/timeout, and `:353-365` chooses that default for website audit when no transport is supplied. The fake signature matches this invocation. The test continues to execute the actual graph, registered audit, constraint handling and SQLite telemetry, rather than replacing their results.
 
-`app/tests/test_dev007rfinal_surface.py:150` adds only `/app/workspace` to the exact expected route sequence. It matches the approved route at `frontend/src/App.tsx:68` and retains the exact-list assertion. There is no wildcard relaxation or removal of route coverage.
+The original assertions remain at test lines 129-134: an audit succeeds and returns a capability answer; campaign rows remain empty; `propose_campaign` was never run; and campaign creation remains explicitly forbidden. Live website availability was unrelated to those constraints. A deterministic response removes network variability without weakening the product behavior being tested.
 
-### Minimality and five-axis assessment
+## Minimality and five axes
 
-The entire runtime/implementation tree is unchanged relative to the previously reviewed Phase A commit. The current code diff is two existing test infrastructure files plus the new fixture-gate regression; remaining changes are run evidence/metadata.
+The complete current implementation diff relative to the preceding commit is these three test files. Run metadata, QA and remediation records also changed. Relative to the original approved Phase A implementation commit, cumulative CI changes remain confined to tests: fixture detection/regression, route inventory, these two version assertions and the injected transport. No runtime or frontend source changed.
 
-- **Correctness:** file-based fixture availability matches the consumed private artifacts; the route expectation matches the approved product route. Independently executed both affected regressions successfully.
-- **Readability:** explicit fixture paths, one small availability helper, and one route-list insertion make the causes and remedies clear.
-- **Architecture:** preserves the existing skip-marker mechanism and exact route-inventory test. No product/provider/migration architecture change in this remediation.
-- **Security:** no secret, access-control, permission, publishing or DPAPI runtime behavior changed. The Windows product tests remain enabled; the private migration-artifact test is the intended skip when its unpublished fixtures are missing.
-- **Performance:** seven bounded file checks at test-module initialization; no product hot-path impact.
-
-## Prior fixes and approved requirements
-
-The previously reviewed runtime code is unchanged, so the substantive findings remain closed. Rechecked its relevant boundaries and the earlier `review-before-ci-remediation.md` evidence:
-
-| Prior finding | Current disposition |
+| Axis | Assessment |
 |---|---|
-| F1 unsupported citations | CLOSED: `app/routes/business_workspace.py:25-50`, `:167-173` validate source candidates against retrieved IDs before persistence. Original punctuated-citation rejection and saved provenance preservation were independently reproduced in the prior review; focused QA still passes. |
-| F2 optional creation fields | CLOSED: `app/services/business_workspace.py:13-25` supplies the shared validator; creation at `app/routes/business_workspace.py:69-86` persists supplied fields after validation. |
-| F3 A→B→A responses | CLOSED: `Workspace.tsx:58-92` guards action success, errors and finalization with both selected ID and epoch; `workspaceSelection.ts:1-8` remains unchanged. |
-| F4 lazy initialization race | CLOSED: `app/services/business_workspace.py:32-38` uses conflict-safe insert and reload. Prior controlled reproduction and current QA's synchronized-reader regression support the fix. |
+| Correctness | All three exact full-suite failure tests now pass independently. Their substantive schema, attachment, audit and forbidden-write assertions remain intact. |
+| Readability | Canonical version references remove stale literals; the synthetic page response is explicit and scoped to its one test. |
+| Architecture | Uses the existing schema constant and transport injection seam. No product abstraction, provider, migration or workflow change. |
+| Security | Campaign permission behavior remains tested through the real graph; no secret, publishing, auth, vault or runtime guard was altered. |
+| Performance | Removes a live fetch from a focused regression. No production performance effect or dependency change. |
 
-All four founder UX requirements remain represented: short name-only creation with optional fields; generation status and actual returned provider/model with understandable failures and manual editing available; explicit saved/draft replacement confirmation plus revision checks; and separated user facts, evidence, AI suggestions and missing information with supported citations.
+No required finding or scope expansion was identified.
 
-The implementation still reuses Projects, existing Knowledge/files, SQLite and ModelRouter; preserves first-run onboarding, Account Manager, campaigns, automatic tools, model selection, Markdown export and approval guards; and stays inside Phase A. No CRM, Phase B, client portal, billing, multi-user platform, publishing integration, installer change, redesign or provider stack was added.
+## Prior Phase A fixes and founder requirements
 
-## Evidence and verification
+Rechecked current boundary code and prior review evidence. All four original findings remain closed:
 
-Read the approved plan, supplied operating contract, repository delegation policy, original blocked review, prior approved re-review, `remediation.md`, `remediation-ci.md`, current `qa.md`, acceptance and execution records. Reviewed the current tracked code diff and new fixture regression. The final QA artifact was reread after its authoritative completion at **2026-10-09 20:04:37 UTC**, and its execution record now agrees. Initial context reading began against the earlier provisional PASS artifact; the final verdict uses the completed QA record.
+- **F1 citations:** `app/routes/business_workspace.py:25-50`, `:167-173` validates references against scoped retrieved IDs before persistence; prior independent reproduction confirmed rejection and complete saved brief/provenance preservation.
+- **F2 partial creation:** shared validation at `app/services/business_workspace.py:13-25` is used by creation at `app/routes/business_workspace.py:69-86`; supplied supported optional fields persist.
+- **F3 A→B→A actions:** `Workspace.tsx:58-92` guards action success/errors/finalization by ID and selection epoch through `workspaceSelection.ts:1-8`.
+- **F4 concurrent initialization:** `app/services/business_workspace.py:32-38` uses conflict-safe insert and reads the winning row.
 
-**Independently performed in this review:**
+The earlier private-fixture detection and exact `/app/workspace` inventory corrections remain intact.
 
-`python -B -m pytest --basetemp=.pytest-tmp/review-ci -p no:cacheprovider -q app/tests/test_internal_fixtures.py app/tests/test_dev007rfinal_surface.py::test_react_route_inventory_is_exactly_the_frozen_set`
+All four founder UX requirements remain represented: short name-only creation with optional details; generation state, actual returned route/model and understandable failures with manual editing available; explicit replacement confirmation with revision protection; and separated facts, evidence, suggestions and missing information with validated citation IDs.
 
-Result: **2 passed, 1 warning in 2.56 seconds**. The warning is the existing Starlette/AnyIO deprecated alias. `git diff --check HEAD` also passed with working-copy LF/CRLF notices only.
+Phase A continues to reuse Projects, scoped Knowledge/files, SQLite and the existing ModelRouter. First-run onboarding, Account Manager, automatic tools, campaign drafts, model selection, Markdown export and approval guards remain supported. No CRM, Phase B, multi-user platform, billing, portal, publishing integration, redesign, installer change or provider stack was introduced.
 
-**Inspected final independent QA evidence:**
+## Checks and evidence
 
-- Focused backend and fixture gate: **41 passed, 1 skipped**.
-- Exact Windows workflow test set: **102 passed, 2 skipped**.
-- Frozen route inventory: **1 passed**.
-- Frontend confirmation/selection regressions, typecheck and production build: passed.
+Read the approved plan, supplied operating contract, delegation policy, current `qa-brief.md`, `qa.md`, `remediation-ci.md`, `remediation.md`, acceptance, earlier review records and current execution records. The final QA PASS completed **2026-10-09 20:36:09 UTC**, before this review began.
 
-These local results support the remediation; they do not establish the full remote Linux matrix result.
+**Independently performed in this execution:**
 
-## Limitations and release gates
+`python -B -m pytest --basetemp=.pytest-tmp/ci2-review -p no:cacheprovider -q app/tests/test_dev015_i1_migration.py::test_v10_to_v11_attachment_tables_migrate_idempotently_and_round_trip app/tests/test_w2_sqlite.py::test_schema_version_and_tables app/tests/test_dev012_write_constraints.py::test_allowed_website_read_runs_with_campaign_suggestion_and_no_write`
 
-The recorded two-client browser scenario covers creation, scoped upload, manual brief save/edit, restart persistence, isolation and provider-failure behavior. This reviewer did not rerun the browser. Real generation remains unverified because no model/provider was available; deterministic fake output is test evidence only. The selection regression is a helper/source-guard check, not a mounted React end-to-end delay test.
+Final elevated confirmation run: **3 passed in 4.10 seconds, exit 0**. The first sandbox attempt produced no result and was interrupted. A subsequent workspace-temp attempt printed 3 passes as the interruption arrived; that interrupted exit is not counted as the successful verification. No test or implementation file was edited by this reviewer.
 
-The first GitHub Actions run is recorded as failed. This execution did not independently fetch or verify a successful rerun, push, PR status or merge. Continue the user-authorized PR/CI flow, obtain actual required CI success, and verify the merge on public main before reporting release completion. Preserve the real-generation limitation in that report.
+`git diff --check HEAD` passed; Git emitted LF/CRLF notices for run artifacts only.
+
+**Inspected final independent QA evidence:** the same three failures passed; focused Phase A/fixture checks reported **41 passed, 1 skipped**; Windows workflow set reported **102 passed, 2 skipped**; route inventory reported **1 passed**; frontend confirmation/selection regressions, typecheck and build passed.
+
+## CI and acceptance limitations
+
+`remediation-ci.md` records public run **37985032794** at `5dc8c3f` as failed in both Linux backend matrix jobs, with Windows and other checks passing. The recorded local full-suite reproduction had **2,601 passed, 99 skipped, 3 failed** before these fixes. The three reproduced local failures correspond to the three reviewed tests. Because remote pytest artifact downloads failed, this evidence does not prove these were the only causes of the Linux jobs.
+
+A new successful public run is still pending/unverified. The full suite was not rerun by this reviewer or final QA after the narrow fixes. Obtain actual required CI success and verify the public-main merge before reporting release completion.
+
+The existing Northstar/Harbor browser record documents creation, scoped upload, manual brief persistence, restart, isolation and friendly generation failure. This reviewer did not rerun the browser. Real AI generation remains unverified because no provider/model was available; deterministic fake output is test evidence only. The selection regression tests the helper and source guards rather than a mounted React delay sequence.
+
+**Final disposition:** APPROVE the current remediated Phase A code for the local review gate; preserve these limitations and continue the authorized CI/merge flow.
