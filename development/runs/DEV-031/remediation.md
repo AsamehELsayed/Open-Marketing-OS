@@ -16,3 +16,7 @@ All QA remediations are within the approved Phase A scope. Initial FAIL evidence
 - **Concurrent lazy profile initialization:** legacy profile creation now uses `INSERT OR IGNORE` on the project-key constraint and reloads the winning row. A synchronized two-reader test verifies both requests succeed and only one profile exists.
 
 The pre-review QA PASS is preserved in `qa-before-sol-remediation.md`. Final independent QA and SOL re-review are required on this latest result; no approval is implied here.
+
+## Initial GitHub CI remediation
+
+The first PR run found that any `development/runs/` directory enabled legacy private-artifact tests even though DEV-005/DEV-007 fixtures were absent. `internal_fixtures.py` now checks the exact parity and migration files those tests consume, and a regression test proves a DEV-031 run directory alone does not enable them. The backend's frozen React route inventory also lacked the approved `/app/workspace` route; its expected list now includes it. Local Windows CI tests and the focused backend/route tests pass. Independent QA and SOL re-review are required again; GitHub CI has not yet been rerun.

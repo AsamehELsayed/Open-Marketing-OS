@@ -1,66 +1,79 @@
-# DEV-031 Phase A independent SOL re-review
-
 VERDICT: APPROVE
 
-**Execution:** Separate `gpt-6.1-sol` re-review after remediation and independent QA PASS. Applied the previously loaded `code-review-and-quality` skill and supplied operating contract. Implementation files were read-only; no delegation, provider call or implementation edit occurred.
+# DEV-031 independent SOL re-review after CI remediation
 
-**Started:** 2026-10-09 17:28:07 UTC
-**Completed:** 2026-10-09 17:30:19 UTC
-**Baseline:** public main `efbcb7582ca43ef35db70f462ee52a1d9136789b`
+**Execution:** Separate `gpt-6.1-sol` review execution using the previously loaded code-review-and-quality rubric. Read-only on implementation; no delegation or provider calls.
 
-No required changes remain in the reviewed Phase A implementation. This approves the code review gate; required GitHub Actions and merge verification remain separate release gates.
+**Started:** 2026-10-09 20:04:13 UTC
+**Completed:** 2026-10-09 20:06:27 UTC
+**Reviewed baseline:** public main `efbcb7582ca43ef35db70f462ee52a1d9136789b`
+**CI-remediation base:** `bedcb0c22866b1a9eb7676ae3dac13fa56e6500e`
 
-## Prior findings
+No required code changes remain. APPROVE applies to the local code-review gate. Remote CI success and merge completion are separate requirements and have not been verified by this reviewer.
 
-| Finding | Disposition and concrete evidence |
+## CI remediation
+
+### Exact private-fixture detection — approved
+
+`app/tests/internal_fixtures.py:50-58` explicitly enumerates these seven files:
+
+- DEV-005 parity: `chat_corpus.json`, `rag_golden.json`, `state_cases.json`.
+- DEV-007 migrations: `w2.sql`, `w4.sql`, `w5.sql`, `w6.sql`.
+
+At lines 97-109, the existing skip marker now depends on every required path being a file rather than the parent directory existing. Checked the actual consumers: `test_w0_contracts.py:341-369`, `test_dev007_files.py:486-497`, `test_dev007_tool_registry.py:436-440`, `test_dev007_vault.py:469-485`, and `test_dev007_mcp.py:712-715`. The enumerated paths match their private artifact reads.
+
+The new `app/tests/test_internal_fixtures.py:7-16` verifies that a DEV-031 directory alone does not enable those tests, then verifies that supplying all required files enables them. This corrects a pre-existing availability assumption exposed by committing the required public run evidence. It does not skip general product or DPAPI tests merely because they are old; the existing decorated private-artifact tests keep their explicit skip reason, and execute when the required fixtures are present. Missing artifact contents are not fabricated.
+
+### Workspace route inventory — approved
+
+`app/tests/test_dev007rfinal_surface.py:150` adds only `/app/workspace` to the exact expected route sequence. It matches the approved route at `frontend/src/App.tsx:68` and retains the exact-list assertion. There is no wildcard relaxation or removal of route coverage.
+
+### Minimality and five-axis assessment
+
+The entire runtime/implementation tree is unchanged relative to the previously reviewed Phase A commit. The current code diff is two existing test infrastructure files plus the new fixture-gate regression; remaining changes are run evidence/metadata.
+
+- **Correctness:** file-based fixture availability matches the consumed private artifacts; the route expectation matches the approved product route. Independently executed both affected regressions successfully.
+- **Readability:** explicit fixture paths, one small availability helper, and one route-list insertion make the causes and remedies clear.
+- **Architecture:** preserves the existing skip-marker mechanism and exact route-inventory test. No product/provider/migration architecture change in this remediation.
+- **Security:** no secret, access-control, permission, publishing or DPAPI runtime behavior changed. The Windows product tests remain enabled; the private migration-artifact test is the intended skip when its unpublished fixtures are missing.
+- **Performance:** seven bounded file checks at test-module initialization; no product hot-path impact.
+
+## Prior fixes and approved requirements
+
+The previously reviewed runtime code is unchanged, so the substantive findings remain closed. Rechecked its relevant boundaries and the earlier `review-before-ci-remediation.md` evidence:
+
+| Prior finding | Current disposition |
 |---|---|
-| F1 — unsupported citations | **CLOSED.** `app/routes/business_workspace.py:25-50` checks every bracketed colon reference against the exact scoped evidence set and rejects noncanonical source-like tokens. Generation calls it before persistence at lines 167-173. Re-executed the original production-route reproduction with zero evidence and `[invented.source:reference]`: now returns 503/`invalid_model_output`; the complete saved brief response, including revision and provenance, remains unchanged. Canonical `[doc-a:chunk-a]` is accepted when allowlisted. Updated backend regression covers unknown bracketed, bare, parenthesized and punctuated references. |
-| F2 — optional fields lost at creation | **CLOSED.** `app/services/business_workspace.py:13-25` is the shared type/length/normalization boundary; updates call it at line 50 and creation at `app/routes/business_workspace.py:69-86`. Creation persists all supplied supported fields and validates before inserts. Re-executed the production route with all eight profile fields: every value round-trips. A non-text website returns 422 and leaves project count unchanged. |
-| F3 — A→B→A stale actions | **CLOSED.** `frontend/src/routes/Workspace.tsx:58-66`, `:70-78`, and `:83-92` capture both project ID and selection epoch and guard success, error and finalization. `workspaceSelection.ts:1-8` requires both to match; the effect at Workspace lines 37-52 invalidates prior epochs. Inspected every handler and independently ran the selection regression: old A epoch is rejected after switching back to A. This check tests the helper plus handler source guards, not a mounted React/browser delay sequence. |
-| F4 — concurrent lazy initialization | **CLOSED.** `app/services/business_workspace.py:32-38` now inserts with `INSERT OR IGNORE`, then reads the winning row. Repeated the original controlled interleaving: it returns the existing profile without UNIQUE failure and leaves one row. The reviewed synchronized two-reader regression additionally exercises real separate SQLite connections; latest independent QA reports it passed. |
+| F1 unsupported citations | CLOSED: `app/routes/business_workspace.py:25-50`, `:167-173` validate source candidates against retrieved IDs before persistence. Original punctuated-citation rejection and saved provenance preservation were independently reproduced in the prior review; focused QA still passes. |
+| F2 optional creation fields | CLOSED: `app/services/business_workspace.py:13-25` supplies the shared validator; creation at `app/routes/business_workspace.py:69-86` persists supplied fields after validation. |
+| F3 A→B→A responses | CLOSED: `Workspace.tsx:58-92` guards action success, errors and finalization with both selected ID and epoch; `workspaceSelection.ts:1-8` remains unchanged. |
+| F4 lazy initialization race | CLOSED: `app/services/business_workspace.py:32-38` uses conflict-safe insert and reload. Prior controlled reproduction and current QA's synchronized-reader regression support the fix. |
 
-The earlier QA findings also remain closed: v13's profile project key is explicitly `NOT NULL`; original unsupported citation forms remain rejected; regeneration confirmation accurately states immediate saved replacement and discarded unsaved editor edits.
+All four founder UX requirements remain represented: short name-only creation with optional fields; generation status and actual returned provider/model with understandable failures and manual editing available; explicit saved/draft replacement confirmation plus revision checks; and separated user facts, evidence, AI suggestions and missing information with supported citations.
 
-## Four founder-approved UX requirements
+The implementation still reuses Projects, existing Knowledge/files, SQLite and ModelRouter; preserves first-run onboarding, Account Manager, campaigns, automatic tools, model selection, Markdown export and approval guards; and stays inside Phase A. No CRM, Phase B, client portal, billing, multi-user platform, publishing integration, installer change, redesign or provider stack was added.
 
-1. **Name-only, short client creation:** explicit client mode keeps only business name and optional website visible; name-only creation remains valid and every other profile field can be added later. Existing first-run onboarding retains its prior API/navigation path. Evidence: `frontend/src/routes/CreateBusiness.tsx`, `app/routes/business_workspace.py:63-88`, recorded browser acceptance.
-2. **Generation state, actual route and plain-language failures, with manual editing available:** Workspace shows running/generated/failed state and returned provider/model metadata; structured error handling covers missing credentials, unavailable model, authentication, timeout and generic provider failures. Failed generation leaves the saved brief intact and re-enables editing. Evidence: `Workspace.tsx:80-92`, `:118-119`; generation error handling in `app/routes/business_workspace.py:194-255`; latest QA and browser acceptance.
-3. **Explicit confirmation before replacing an edited brief:** Workspace line 82 checks saved or draft content and uses the corrected confirmation. Backend lines 136-138 enforce saved-brief overwrite authorization and snapshot profile/brief revisions; lines 187-191 conditionally persist. The independently rerun confirmation assertion passed.
-4. **Separate facts, evidence, suggestions and unknowns; supported citations; insufficient Knowledge:** the prompt and required section checks at backend lines 143-152 and 174-185 separate categories; the UI labels them at Workspace line 120 and displays sources at line 121. F1 closes the reported citation validation gap. Missing evidence is explicitly described as insufficient in the prompt/UI. These structural safeguards do not establish the semantic truth of every sentence a real model might produce.
+## Evidence and verification
 
-## Five-axis review
+Read the approved plan, supplied operating contract, repository delegation policy, original blocked review, prior approved re-review, `remediation.md`, `remediation-ci.md`, current `qa.md`, acceptance and execution records. Reviewed the current tracked code diff and new fixture regression. The final QA artifact was reread after its authoritative completion at **2026-10-09 20:04:37 UTC**, and its execution record now agrees. Initial context reading began against the earlier provisional PASS artifact; the final verdict uses the completed QA record.
 
-| Axis | Assessment |
-|---|---|
-| Correctness | Prior failures resolved. Partial profiles, separate brief/profile revisions, unknown-project handling, conflicting body-ID rejection, generation validation and conditional persistence fit the approved contract. Recorded migration, restart and isolation evidence inspected. |
-| Readability | Shared profile validation and dedicated citation/selection helpers give the new boundaries clear owners. New modules remain small; no required readability finding. |
-| Architecture | Projects remain the client identity; the additive SQLite table owns profile/brief state. Existing scoped retrieval, ModelRouter, files, campaigns and navigation are reused. No replacement-style profile writes or new provider stack. |
-| Security | Path IDs scope access, SQL values are parameterized, editable column names come from a fixed whitelist, creation is validated, untrusted generated citation IDs are allowlisted, and isolated clients skip root ingestion/import. Single-operator project isolation is not represented as multi-user authentication. |
-| Performance | Profile fields are bounded, retrieval is limited to eight excerpts of 1,200 characters, and one tools-disabled model call requests at most 1,800 output tokens. No new unbounded list query or dependency change. |
+**Independently performed in this review:**
 
-## Scope and regression assessment
+`python -B -m pytest --basetemp=.pytest-tmp/review-ci -p no:cacheprovider -q app/tests/test_internal_fixtures.py app/tests/test_dev007rfinal_surface.py::test_react_route_inventory_is_exactly_the_frozen_set`
 
-Reviewed the complete tracked baseline diff and all untracked implementation/test files, including `business_workspace.py` service/router, `Workspace.tsx`, `workspaceSelection.ts` and the new backend/frontend checks. Read the approved plan, original blocked review, remediation, latest QA, acceptance and current execution records.
+Result: **2 passed, 1 warning in 2.56 seconds**. The warning is the existing Starlette/AnyIO deprecated alias. `git diff --check HEAD` also passed with working-copy LF/CRLF notices only.
 
-Phase A stays within client workspaces, editable profiles/briefs and project isolation. No CRM, billing, client portal, multi-user platform, publishing integration, installer changes, redesign or Phase B implementation was identified. Existing Account Manager, Campaigns, Knowledge, Files, model selection, Markdown export and approval paths are preserved; the relevant regression evidence supports this assessment.
+**Inspected final independent QA evidence:**
 
-## Validation and remaining limits
+- Focused backend and fixture gate: **41 passed, 1 skipped**.
+- Exact Windows workflow test set: **102 passed, 2 skipped**.
+- Frozen route inventory: **1 passed**.
+- Frontend confirmation/selection regressions, typecheck and production build: passed.
 
-**Independently performed during this re-review:**
+These local results support the remediation; they do not establish the full remote Linux matrix result.
 
-- In-memory production-route checks verified all supplied creation fields, invalid creation without partial rows, rejection of the original unsupported citation with complete prior brief/provenance preservation, and canonical allowlisted citation acceptance.
-- Controlled lazy-initialization interleaving verified the race remedy returns the winning row.
-- Both frontend DEV-031 confirmation/selection regression commands passed.
-- `git diff --check` against the public-main baseline passed.
+## Limitations and release gates
 
-**Inspected independent QA evidence, completed 2026-10-09 17:27:06 UTC:**
+The recorded two-client browser scenario covers creation, scoped upload, manual brief save/edit, restart persistence, isolation and provider-failure behavior. This reviewer did not rerun the browser. Real generation remains unverified because no model/provider was available; deterministic fake output is test evidence only. The selection regression is a helper/source-guard check, not a mounted React end-to-end delay test.
 
-- Focused backend batch: **40 passed, 1 skipped**.
-- Both frontend regressions, typecheck and production build: passed.
-- Broader earlier acceptance evidence records **124 passed**.
-
-The two-client browser scenario records name-only creation, scoped upload, manual brief editing/saving, restart persistence, isolation, replacement confirmation and friendly provider failure. This reviewer read that evidence and did not rerun the browser. The delayed-selection test is not a mounted-component end-to-end test.
-
-Real AI generation remains **unverified/blocked in acceptance**: no provider/model was available. Fake provider checks are deterministic test evidence only. GitHub Actions, remote commit/PR status and merge readiness were not checked in this execution and are not implied by APPROVE. Keep generated pytest/smoke runtime files out of the implementation commit as appropriate.
-
-**Final disposition:** APPROVE the remediated Phase A code. Continue the user-authorized PR/CI flow, preserve the generation limitation in the handoff, and require actual CI success plus public-main merge verification before reporting the release complete.
+The first GitHub Actions run is recorded as failed. This execution did not independently fetch or verify a successful rerun, push, PR status or merge. Continue the user-authorized PR/CI flow, obtain actual required CI success, and verify the merge on public main before reporting release completion. Preserve the real-generation limitation in that report.

@@ -21,8 +21,9 @@ and for a private workspace that no public user will ever have. Skipping them
 with an explicit reason is the honest behaviour. Publishing internal run history
 to keep them green would be strictly worse.
 
-Every skip is conditional on the content being absent, so **nothing is skipped
-in the development repository** and the full suite still runs locally.
+Every skip is conditional on the required content being absent, so **nothing
+is skipped in the development repository when its private fixtures are
+available** and the full suite still runs locally.
 
 Mechanism
 ---------
@@ -42,6 +43,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Directories withheld from the public repository.
 INTERNAL_RUNS = REPO_ROOT / "development" / "runs"
+# These tests require frozen parity data and DEV-007 migration fragments. A
+# public Phase run record (for example DEV-031) may create `development/runs/`
+# without publishing those private artifacts, so directory presence alone is
+# not evidence that the gated tests can run.
+INTERNAL_RUN_FIXTURE_PATHS = (
+    "DEV-005/parity/chat_corpus.json",
+    "DEV-005/parity/rag_golden.json",
+    "DEV-005/parity/state_cases.json",
+    "DEV-007/migrations/w2.sql",
+    "DEV-007/migrations/w4.sql",
+    "DEV-007/migrations/w5.sql",
+    "DEV-007/migrations/w6.sql",
+)
 PRIVATE_WORKSPACE_DIRS = (
     REPO_ROOT / "company",
     REPO_ROOT / "production",
@@ -80,12 +94,17 @@ _SKIP_REASON_PRIVATE_WORKSPACE = (
     "published (scripts/package/export_public_repo.py)"
 )
 
-internal_runs_available = INTERNAL_RUNS.is_dir()
+def internal_run_fixtures_available(root: Path = INTERNAL_RUNS) -> bool:
+    """Return whether all private artifacts required by gated tests exist."""
+    return all((root / relative_path).is_file() for relative_path in INTERNAL_RUN_FIXTURE_PATHS)
+
+
+internal_runs_available = internal_run_fixtures_available()
 private_workspace_available = all(d.is_dir() for d in PRIVATE_WORKSPACE_DIRS)
 
 
 def requires_internal_runs(func):
-    """Skip a test unless `development/runs/` is present."""
+    """Skip a test unless its DEV-005/DEV-007 private fixtures are present."""
     return pytest.mark.skipif(
         not internal_runs_available, reason=_SKIP_REASON_INTERNAL_RUNS
     )(func)
