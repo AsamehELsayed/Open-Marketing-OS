@@ -138,8 +138,10 @@ def test_every_project_id_column_default_is_generic(tmp_path: Path):
       each name their project, and defaulting them would silently attribute work
       to whichever project happened to be active. Attachment selections also
       require explicit scope because they can carry user-selected content into a
-      turn. A missing default there is a safety property, so this test pins the
-      shape rather than demanding uniformity.
+      turn. Client profiles and campaign deliverables, batches, and revisions
+      also require explicit project ownership. A missing default there is a
+      safety property, so this test pins the shape rather than demanding
+      uniformity.
     """
     #: Tables where "no default" is the correct, safer design.
     NO_DEFAULT_PROJECT_ID_TABLES = frozenset({
@@ -147,6 +149,10 @@ def test_every_project_id_column_default_is_generic(tmp_path: Path):
         "turn_attachment_selections", "turn_file_bindings",
         # Client profiles must always name their owning project explicitly.
         "business_profiles",
+        # Deliverables, generation batches, and revision history are explicitly
+        # scoped to their owning project at creation.
+        "campaign_deliverables", "campaign_deliverable_batches",
+        "campaign_deliverable_revisions",
     })
     conn = connect(tmp_path / "synthetic_gate_tmp.db")
     try:

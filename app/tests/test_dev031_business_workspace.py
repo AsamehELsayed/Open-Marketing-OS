@@ -15,7 +15,7 @@ from app.services.rag.indexing_service import IndexingService
 def test_v13_migration_and_client_profile_revision(tmp_path, monkeypatch):
     db = tmp_path / "dev031.db"
     conn = connect(db)
-    assert get_user_version(conn) == 13
+    assert get_user_version(conn) == 14
     conn.close()
     monkeypatch.setattr(deps, "DB_PATH", db)
     app = FastAPI(); app.include_router(router)

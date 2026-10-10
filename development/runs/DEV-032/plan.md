@@ -3,8 +3,8 @@
 **Classification:** LARGE — cross-cutting SQLite, API, account-manager graph, React, and isolation work. This adds campaign deliverables to the existing campaign system. It does not introduce a new campaign or provider architecture.
 
 **Base:** public main at 385c989698432406c287399e71a002ec014ed13b (DEV-031 Phase A).  
-**Feature branch:** codex/dev-032-campaign-deliverables.  
-**Approval state:** Founder plan approval is pending. No product files have been changed.
+**Feature branch:** codex/dev-032-campaign-deliverables-integrated.
+**Approval state:** Founder approved the plan at 2026-10-10T10:31:49Z, including autonomous implementation, integration, QA, independent review, remediation/re-review, one PR to public `main`, and merge only after green CI and review approval.
 
 ## Current architecture observed
 

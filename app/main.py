@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
         files,
         skills,
         business_workspace,
+        campaign_deliverables,
     )
 
     for router in (
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
         # app must not start.
         skills.router,
         business_workspace.router,
+        campaign_deliverables.router,
     ):
         app.include_router(router)
 

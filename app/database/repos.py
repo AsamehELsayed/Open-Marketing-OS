@@ -294,6 +294,88 @@ class Campaigns:
     def set_status(conn, id, status): _update_status(conn, Campaigns.TABLE, id, status)
 
 
+class CampaignDeliverables:
+    """Repository methods for project/campaign-scoped deliverables."""
+
+    @staticmethod
+    def get(conn, project_id: str, campaign_id: str, deliverable_id: str):
+        row = conn.execute(
+            "SELECT * FROM campaign_deliverables "
+            "WHERE project_id=? AND campaign_id=? AND id=?",
+            (project_id, campaign_id, deliverable_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def list(conn, project_id: str, campaign_id: str):
+        return _list(
+            conn, "campaign_deliverables",
+            "project_id=? AND campaign_id=? ORDER BY created_at, id",
+            (project_id, campaign_id),
+        )
+
+    @staticmethod
+    def insert(conn, row: dict[str, Any]) -> None:
+        cols = ", ".join(row.keys())
+        placeholders = ", ".join("?" for _ in row)
+        conn.execute(
+            f"INSERT INTO campaign_deliverables ({cols}) VALUES ({placeholders})",
+            list(row.values()),
+        )
+
+    @staticmethod
+    def update_if_version(conn, project_id: str, campaign_id: str,
+                          deliverable_id: str, expected_version: int,
+                          updates: dict[str, Any]) -> int:
+        """Apply a validated field mapping only at the expected version."""
+        if not updates:
+            return 0
+        assignments = ", ".join(f"{column}=?" for column in updates)
+        values = list(updates.values())
+        values.extend((project_id, campaign_id, deliverable_id, expected_version))
+        result = conn.execute(
+            f"UPDATE campaign_deliverables SET {assignments} "
+            "WHERE project_id=? AND campaign_id=? AND id=? AND current_version=?",
+            values,
+        )
+        return result.rowcount
+
+    @staticmethod
+    def insert_revision(conn, row: dict[str, Any]) -> None:
+        cols = ", ".join(row.keys())
+        placeholders = ", ".join("?" for _ in row)
+        conn.execute(
+            f"INSERT INTO campaign_deliverable_revisions ({cols}) VALUES ({placeholders})",
+            list(row.values()),
+        )
+
+    @staticmethod
+    def history(conn, project_id: str, campaign_id: str, deliverable_id: str):
+        return _list(
+            conn, "campaign_deliverable_revisions",
+            "project_id=? AND campaign_id=? AND deliverable_id=? ORDER BY version",
+            (project_id, campaign_id, deliverable_id),
+        )
+
+    @staticmethod
+    def batch(conn, project_id: str, campaign_id: str, idempotency_key: str):
+        row = conn.execute(
+            "SELECT * FROM campaign_deliverable_batches "
+            "WHERE project_id=? AND campaign_id=? AND idempotency_key=?",
+            (project_id, campaign_id, idempotency_key),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def insert_batch(conn, row: dict[str, Any]) -> None:
+        cols = ", ".join(row.keys())
+        placeholders = ", ".join("?" for _ in row)
+        conn.execute(
+            f"INSERT INTO campaign_deliverable_batches ({cols}) VALUES ({placeholders})",
+            list(row.values()),
+        )
+
+
 class Tasks:
     TABLE = "tasks"
 

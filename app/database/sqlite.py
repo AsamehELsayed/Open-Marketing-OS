@@ -5,7 +5,7 @@ from pathlib import Path
 from app.database.identity import DEFAULT_PROJECT_ID
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # Columns added post-foundation (Gate 2 Required 1). Fresh DBs get them from
 # DDL; DBs created by the older schema are upgraded in place below.
@@ -471,6 +471,67 @@ def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
+    """DEV-032 deliverables; mirrors the canonical schema.sql DDL block."""
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS campaign_deliverable_batches (
+      project_id TEXT NOT NULL,
+      campaign_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      deliverable_ids_json TEXT NOT NULL,
+      provenance_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, campaign_id, idempotency_key),
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS campaign_deliverables (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      campaign_id TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN (
+        'strategy_brief', 'social_post', 'ad_copy', 'creative_brief', 'content_calendar'
+      )),
+      title TEXT NOT NULL,
+      platform TEXT,
+      content_md TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'DRAFT'
+        CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED')),
+      current_version INTEGER NOT NULL DEFAULT 1 CHECK (current_version >= 1),
+      generation_idempotency_key TEXT,
+      generation_ordinal INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (project_id, campaign_id, id),
+      UNIQUE (project_id, campaign_id, generation_idempotency_key, generation_ordinal),
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_campaign_deliverables_scope
+      ON campaign_deliverables(project_id, campaign_id, created_at, id);
+    CREATE TABLE IF NOT EXISTS campaign_deliverable_revisions (
+      revision_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      campaign_id TEXT NOT NULL,
+      deliverable_id TEXT NOT NULL,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      operation TEXT NOT NULL CHECK (operation IN ('CREATE', 'GENERATED', 'EDIT', 'STATUS_TRANSITION')),
+      type TEXT NOT NULL CHECK (type IN (
+        'strategy_brief', 'social_post', 'ad_copy', 'creative_brief', 'content_calendar'
+      )),
+      title TEXT NOT NULL,
+      platform TEXT,
+      content_md TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED')),
+      provenance_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      UNIQUE (project_id, campaign_id, deliverable_id, version),
+      FOREIGN KEY (deliverable_id) REFERENCES campaign_deliverables(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_campaign_deliverable_revisions_scope
+      ON campaign_deliverable_revisions(project_id, campaign_id, deliverable_id, version);
+    """)
+    conn.commit()
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -493,6 +554,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     _migrate_v10_to_v11(conn)
     _migrate_v11_to_v12(conn)
     _migrate_v12_to_v13(conn)
+    _migrate_v13_to_v14(conn)
     _migrate_model_calls_hotfix3(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION};")
     conn.commit()
