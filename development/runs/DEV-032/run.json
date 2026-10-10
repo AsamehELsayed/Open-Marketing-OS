@@ -1,0 +1,26 @@
+{
+  "run_id": "DEV-032",
+  "title": "OMOS Solo Agency Campaign Deliverables",
+  "classification": "LARGE",
+  "status": "planning",
+  "planner": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-032/plan.md"
+  },
+  "workers": [],
+  "qa": null,
+  "reviewer": null,
+  "required_roles": [
+    "planner",
+    "implementer",
+    "integrator",
+    "qa",
+    "reviewer"
+  ],
+  "founder_plan_approved": true,
+  "plan_approved_at": "2026-10-10T10:31:49Z",
+  "created_at": "2026-10-10T10:23:49Z",
+  "updated_at": "2026-10-10T10:31:53Z",
+  "current_stage": "implementing"
+}
