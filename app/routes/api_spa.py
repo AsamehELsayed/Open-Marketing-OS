@@ -515,6 +515,53 @@ def _campaign_row(conn, c: dict) -> dict:
         "result", "learning_ref", "updated_at")}
 
 
+def _campaign_intake_fields(c: dict) -> dict:
+    """Expose only the bounded planning fields used by the campaign overview.
+
+    W2 stores intake under ``workflow_json.campaign_intake``. Keep the rest of
+    that internal metadata private and treat malformed/legacy JSON as absent.
+    """
+    try:
+        workflow = _json.loads(c.get("workflow_json") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    intake = workflow.get("campaign_intake") if isinstance(workflow, dict) else None
+    if not isinstance(intake, dict):
+        return {}
+
+    fields = {}
+    for name, limit in (("objective", 500), ("target_audience", 400),
+                        ("duration", 100)):
+        value = intake.get(name)
+        if isinstance(value, str) and value.strip():
+            fields[name] = value.strip()[:limit]
+
+    channels = intake.get("channels")
+    if isinstance(channels, list):
+        clean_channels = [value.strip()[:80] for value in channels
+                          if isinstance(value, str) and value.strip()]
+        if clean_channels:
+            fields["channels"] = clean_channels[:12]
+
+    # Do not echo the free-form original request or internal turn id. The
+    # stable deliverable type list is enough to give the overview a concise,
+    # non-sensitive request summary.
+    request_facts = intake.get("request_facts")
+    requested_types = (request_facts.get("requested_types")
+                       if isinstance(request_facts, dict) else None)
+    allowed_types = {
+        "strategy_brief", "social_post", "ad_copy", "creative_brief",
+        "content_calendar",
+    }
+    if isinstance(requested_types, list):
+        clean_types = [value for value in requested_types
+                       if isinstance(value, str) and value in allowed_types]
+        if clean_types:
+            fields["request"] = (
+                "Requested deliverables: " + ", ".join(clean_types[:5]))
+    return fields
+
+
 @router.get("/campaigns")
 def spa_campaigns(project_id: str | None = Query(default=None)):
     with deps.get_db() as conn:
@@ -547,7 +594,14 @@ def spa_campaign_detail(campaign_id: str,
                  if t.get("campaign_id") == campaign_id]
         experiments = [e for e in repos.Experiments.list(conn, pid)
                        if e.get("campaign_id") == campaign_id]
-    return _ok({"campaign": _campaign_row(conn, row),
+        campaign = _campaign_row(conn, row)
+        # Campaign intake is client-owned. Keep legacy unscoped detail reads
+        # compatible for the older summary fields, but never include intake
+        # unless the caller supplied a project scope and the lookup above
+        # verified that this campaign belongs to it.
+        if project_id is not None:
+            campaign.update(_campaign_intake_fields(row))
+    return _ok({"campaign": campaign,
                 "prospects": prospects, "tasks": tasks,
                 "experiments": experiments})
 

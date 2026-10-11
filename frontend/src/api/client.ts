@@ -233,6 +233,94 @@ export interface CreateProjectBody {
 
 export type CreateProjectResult = BusinessProfile;
 
+/**
+ * DEV-032 W3 — campaign deliverables.
+ *
+ * Every field below is the exact key W1's `campaign_deliverables.py` router
+ * serialises (`_public()` in app/services/campaign_deliverables.py). The
+ * deliverable lives inside one campaign inside one project, so `project_id`
+ * and `campaign_id` travel in the URL and are echoed on the row; the client
+ * refuses to present a row whose echoed scope is not the requested scope.
+ *
+ * `status` is an INTERNAL EDITORIAL state only. DRAFT → IN_REVIEW → APPROVED
+ * records that a human signed the copy off inside OMOS. It does not publish,
+ * schedule, or spend anything anywhere.
+ */
+export const DELIVERABLE_TYPES = [
+  "strategy_brief",
+  "social_post",
+  "ad_copy",
+  "creative_brief",
+  "content_calendar",
+] as const;
+
+export type DeliverableType = (typeof DELIVERABLE_TYPES)[number];
+
+export const DELIVERABLE_STATUSES = ["DRAFT", "IN_REVIEW", "APPROVED"] as const;
+
+export type DeliverableStatus = (typeof DELIVERABLE_STATUSES)[number];
+
+export interface SpaCampaignDeliverable {
+  id: string;
+  project_id: string;
+  campaign_id: string;
+  type: DeliverableType | string;
+  title: string;
+  platform?: string | null;
+  content_md: string;
+  status: DeliverableStatus | string;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One immutable snapshot appended by every edit and every status transition. */
+export interface SpaDeliverableRevision {
+  revision_id: string;
+  project_id: string;
+  campaign_id: string;
+  deliverable_id: string;
+  version: number;
+  operation: string;
+  type: string;
+  title: string;
+  platform?: string | null;
+  content_md: string;
+  status: string;
+  provenance_json?: string;
+  created_at: string;
+}
+
+export interface CreateDeliverableBody {
+  type: DeliverableType;
+  title: string;
+  content_md: string;
+  platform?: string | null;
+}
+
+export interface ReviseDeliverableBody {
+  expected_version: number;
+  type?: DeliverableType;
+  title?: string;
+  content_md?: string;
+  platform?: string | null;
+}
+
+export interface TransitionDeliverableBody {
+  expected_version: number;
+  status: DeliverableStatus;
+}
+
+/** Path segment for the scoped deliverables collection under one campaign. */
+export function campaignDeliverablesPath(projectId: string, campaignId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/campaigns/${encodeURIComponent(campaignId)}/deliverables`;
+}
+
+/** Path segment for one deliverable inside that same project+campaign scope. */
+export function campaignDeliverablePath(projectId: string, campaignId: string, deliverableId: string): string {
+  return `${campaignDeliverablesPath(projectId, campaignId)}/${encodeURIComponent(deliverableId)}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -293,6 +381,53 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type CredentialConfig = Record<string, string | number | boolean | null>;
+
+/**
+ * Fetch a file response and hand back a sanitised filename.
+ *
+ * The server's `Content-Disposition` is a hint, never a command: the name is
+ * stripped of path separators and control characters, and an extension the
+ * caller did not ask for is discarded rather than trusted. Used by the chat
+ * Markdown export and by the DEV-032 deliverable exports.
+ */
+async function downloadAttachment(
+  path: string,
+  fallbackFilename: string,
+  allowedExtensions: string[],
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(path);
+  if (!res.ok) {
+    let message = `Export failed (${res.status}). Please try again.`;
+    try {
+      const payload = (await res.clone().json()) as { detail?: unknown; message?: unknown };
+      if (typeof payload.detail === "string") message = payload.detail;
+      else if (typeof payload.message === "string") message = payload.message;
+    } catch { /* use the status-based message for non-JSON errors */ }
+    throw new Error(message);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  let filename = fallbackFilename;
+  try {
+    const candidate = encodedName ? decodeURIComponent(encodedName) : plainName;
+    if (candidate) filename = candidate.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
+  } catch { /* retain the safe default filename */ }
+  if (!allowedExtensions.some((ext) => filename.toLowerCase().endsWith(ext))) filename = fallbackFilename;
+  return { blob: await res.blob(), filename: filename || fallbackFilename };
+}
+
+/** Save a downloaded blob through the browser's own download flow. */
+export function saveDownloadedFile({ blob, filename }: { blob: Blob; filename: string }): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export interface CredentialConnectBody {
   target: string;
@@ -724,28 +859,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(selection),
     }),
-  downloadChatMarkdown: async (id: string): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`/api/chats/${encodeURIComponent(id)}/export.md`);
-    if (!res.ok) {
-      let message = `Export failed (${res.status}). Please try again.`;
-      try {
-        const payload = await res.clone().json() as { detail?: unknown; message?: unknown };
-        if (typeof payload.detail === "string") message = payload.detail;
-        else if (typeof payload.message === "string") message = payload.message;
-      } catch { /* use the status-based message for non-JSON errors */ }
-      throw new Error(message);
-    }
-    const disposition = res.headers.get("Content-Disposition") || "";
-    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-    const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
-    let filename = "conversation.md";
-    try {
-      const candidate = encodedName ? decodeURIComponent(encodedName) : plainName;
-      if (candidate) filename = candidate.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
-    } catch { /* retain the safe default filename */ }
-    if (!filename.toLowerCase().endsWith(".md")) filename = "conversation.md";
-    return { blob: await res.blob(), filename: filename || "conversation.md" };
-  },
+  downloadChatMarkdown: (id: string): Promise<{ blob: Blob; filename: string }> =>
+    downloadAttachment(`/api/chats/${encodeURIComponent(id)}/export.md`, "conversation.md", [".md"]),
   getActivity: (conversation_id: string) =>
     request<SpaActivityEvent[]>(
       `/api/activity?conversation_id=${encodeURIComponent(conversation_id)}`,
@@ -765,8 +880,44 @@ export const api = {
     request<Record<string, unknown>[]>(
       project_id ? `/api/campaigns?project_id=${encodeURIComponent(project_id)}` : "/api/campaigns",
     ),
-  getCampaign: (id: string) =>
-    request<Record<string, unknown>>(`/api/campaigns/${encodeURIComponent(id)}`),
+  getCampaign: (id: string, project_id: string) =>
+    request<Record<string, unknown>>(
+      `/api/campaigns/${encodeURIComponent(id)}?project_id=${encodeURIComponent(project_id)}`,
+    ),
+
+  // --- DEV-032 W3: campaign deliverables -------------------------------
+  // project_id and campaign_id are BOTH required on every call. There is no
+  // unscoped variant: a request that does not name the project it believes it
+  // is working in is not sent, and a row whose echoed project/campaign does
+  // not match the request is discarded by the caller before it is rendered.
+  // Writes are optimistic: they carry `expected_version` so a stale tab
+  // receives a 409 conflict instead of overwriting newer content.
+
+  getCampaignDeliverables: (project_id: string, campaign_id: string) =>
+    request<SpaCampaignDeliverable[]>(campaignDeliverablesPath(project_id, campaign_id)),
+  getCampaignDeliverable: (project_id: string, campaign_id: string, deliverable_id: string) =>
+    request<SpaCampaignDeliverable>(campaignDeliverablePath(project_id, campaign_id, deliverable_id)),
+  createCampaignDeliverable: (project_id: string, campaign_id: string, body: CreateDeliverableBody) =>
+    request<SpaCampaignDeliverable>(campaignDeliverablesPath(project_id, campaign_id), {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  saveCampaignDeliverable: (project_id: string, campaign_id: string, deliverable_id: string, body: ReviseDeliverableBody) =>
+    request<SpaCampaignDeliverable>(campaignDeliverablePath(project_id, campaign_id, deliverable_id), {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  setCampaignDeliverableStatus: (project_id: string, campaign_id: string, deliverable_id: string, body: TransitionDeliverableBody) =>
+    request<SpaCampaignDeliverable>(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getCampaignDeliverableHistory: (project_id: string, campaign_id: string, deliverable_id: string) =>
+    request<SpaDeliverableRevision[]>(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/history`),
+  downloadDeliverableMarkdown: (project_id: string, campaign_id: string, deliverable_id: string) =>
+    downloadAttachment(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/export.md`, "deliverable.md", [".md"]),
+  downloadCampaignDeliverablesPackage: (project_id: string, campaign_id: string) =>
+    downloadAttachment(`${campaignDeliverablesPath(project_id, campaign_id)}/exports/package.zip`, "campaign-deliverables.zip", [".zip"]),
   getResultsSummary: (project_id?: string) =>
     request<Record<string, unknown>>(
       project_id

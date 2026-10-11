@@ -5,6 +5,9 @@ import EmptyState from "../components/chrome/EmptyState";
 import PageHeader from "../components/chrome/PageHeader";
 import StatusBadge from "../components/chrome/StatusBadge";
 import Tabs from "../components/chrome/Tabs";
+import { useProject } from "../components/shell/project-context";
+import DeliverableEditor from "../components/workspace/DeliverableEditor";
+import { campaignBriefing } from "../components/workspace/deliverables";
 import {
   excerptOf,
   listOf,
@@ -14,13 +17,22 @@ import {
 
 /**
  * DEV-004 W5: campaign detail — header (title, status, goal) + six tabs.
+ * DEV-032 W3: Overview gained the campaign's objective / audience / channels
+ * and the Content tab is now the real deliverable workspace instead of a
+ * placeholder.
+ *
  * Renders whatever the API returns defensively: user-friendly subsets only,
- * raw ids / JSON never shown. Tabs with no backing endpoint (Content, Files)
+ * raw ids / JSON never shown. Tabs with no backing endpoint (Files) still
  * render honest EmptyStates instead of fake data.
  *
- * Tab → data mapping (documented, no dedicated content/files endpoint exists
- * in the W1 contract): Overview = campaign fields; Prospects = prospects;
- * Content = none yet; Activity = tasks; Results = experiments; Files = none yet.
+ * Tab → data mapping (documented): Overview = campaign fields; Prospects =
+ * prospects; Content = deliverables (DEV-032); Activity = tasks;
+ * Results = experiments; Files = none yet.
+ *
+ * PROJECT SCOPE: deliverables are read and written under the campaign's own
+ * project. When the workspace selection points at a different client than
+ * the campaign belongs to, the Content tab refuses to load rather than
+ * rendering one client's copy under another client's campaign.
  */
 
 const TABS = [
@@ -48,20 +60,23 @@ function isHttpUrl(s: string): boolean {
 
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>();
+  const { projectId } = useProject();
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState("overview");
 
   useEffect(() => {
-    if (!id) {
+    if (!id || !projectId) {
+      setData(null);
+      setError(projectId ? null : "Select a client to view this campaign.");
       setLoading(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
     api
-      .getCampaign(id)
+      .getCampaign(id, projectId)
       .then((d) => {
         if (!cancelled) {
           setData(d);
@@ -80,7 +95,7 @@ export default function CampaignDetail() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, projectId]);
 
   const campaign = useMemo(
     () =>
@@ -92,6 +107,16 @@ export default function CampaignDetail() {
   const prospects = useMemo(() => listOf(data?.prospects), [data]);
   const tasks = useMemo(() => listOf(data?.tasks), [data]);
   const experiments = useMemo(() => listOf(data?.experiments), [data]);
+
+  // The campaign is owned by exactly one client. When the row states which,
+  // that wins over the workspace selection so a stale selection cannot pull
+  // another client's deliverables into this page.
+  const campaignProjectId = useMemo(() => {
+    const row = data && typeof data.campaign === "object" && data.campaign !== null
+      ? (data.campaign as Record<string, unknown>)
+      : null;
+    return str(row?.project_id).trim() || projectId;
+  }, [data, projectId]);
 
   if (loading) {
     return (
@@ -120,6 +145,7 @@ export default function CampaignDetail() {
     ? "Draft"
     : rawStatus;
   const goal = excerptOf(campaign, ["result", "measurement_window"], 240);
+  const briefing = campaignBriefing(campaign);
   const campaignScores = [
     ["impact", optionalScore(campaign.impact)],
     ["confidence", optionalScore(campaign.confidence)],
@@ -137,22 +163,33 @@ export default function CampaignDetail() {
         actions={<StatusBadge status={status} />}
       />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
-      <div className="max-w-3xl px-6 py-4">
+      <div className="px-6 py-4">
         {tab === "overview" && (
-          <dl className="divide-y divide-linesubtle rounded border border-linedefault bg-surface px-4 py-2">
-            <Field label="Status" value={status} />
-            <Field label="Approval level" value={str(campaign.approval_level)} />
-            <Field
-              label="Scores"
-              value={campaignScores.length ? campaignScores.join(" · ") : "Not set"}
-            />
-            <Field
-              label="Measurement window"
-              value={str(campaign.measurement_window)}
-            />
-            <Field label="Result" value={str(campaign.result)} />
-            <Field label="Updated" value={str(campaign.updated_at)} />
-          </dl>
+          <div className="max-w-3xl">
+            <dl className="divide-y divide-linesubtle rounded border border-linedefault bg-surface px-4 py-2">
+              <Field label="Objective" value={briefing.objective} />
+              <Field label="Target audience" value={briefing.audience} />
+              <Field label="Channels" value={briefing.channels} />
+              <Field label="Duration" value={briefing.duration} />
+              <Field label="Status" value={status} />
+              <Field label="Approval level" value={str(campaign.approval_level)} />
+              <Field
+                label="Scores"
+                value={campaignScores.length ? campaignScores.join(" · ") : "Not set"}
+              />
+              <Field
+                label="Measurement window"
+                value={str(campaign.measurement_window)}
+              />
+              <Field label="Result" value={str(campaign.result)} />
+              <Field label="Updated" value={str(campaign.updated_at)} />
+            </dl>
+            {briefing.request && (
+              <p className="mt-3 text-bodysm text-inksecondary">
+                <span className="font-medium text-ink">Request:</span> {briefing.request}
+              </p>
+            )}
+          </div>
         )}
 
         {tab === "prospects" &&
@@ -201,10 +238,16 @@ export default function CampaignDetail() {
           ))}
 
         {tab === "content" && (
-          <EmptyState
-            title="No content yet"
-            hint="Content drafts for this campaign will appear here once created."
-          />
+          <div className="max-w-5xl">
+            {projectId && id && campaignProjectId === projectId ? (
+              <DeliverableEditor projectId={projectId} campaignId={id} />
+            ) : (
+              <EmptyState
+                title="Switch to this campaign's client"
+                hint="Deliverables are stored under one client. Select that client in the workspace switcher to read and edit them."
+              />
+            )}
+          </div>
         )}
 
         {tab === "activity" &&

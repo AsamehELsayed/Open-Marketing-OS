@@ -48,7 +48,7 @@ def _rag_debug_enabled() -> bool:
     return (os.environ.get("OMOS_RAG_DEBUG", "") or "").strip() == "1"
 
 
-def _explicit_write_intents(text: str) -> dict:
+def _explicit_write_intents(text: str, *, turn_id: str = "") -> dict:
     """Recognize concrete creation requests; ordinary brainstorms stay prose."""
     value = str(text or "").strip()
     lowered = value.lower()
@@ -60,7 +60,19 @@ def _explicit_write_intents(text: str) -> dict:
         "please approve and send", "submit this work for approval",
         "submit for approval", "request approval"))
     external_action = _external_action_request(value)
-    if external_action and not governed_proposal:
+    campaign_create_request = bool(re.search(
+        r"\b(?:create|build|prepare|propose|start)\b.{0,60}"
+        r"\b(?:campaign|campaigns|experiment|experiments|task|tasks)\b|"
+        r"\bdraft\s+(?:a|an|the|this|new|small|marketing)\b.{0,45}"
+        r"\b(?:campaign|experiment|task)\b",
+        lowered))
+    if (external_action and not governed_proposal and not campaign_create_request
+            and not _deliverable_write_intents(value, allow_revision=False)):
+        # DEV-032 W2: "campaign ... post" reads as publishing here, but a turn
+        # that also asks to *create* content names "post"/"ad" as a deliverable
+        # noun. Such a turn keeps the campaign gate; an explicit
+        # publish/send/launch carries no creation verb and still takes the
+        # external-action branch.
         return {"campaign": None, "task": None, "experiment": None,
                 "external_action": external_action, "requires_approval": True}
     direct_request = bool(re.match(
@@ -93,7 +105,16 @@ def _explicit_write_intents(text: str) -> dict:
         "send campaign", "send the launch campaign", "launch ads", "spend",
         "edit the live site", "change the live site", "delete", "destructive"))
     if not campaign_requested and not experiment_requested and not task_requested:
-        return {}
+        # DEV-032 W2: a targeted revision of an existing deliverable is a
+        # legitimate write with no new campaign, task, or experiment to create.
+        deliverable = _deliverable_write_intents(value, allow_revision=True)
+        if not deliverable:
+            return {}
+        return {
+            "campaign": None, "task": None, "experiment": None,
+            "deliverable": deliverable, "external_action": external_action,
+            "requires_approval": False,
+        }
     objective_match = re.search(
         r"(?i)\b(?:campaign|experiment|task)\b\s+(?:to|for|about)\s+([^.!?\r\n]+)",
         value,
@@ -110,10 +131,30 @@ def _explicit_write_intents(text: str) -> dict:
             "", goal,
         )
     goal = goal.strip(" .:-") or "website marketing"
+    try:
+        from app.services import campaign_production as production
+
+        goal = production.trim_objective(goal) or goal
+    except Exception:
+        pass
     title = goal[:140].strip(" .:-")
+    campaign_payload = None
+    campaign_intake: dict = {}
+    if campaign_requested:
+        campaign_payload = {"title": f"Campaign: {title}"[:160],
+                            "approval_level": "Green"}
+        # DEV-032 W2: objective / audience / channels / duration / request
+        # facts come only from what the user actually said.
+        try:
+            from app.services import campaign_production as production
+
+            campaign_intake = production.campaign_intake(value, objective=goal,
+                                                     turn_id=turn_id)
+        except Exception:
+            campaign_intake = {}
     return {
-        "campaign": ({"title": f"Campaign: {title}"[:160],
-                      "approval_level": "Green"} if campaign_requested else None),
+        "campaign": campaign_payload,
+        "campaign_intake": campaign_intake or None,
         "task": ({"title": f"Improve conversion: {title}"[:160],
                   "lane": "conversion", "acceptance": "Complete the requested analysis and deliver a reviewable conversion improvement proposal.",
                   "explicit_standalone": bool(task_requested)}
@@ -122,6 +163,8 @@ def _explicit_write_intents(text: str) -> dict:
                         "metric": "website conversion rate", "window_days": 14,
                         "start_date": "", "next_review": "", "stop_condition": "Stop if the primary metric declines materially or the planned window ends.",
                         "campaign_id": "", "explicit_standalone": bool(experiment_requested)} if experiment_requested else None),
+        "deliverable": _deliverable_write_intents(value, allow_revision=False) or None,
+        "external_action": external_action,
         "requires_approval": (
             any(x in lowered for x in ("submit for approval", "submit this work for approval",
                                        "must be approved", "approval required", "request approval",
@@ -233,10 +276,11 @@ def _filter_forbidden_write_intents(intents: dict, constraints: dict) -> tuple[d
     clean = dict(intents or {})
     forbidden = set(constraints.get("forbidden_actions") or [])
     if constraints.get("analysis_only"):
-        forbidden.update(("campaign", "task", "experiment", "publish", "send"))
+        forbidden.update(("campaign", "task", "experiment", "publish", "send",
+                          "deliverable"))
 
     blocked: list[str] = []
-    for key in ("campaign", "task", "experiment"):
+    for key in ("campaign", "task", "experiment", "deliverable"):
         if clean.get(key) and key in forbidden:
             clean[key] = None
             blocked.append(key)
@@ -244,15 +288,350 @@ def _filter_forbidden_write_intents(intents: dict, constraints: dict) -> tuple[d
     # A task or experiment inferred as work under a campaign cannot be written
     # after the campaign was prohibited. Explicit standalone intents remain.
     if "campaign" in blocked:
+        # Intake facts describe a campaign that will not exist, so they must not
+        # linger in the intents either.
+        clean["campaign_intake"] = None
         if clean.get("task") and not clean["task"].get("explicit_standalone"):
             clean["task"] = None
             blocked.append("task")
         if clean.get("experiment") and not clean["experiment"].get("explicit_standalone"):
             clean["experiment"] = None
             blocked.append("experiment")
-    if not any(clean.get(key) for key in ("campaign", "task", "experiment")):
+    if not any(clean.get(key) for key in ("campaign", "task", "experiment", "deliverable")):
         clean["requires_approval"] = bool(clean.get("external_action"))
     return clean, list(dict.fromkeys(blocked))
+
+
+def _deliverable_write_intents(value: str, *, allow_revision: bool = True) -> dict:
+    """DEV-032 W2: requested deliverable types and revision intent for a turn.
+
+    Returns ``{}`` unless the turn asked for campaign content, and
+    ``{"revision": {...}}`` when it asked to *change* one that already exists.
+    Both stay behind the existing explicit-write-intent and analysis-only gates
+    in ``_explicit_write_intents``.
+
+    ``allow_revision`` is False on a turn that is also creating a campaign,
+    task, or experiment: that turn generates rather than revises.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        from app.services import campaign_production as production
+    except Exception:
+        return {}
+
+    intents: dict = {}
+    if allow_revision and production.looks_like_revision(text):
+        intents["revision"] = {
+            "instruction": text[:2000],
+            "requested_types": production.requested_types(text),
+        }
+        return intents
+
+    # Only an explicit request for campaign content produces deliverables; an
+    # ordinary question that happens to mention a channel stays prose.
+    if not production.creates_deliverables(text):
+        return {}
+    intents["generate"] = {"types": production.resolved_types(text)}
+    return intents
+
+
+def _apply_campaign_metadata(conn, project_id: str, campaign_id: str,
+                             intake: dict) -> dict:
+    """DEV-032 W2: persist objective / audience / channels / duration / facts.
+
+    Merges into the campaign's existing ``workflow_json`` metadata. Never
+    raises, so a metadata write can never fail a turn that already proposed a
+    campaign.
+    """
+    if not (project_id and campaign_id) or not isinstance(intake, dict):
+        return {}
+    try:
+        from app.services import campaign_production as production
+
+        return production.apply_campaign_metadata(
+            conn, project_id, campaign_id, intake)
+    except Exception:
+        return {}
+
+
+def _project_campaign_rows(conn, project_id: str) -> list[dict]:
+    """Read revision candidates only from the immutable turn project."""
+    if not project_id:
+        return []
+    rows = conn.execute(
+        "SELECT id, title, status FROM campaigns WHERE project_id=? "
+        "ORDER BY title COLLATE NOCASE, id",
+        (project_id,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _resolve_revision_campaign(conn, project_id: str, campaign_id: str,
+                               user_request: str) -> tuple[str, list[dict]]:
+    """Use an explicit ID, one project campaign, or a uniquely named target."""
+    rows = _project_campaign_rows(conn, project_id)
+    if campaign_id:
+        match = next((row for row in rows
+                      if str(row.get("id", "")) == campaign_id), None)
+        return (campaign_id, rows) if match else ("", rows)
+    if len(rows) == 1:
+        return str(rows[0].get("id") or ""), rows
+
+    request = " ".join(str(user_request or "").casefold().split())
+    matches = []
+    for row in rows:
+        identifier = str(row.get("id", "") or "").casefold()
+        title = str(row.get("title", "") or "").casefold().strip()
+        name = re.sub(r"^campaign\s*:\s*", "", title).strip()
+        named_syntax = name and re.search(
+            rf"\bcampaign\s+(?:named|called)\s+{re.escape(name)}\b", request)
+        explicit_title = len(name.split()) >= 2 and name in request
+        if (identifier and identifier in request) or named_syntax or explicit_title:
+            matches.append(row)
+    if len(matches) == 1:
+        return str(matches[0].get("id") or ""), rows
+    return "", rows
+
+
+def _revision_campaign_details(conn, project_id: str,
+                                campaign_rows: list[dict], production) -> list[dict]:
+    """Return safe project-scoped campaign and deliverable choices."""
+    details = []
+    for row in campaign_rows:
+        cid = str(row.get("id", "") or "")
+        deliverables = production.list_deliverables(
+            conn, project_id=project_id, campaign_id=cid)
+        details.append({
+            "campaign_id": cid,
+            "title": str(row.get("title", "") or ""),
+            "status": str(row.get("status", "") or ""),
+            "deliverables": [{
+                "id": str(item.get("id", "") or ""),
+                "type": str(item.get("type", "") or ""),
+                "title": str(item.get("title", "") or ""),
+                "platform": str(item.get("platform", "") or ""),
+            } for item in deliverables],
+        })
+    return details
+
+
+def _produce_deliverables(conn, *, state: dict, campaign_id: str, intent: dict,
+                          campaign: dict | None, config=None) -> dict:
+    """DEV-032 W2: generate or revise deliverables for one immutable turn scope.
+
+    Returns an honest result dict. It never raises into the turn and never
+    claims a write it did not perform.
+    """
+    try:
+        from app.services import campaign_production as production
+    except Exception as exc:
+        return {"ok": False, "status": "failed",
+                "error": f"Campaign deliverables are unavailable: {exc}"[:300]}
+    pid = str(state.get("project_id") or "")
+    turn_id = str(state.get("turn_id") or "")
+    user_request = str(state.get("user_request") or "")
+    provider = str(state.get("model_provider") or "AUTO")
+    model_id = str(state.get("model_id") or "")
+    callback = _event_callback(config)
+
+    def _announce(event_type: str, payload: dict) -> None:
+        if callable(callback):
+            try:
+                callback(event_type, payload)
+            except Exception:
+                pass
+
+    revision = intent.get("revision")
+    if isinstance(revision, dict):
+        try:
+            target_campaign, campaign_rows = _resolve_revision_campaign(
+                conn, pid, campaign_id, user_request)
+        except Exception as exc:
+            return {"ok": False, "status": "failed",
+                    "error": f"Campaign targets are unavailable: {exc}"[:300]}
+        if not target_campaign:
+            if not campaign_rows:
+                return {"ok": False, "status": "failed",
+                        "error": "This project has no campaign to revise yet."}
+            try:
+                details = _revision_campaign_details(
+                    conn, pid, campaign_rows, production)
+            except Exception as exc:
+                return {"ok": False, "status": "failed",
+                        "error": f"Campaign deliverables are unavailable: {exc}"[:300]}
+            return {
+                "ok": False,
+                "status": "needs_clarification",
+                "error": ("This project has multiple campaign targets. Tell me "
+                          "which campaign to revise."),
+                "campaign_candidates": details,
+            }
+        try:
+            candidates = production.list_deliverables(
+                conn, project_id=pid, campaign_id=target_campaign)
+        except Exception as exc:
+            return {"ok": False, "status": "failed",
+                    "error": f"Campaign deliverables are unavailable: {exc}"[:300]}
+        requested = [str(t) for t in (revision.get("requested_types") or [])]
+        scoped = [row for row in candidates
+                  if not requested or str(row.get("type", "")) in requested]
+        if requested and not scoped:
+            return {
+                "ok": False,
+                "status": "needs_clarification",
+                "error": (f"This campaign has no saved {' or '.join(requested)} "
+                          "deliverable to revise. Choose one of the available "
+                          "deliverables or name another campaign."),
+                "campaign_id": target_campaign,
+                "candidates": [{
+                    "id": str(row.get("id", "") or ""),
+                    "type": str(row.get("type", "") or ""),
+                    "title": str(row.get("title", "") or ""),
+                    "platform": str(row.get("platform", "") or ""),
+                } for row in candidates],
+            }
+        try:
+            target = production.resolve_revision_target(
+                scoped, user_request=user_request)
+        except production.AmbiguousRevisionError as exc:
+            return {"ok": False, "status": "needs_clarification",
+                    "error": str(exc), "candidates": exc.candidates,
+                    "campaign_id": target_campaign}
+        _announce("tool_started", {"tool": "revise_campaign_deliverable",
+                                   "tool_id": "revise_campaign_deliverable",
+                                   "args": {"deliverable_id": str(target.get("id", ""))}})
+        try:
+            out = production.revise_deliverable(
+                conn, project_id=pid, campaign_id=target_campaign,
+                turn_id=turn_id, deliverable_id=str(target.get("id", "")),
+                instruction=str(revision.get("instruction", "")), provider=provider,
+                model_id=model_id)
+        except Exception as exc:
+            out = {"ok": False, "status": "failed",
+                   "error": f"The revision could not be completed: {exc}"[:300]}
+        _announce("tool_completed" if out.get("ok") else "tool_failed",
+                  {"tool": "revise_campaign_deliverable",
+                   "tool_id": "revise_campaign_deliverable",
+                   "ok": bool(out.get("ok")), "status": out.get("status", "")})
+        return out
+
+    generate = intent.get("generate")
+    if not isinstance(generate, dict):
+        return {"ok": False, "status": "skipped",
+                "error": "No campaign deliverables were requested."}
+    if not campaign_id:
+        return {"ok": False, "status": "failed",
+                "error": "The campaign was not created, so no deliverables were generated."}
+    _announce("tool_started", {"tool": "generate_campaign_deliverables",
+                               "tool_id": "generate_campaign_deliverables",
+                               "args": {"campaign_id": campaign_id}})
+    try:
+        out = production.generate_batch(
+            conn, project_id=pid, campaign_id=campaign_id, turn_id=turn_id,
+            user_request=user_request, types=list(generate.get("types") or []),
+            campaign_title=str((campaign or {}).get("title", "")),
+            provider=provider, model_id=model_id)
+    except Exception as exc:
+        out = {"ok": False, "status": "failed",
+               "error": f"Deliverable generation could not be completed: {exc}"[:300]}
+    _announce("tool_completed" if out.get("ok") else "tool_failed",
+              {"tool": "generate_campaign_deliverables",
+               "tool_id": "generate_campaign_deliverables",
+               "ok": bool(out.get("ok")), "status": out.get("status", "")})
+    return out
+
+
+def _reseal_campaign_metadata(conn, project_id: str, turn_id: str) -> None:
+    """DEV-032 W2: lift intake facts off this turn's campaign before replaying.
+
+    ``propose_campaign`` rebuilds ``workflow_json`` from a fixed key set and
+    refuses a reused idempotency key on any difference, so a retried turn would
+    fail once the intake facts are attached. Removing them first keeps
+    turn-level campaign idempotency intact. Never raises.
+    """
+    try:
+        from app.services import campaign_production as production
+
+        production.reseal_campaign_metadata(
+            conn, project_id, production.campaign_proposal_id(project_id, turn_id))
+    except Exception:
+        pass
+
+
+def _deliverable_report(result) -> str:
+    """DEV-032 W2: one honest sentence about this turn's deliverable outcome.
+
+    Reports persisted ids and types, or the exact partial failure. Never claims
+    a write that did not happen and never reports anything about other work.
+    """
+    if not isinstance(result, dict):
+        return ""
+    if result.get("status") == "blocked_by_user_constraint":
+        return (" No campaign deliverables were saved because your instructions "
+                "prohibited that write.")
+    if not result.get("ok"):
+        detail = str(result.get("error") or "").strip()[:300]
+        if not detail:
+            return ""
+        if result.get("status") == "needs_clarification":
+            choices = []
+            campaign_candidates = [
+                row for row in (result.get("campaign_candidates") or [])
+                if isinstance(row, dict)
+            ]
+            for campaign_row in campaign_candidates[:5]:
+                name = str(campaign_row.get("title") or "Untitled campaign")
+                cid = str(campaign_row.get("campaign_id") or "")
+                deliverables = [
+                    f"{str(item.get('type') or 'deliverable')}: "
+                    f"{str(item.get('title') or 'Untitled')}"
+                    + (f" ({item['platform']})" if item.get("platform") else "")
+                    for item in (campaign_row.get("deliverables") or [])
+                    if isinstance(item, dict)
+                ][:5]
+                label = f"{name} [{cid}]" if cid else name
+                if deliverables:
+                    label += " — " + ", ".join(deliverables)
+                choices.append(label)
+            deliverable_candidates = [
+                row for row in (result.get("candidates") or [])
+                if isinstance(row, dict)
+            ]
+            if deliverable_candidates:
+                choices.extend(
+                    f"{str(item.get('type') or 'deliverable')}: "
+                    f"{str(item.get('title') or 'Untitled')}"
+                    + (f" ({item['platform']})" if item.get("platform") else "")
+                    for item in deliverable_candidates[:8]
+                )
+            choice_note = (" Candidates: " + "; ".join(choices) + ".") if choices else ""
+            return f" {detail}{choice_note}"
+        return (f" No campaign deliverables were saved. {detail} "
+                "You can still create and edit deliverables manually.")
+    rows = [row for row in (result.get("deliverables") or [])
+            if isinstance(row, dict)]
+    described = ", ".join(
+        f"{str(row.get('type', '')) or 'deliverable'} {str(row.get('id', ''))}"
+        for row in rows) or ", ".join(
+        f"{kind} {did}" for kind, did
+        in zip(result.get("types") or [], result.get("created") or []))
+    if not described:
+        return ""
+    return f" Campaign deliverables saved: {described}."
+
+
+def _external_action_report(result) -> str:
+    if not isinstance(result, dict):
+        return ""
+    platform = str(result.get("platform") or "External")
+    action = str(result.get("action") or "action")
+    detail = str(result.get("error") or
+                 "The required approval or integration is unavailable.")
+    return (
+        f" The requested {platform} {action} action is blocked and was not performed. "
+        f"{detail} No content was published and no spend occurred."
+    )
 
 
 def _evidence_grounded_experiment(experiment: dict | None,
@@ -1051,7 +1430,8 @@ def build_account_manager_graph(
         lowered = (text or "").lower()
         write_constraints = _current_turn_write_constraints(text)
         write_intents, blocked_actions = _filter_forbidden_write_intents(
-            _explicit_write_intents(text), write_constraints)
+            _explicit_write_intents(text, turn_id=state.get("turn_id", "")),
+            write_constraints)
         if blocked_actions:
             write_intents["_blocked_actions"] = blocked_actions
         from app.graphs.account_manager import _APPROVAL_CUES
@@ -1086,7 +1466,8 @@ def build_account_manager_graph(
                     "write_constraints": write_constraints,
                     "tool_capability_name": str(intent.get("capability", "") or "")}
         if write_intents.get("external_action") or any(
-                write_intents.get(k) for k in ("campaign", "task", "experiment")):
+                write_intents.get(k) for k in
+                ("campaign", "task", "experiment", "deliverable")):
             return {"route": "campaign_operation", "model_route": "campaign_operation",
                     "write_intents": write_intents,
                     "write_constraints": write_constraints}
@@ -1116,7 +1497,8 @@ def build_account_manager_graph(
                     "write_constraints": write_constraints}
         route = classify_to_route(
             text, deep="deep research" in (text or "").lower())
-        if any(write_intents.get(k) for k in ("campaign", "task", "experiment")) and route in ("state_only", "knowledge"):
+        if any(write_intents.get(k) for k in
+               ("campaign", "task", "experiment", "deliverable")) and route in ("state_only", "knowledge"):
             route = "campaign_operation"
         return {"route": route, "model_route": route,
                 "write_intents": write_intents,
@@ -1897,7 +2279,8 @@ def build_account_manager_graph(
         if not isinstance(intents, dict):
             return {}
         blocked_actions = list(intents.get("_blocked_actions") or [])
-        if (not any(intents.get(k) for k in ("campaign", "task", "experiment"))
+        if (not any(intents.get(k) for k in ("campaign", "task", "experiment",
+                                             "deliverable"))
                 and not intents.get("external_action") and not blocked_actions):
             return {}
         pid = str(state.get("project_id") or "")
@@ -1972,12 +2355,25 @@ def build_account_manager_graph(
                 return res
 
             campaign = intents.get("campaign")
+            campaign_intake = intents.get("campaign_intake")
             if isinstance(campaign, dict):
                 wf = {**workflow_base, "assigned_role": "account_manager"}
+                _reseal_campaign_metadata(conn, pid, turn_id)
                 res = execute("propose_campaign", {**campaign, "workflow": wf,
                                "idempotency_key": f"{turn_id}:campaign"})
                 results["campaign"] = res
                 campaign_id = str(res.get("campaign_id") or "") if res.get("ok") else ""
+                if res.get("ok"):
+                    recorded = _apply_campaign_metadata(
+                        conn, pid, campaign_id, campaign_intake)
+                    if recorded:
+                        results["campaign_intake"] = {
+                            "ok": True, "status": "recorded", **recorded}
+            deliverable = intents.get("deliverable")
+            if isinstance(deliverable, dict):
+                results["deliverables"] = _produce_deliverables(
+                    conn, state=state, campaign_id=campaign_id,
+                    intent=deliverable, campaign=campaign, config=config)
             task = intents.get("task")
             if isinstance(task, dict) and (not intents.get("campaign") or campaign_id):
                 task_args = dict(task)
@@ -2034,7 +2430,8 @@ def build_account_manager_graph(
                     pass
         failed = [k for k, v in results.items()
                   if isinstance(v, dict) and not v.get("ok")
-                  and v.get("status") != "blocked_by_user_constraint"]
+                  and v.get("status") not in (
+                      "blocked_by_user_constraint", "blocked")]
         approval = {}
         if results.get("approval", {}).get("ok"):
             approval = {"approval_id": results["approval"].get("approval_id", ""),
@@ -2043,10 +2440,20 @@ def build_account_manager_graph(
                         "campaign_id": campaign_id,
                         "idempotency_key": f"{turn_id}:approval"}
         if failed or results.get("error"):
-            campaign_error = ((results.get("campaign") or {}).get("error")
-                              if isinstance(results.get("campaign"), dict) else "")
-            results["write_error"] = (str(campaign_error).strip()[:300]
-                                      or "One or more proposals could not be saved.")
+            def _error_of(key):
+                value = results.get(key)
+                return str(value.get("error", "")).strip()[:300] \
+                    if isinstance(value, dict) else ""
+
+            # A deliverable-only failure is reported by _deliverable_report so
+            # the turn's exact reason survives into the answer once.
+            other_failures = [k for k in failed
+                              if k not in ("deliverables", "campaign_intake")]
+            results["write_error"] = (
+                _error_of("campaign")
+                or ("One or more proposals could not be saved."
+                    if other_failures else "")
+            )
         return {"write_results": results, "approval_state": approval}
 
     def synthesis_complete(state: LangGraphState, config=None) -> dict:
@@ -2062,6 +2469,8 @@ def build_account_manager_graph(
         writes = state.get("write_results") or {}
         if not writes:
             return {}
+        deliverable_note = _deliverable_report(writes.get("deliverables"))
+        external_note = _external_action_report(writes.get("external_action"))
         campaign = writes.get("campaign")
         if isinstance(campaign, dict):
             if campaign.get("ok") and campaign.get("campaign_id"):
@@ -2070,21 +2479,21 @@ def build_account_manager_graph(
                     "Campaign draft created successfully.\n\n"
                     f"Campaign ID: {campaign_id}\n\n"
                     f"[Open Campaign](/app/campaigns/{campaign_id})"
+                    + deliverable_note
+                    + external_note
                 )}
             if campaign.get("status") == "blocked_by_user_constraint":
                 return {"final_answer":
                         "No campaign draft was created. Skipped saving the campaign draft "
-                        "because your instructions prohibited that write."}
+                        "because your instructions prohibited that write."
+                        + deliverable_note + external_note}
             detail = str(campaign.get("error") or writes.get("write_error") or
                          "The campaign draft could not be saved.").strip()[:300]
-            return {"final_answer": f"Campaign draft could not be saved, so it was not created. {detail}"}
+            return {"final_answer": f"Campaign draft could not be saved, so it was not created. {detail}" + deliverable_note + external_note}
         external = writes.get("external_action")
         if isinstance(external, dict):
-            detail = str(external.get("error") or "This external action is blocked.").strip()
             return {"final_answer": (
-                f"{str(external.get('platform') or 'External')} "
-                f"{str(external.get('action') or 'action')} blocked. {detail} "
-                "No content was published and no budget was spent. "
+                external_note.strip() + " "
                 "Other project tools that do not use this integration remain available."
             )}
         ids = []
@@ -2095,6 +2504,7 @@ def build_account_manager_graph(
         note = (" Saved: " + ", ".join(ids) + ".") if ids else ""
         if writes.get("write_error"):
             note += " " + writes["write_error"]
+        note += deliverable_note
         blocked = [str(item.get("action") or key)
                    for key, item in writes.items()
                    if isinstance(item, dict)

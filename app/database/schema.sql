@@ -1,5 +1,5 @@
 -- Open Marketing OS v0.2 — authoritative schema. Single source of DDL.
-PRAGMA user_version = 12;
+PRAGMA user_version = 14;
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -106,6 +106,64 @@ CREATE TABLE IF NOT EXISTS campaigns (
   workflow_json TEXT NOT NULL DEFAULT '{}',
   updated_at TEXT NOT NULL
 );
+
+-- DEV-032: campaign-scoped Markdown deliverables and immutable snapshots.
+CREATE TABLE IF NOT EXISTS campaign_deliverable_batches (
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  deliverable_ids_json TEXT NOT NULL,
+  provenance_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, campaign_id, idempotency_key),
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS campaign_deliverables (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN (
+    'strategy_brief', 'social_post', 'ad_copy', 'creative_brief', 'content_calendar'
+  )),
+  title TEXT NOT NULL,
+  platform TEXT,
+  content_md TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT'
+    CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED')),
+  current_version INTEGER NOT NULL DEFAULT 1 CHECK (current_version >= 1),
+  generation_idempotency_key TEXT,
+  generation_ordinal INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, campaign_id, id),
+  UNIQUE (project_id, campaign_id, generation_idempotency_key, generation_ordinal),
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_deliverables_scope
+  ON campaign_deliverables(project_id, campaign_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS campaign_deliverable_revisions (
+  revision_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  deliverable_id TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  operation TEXT NOT NULL CHECK (operation IN ('CREATE', 'GENERATED', 'EDIT', 'STATUS_TRANSITION')),
+  type TEXT NOT NULL CHECK (type IN (
+    'strategy_brief', 'social_post', 'ad_copy', 'creative_brief', 'content_calendar'
+  )),
+  title TEXT NOT NULL,
+  platform TEXT,
+  content_md TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED')),
+  provenance_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  UNIQUE (project_id, campaign_id, deliverable_id, version),
+  FOREIGN KEY (deliverable_id) REFERENCES campaign_deliverables(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_deliverable_revisions_scope
+  ON campaign_deliverable_revisions(project_id, campaign_id, deliverable_id, version);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,

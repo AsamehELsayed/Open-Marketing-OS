@@ -161,7 +161,7 @@ def test_campaigns_list_and_detail(client):
     data = _data(c.get(f"/api/campaigns?project_id={ids['pa']}"))
     assert [x["id"] for x in data] == ["camp-a"]
     assert _data(c.get(f"/api/campaigns?project_id={ids['pb']}")) == []
-    detail = _data(c.get("/api/campaigns/camp-a"))
+    detail = _data(c.get(f"/api/campaigns/camp-a?project_id={ids['pa']}"))
     assert detail["campaign"]["title"] == "Alpha campaign"
     assert set(detail) == {"campaign", "prospects", "tasks", "experiments"}
     assert c.get("/api/campaigns/missing").status_code == 404
