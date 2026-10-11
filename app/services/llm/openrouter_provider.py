@@ -14,6 +14,9 @@ reports it (usage.include). Missing cost stays None — never fabricated.
 import logging
 import os
 import time
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,206 @@ from .base import LLMResponse, ToolCall
 
 BASE_URL = "https://openrouter.ai/api/v1"
 TRANSIENT = (429, 500, 502, 503, 504)
+STRICT_FREE_MODEL_ID = "apodex/apodex-1.1-mini:free"
+STRICT_ENDPOINT_SLUG = "novita/bf16"
+STRICT_ELIGIBILITY_MAX_AGE_S = 300
+_STRICT_ELIGIBILITY_TOKEN = object()
+
+
+@dataclass(frozen=True)
+class OpenRouterStrictEligibility:
+    """Short-lived proof collected from authenticated, read-only OpenRouter APIs."""
+
+    model_id: str
+    endpoint_slug: str
+    prompt_price: Decimal
+    completion_price: Decimal
+    request_price: Decimal | None
+    account_free_tier: bool
+    zdr_eligible: bool
+    checked_at: float
+    _verification_token: object = field(repr=False, compare=False)
+
+
+def _strict_error(message: str):
+    raise OpenRouterError(message, failure_kind="strict_eligibility")
+
+
+def _strict_price(pricing: dict, key: str, *, required: bool) -> Decimal | None:
+    value = pricing.get(key) if isinstance(pricing, dict) else None
+    if value is None:
+        if required:
+            _strict_error(f"OpenRouter strict preflight could not verify the {key} price.")
+        return None
+    if isinstance(value, bool):
+        _strict_error(f"OpenRouter strict preflight returned an invalid {key} price.")
+    try:
+        price = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        _strict_error(f"OpenRouter strict preflight returned an invalid {key} price.")
+    if not price.is_finite() or price < 0:
+        _strict_error(f"OpenRouter strict preflight returned an invalid {key} price.")
+    return price
+
+
+def _strict_json(client, path: str) -> dict:
+    try:
+        response = client.get(f"{BASE_URL}{path}")
+    except Exception as exc:
+        raise OpenRouterError(
+            f"OpenRouter strict preflight request {path} failed ({type(exc).__name__}).",
+            failure_kind="strict_eligibility") from None
+    if response.status_code != 200:
+        raise OpenRouterError(
+            f"OpenRouter strict preflight was not verified (HTTP {response.status_code}).",
+            status=response.status_code, failure_kind="strict_eligibility")
+    try:
+        data = response.json()
+    except Exception:
+        _strict_error("OpenRouter strict preflight returned an unreadable response.")
+    if not isinstance(data, dict):
+        _strict_error("OpenRouter strict preflight returned an unexpected response.")
+    return data
+
+
+def _strict_entries(value):
+    """Walk list/dict API response shapes without treating arbitrary text as evidence."""
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _strict_entries(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _strict_entries(child)
+
+
+def _strict_zdr_contains(document: dict, model_id: str, endpoint: dict) -> bool:
+    endpoint_slug = endpoint.get("tag")
+    for entry in _strict_entries(document.get("data")):
+        identifiers = [entry.get(key) for key in ("tag", "endpoint", "endpoint_slug", "slug")]
+        if endpoint_slug not in identifiers:
+            continue
+        if entry.get("model_id") != model_id:
+            continue
+        if endpoint.get("provider_name") is not None and (
+                entry.get("provider_name") != endpoint.get("provider_name")):
+            continue
+        if endpoint.get("name") is not None and entry.get("name") != endpoint.get("name"):
+            continue
+        if entry.get("tag") == endpoint_slug:
+            return True
+    return False
+
+
+def verify_strict_eligibility(model_id: str, *, endpoint_slug: str) -> OpenRouterStrictEligibility:
+    """Verify today's authenticated account/model/endpoint/ZDR state with GETs only.
+
+    The verifier deliberately makes one request to each read-only API and uses
+    an HTTP transport with retries disabled. It never caches this evidence.
+    """
+    if model_id != STRICT_FREE_MODEL_ID or model_id != str(model_id).strip():
+        _strict_error(f"Strict mode requires the exact free model {STRICT_FREE_MODEL_ID}.")
+    if endpoint_slug != STRICT_ENDPOINT_SLUG:
+        _strict_error(f"Strict mode requires the verified endpoint {STRICT_ENDPOINT_SLUG}.")
+    try:
+        key = get_key()
+    except Exception:
+        _strict_error("OpenRouter strict preflight could not access the configured credential.")
+    if not key:
+        _strict_error("OpenRouter strict preflight requires an authenticated account.")
+
+    try:
+        import httpx
+        with httpx.Client(
+                transport=httpx.HTTPTransport(retries=0), timeout=15,
+                follow_redirects=False,
+                headers={"Authorization": f"Bearer {key}",
+                         "Accept": "application/json"}) as client:
+            auth = _strict_json(client, "/auth/key")
+            catalog = _strict_json(client, "/models")
+            author, slug = model_id.split("/", 1)
+            endpoint_path = (f"/models/{quote(author, safe='')}/"
+                             f"{quote(slug, safe='')}/endpoints")
+            endpoints = _strict_json(client, endpoint_path)
+            zdr = _strict_json(client, "/endpoints/zdr")
+    except OpenRouterError:
+        raise
+    except Exception:
+        _strict_error("OpenRouter strict preflight could not initialize its read-only client.")
+
+    auth_data = auth.get("data") if isinstance(auth.get("data"), dict) else auth
+    if not isinstance(auth_data, dict) or auth_data.get("is_free_tier") is not True:
+        _strict_error("The authenticated OpenRouter account is not verified as free tier.")
+
+    catalog_rows = catalog.get("data")
+    model = next((row for row in catalog_rows if isinstance(row, dict)
+                  and row.get("id") == model_id), None) if isinstance(catalog_rows, list) else None
+    if model is None:
+        _strict_error("The exact free model is absent from the current OpenRouter catalog.")
+    model_pricing = model.get("pricing") if isinstance(model.get("pricing"), dict) else {}
+    model_prompt = _strict_price(model_pricing, "prompt", required=True)
+    model_completion = _strict_price(model_pricing, "completion", required=True)
+    model_request = _strict_price(model_pricing, "request", required=False)
+    if model_prompt != 0 or model_completion != 0 or (model_request is not None and model_request != 0):
+        _strict_error("The exact free model does not have verified zero pricing.")
+
+    endpoint = next((entry for entry in _strict_entries(endpoints.get("data"))
+                     if entry.get("tag") == endpoint_slug), None)
+    if endpoint is None:
+        _strict_error("The requested provider endpoint is not currently eligible for this model.")
+    provider_name = endpoint.get("provider_name")
+    if provider_name is not None and str(provider_name).strip().casefold() not in {"novita", "novitaai"}:
+        _strict_error("The endpoint slug does not match the expected Novita provider.")
+    endpoint_status = endpoint.get("status")
+    if endpoint_status is not None and not (
+            (isinstance(endpoint_status, (int, float)) and not isinstance(endpoint_status, bool)
+             and endpoint_status == 0)
+            or (isinstance(endpoint_status, str)
+                and endpoint_status.strip().casefold() in {"0", "online", "active"})):
+        _strict_error("The requested provider endpoint is not currently available.")
+    endpoint_pricing = endpoint.get("pricing") if isinstance(endpoint.get("pricing"), dict) else {}
+    prompt_price = _strict_price(endpoint_pricing, "prompt", required=True)
+    completion_price = _strict_price(endpoint_pricing, "completion", required=True)
+    request_price = _strict_price(endpoint_pricing, "request", required=False)
+    if prompt_price != 0 or completion_price != 0 or (request_price is not None and request_price != 0):
+        _strict_error("The eligible endpoint does not have verified zero pricing.")
+    if not _strict_zdr_contains(zdr, model_id, endpoint):
+        _strict_error("The exact provider endpoint is absent from authenticated ZDR results.")
+
+    return OpenRouterStrictEligibility(
+        model_id=model_id, endpoint_slug=endpoint_slug,
+        prompt_price=prompt_price, completion_price=completion_price,
+        request_price=request_price, account_free_tier=True, zdr_eligible=True,
+        checked_at=time.time(), _verification_token=_STRICT_ELIGIBILITY_TOKEN)
+
+
+def strict_routing_policy(model_id: str, eligibility: OpenRouterStrictEligibility) -> dict:
+    """Return strict route fields only for fresh, exact, zero-price eligibility proof."""
+    now = time.time()
+    if not isinstance(eligibility, OpenRouterStrictEligibility):
+        _strict_error("Strict inference requires a fresh authenticated eligibility check.")
+    if eligibility._verification_token is not _STRICT_ELIGIBILITY_TOKEN:
+        _strict_error("Strict inference requires eligibility created by the authenticated verifier.")
+    if model_id != STRICT_FREE_MODEL_ID or eligibility.model_id != model_id:
+        _strict_error("The selected model does not match the verified exact free model.")
+    if eligibility.endpoint_slug != STRICT_ENDPOINT_SLUG:
+        _strict_error("The selected endpoint does not match the verified Novita endpoint.")
+    if not eligibility.account_free_tier or not eligibility.zdr_eligible:
+        _strict_error("The authenticated account or endpoint privacy eligibility is not verified.")
+    if eligibility.prompt_price != 0 or eligibility.completion_price != 0:
+        _strict_error("Strict inference requires verified zero prompt and completion prices.")
+    if eligibility.request_price is not None and eligibility.request_price != 0:
+        _strict_error("Strict inference requires a verified zero request price.")
+    if not isinstance(eligibility.checked_at, (int, float)) or not (
+            0 <= now - eligibility.checked_at <= STRICT_ELIGIBILITY_MAX_AGE_S):
+        _strict_error("The authenticated eligibility check is expired; rerun read-only preflight.")
+    return {
+        "only": [eligibility.endpoint_slug],
+        "allow_fallbacks": False,
+        "zdr": True,
+        "data_collection": "deny",
+        "max_price": {"prompt": 0, "completion": 0, "request": 0},
+    }
 
 
 def get_key() -> str:
@@ -313,15 +516,25 @@ class OpenRouterProvider:
     def _model(self, opts: dict | None) -> str:
         return (opts or {}).get("model", self.model) or self.model
 
+    @staticmethod
+    def _strict_policy(opts: dict, model: str, tools: list) -> dict | None:
+        if not opts.get("_strict_zero_cost"):
+            return None
+        if tools:
+            _strict_error("Strict zero-cost inference does not allow provider tools.")
+        return strict_routing_policy(model, opts.get("_strict_eligibility"))
+
     def complete(self, *, system: str, messages: list, tools: list,
                  opts: dict | None = None) -> LLMResponse:
         opts = dict(opts or {})
         model = self._model(opts)
+        strict_policy = self._strict_policy(opts, model, tools)
         timeout = int(opts.get("timeout_s", self.timeout_s) or self.timeout_s)
         observer = _TransportObserver(opts, model)
         client = self._open_client(timeout, observer=observer)
         try:
-            payload = self._payload(system, messages, tools, model, opts)
+            payload = self._payload(system, messages, tools, model, opts,
+                                    strict_policy=strict_policy)
         except Exception as exc:
             observer.emit(state="provider_request_failed", attempt_index=0,
                           exception_class=type(exc).__name__, reason="serialization_error",
@@ -332,7 +545,8 @@ class OpenRouterProvider:
                       credential_reference_resolved=True, credential_decrypted=True,
                       client_initialized=True)
         last_err: Exception | None = None
-        for attempt in (0, 1):
+        attempts = (0,) if strict_policy is not None else (0, 1)
+        for attempt in attempts:
             try:
                 resp = client.chat.completions.create(**payload)
                 result = _to_llm_response(resp, requested_model=model)
@@ -357,7 +571,7 @@ class OpenRouterProvider:
                               network_phase=(phase if phase == "response_parse" else
                                              "http_response" if status is not None else phase),
                               **checkpoint_fields, **error_fields)
-                if status in TRANSIENT and attempt == 0:
+                if status in TRANSIENT and attempt == 0 and strict_policy is None:
                     time.sleep(1.0)
                     continue
                 raise _wrap(e, telemetry=observer.last_telemetry) from None
@@ -367,11 +581,13 @@ class OpenRouterProvider:
                            opts: dict | None = None, on_event=None) -> LLMResponse:
         opts = dict(opts or {})
         model = self._model(opts)
+        strict_policy = self._strict_policy(opts, model, tools)
         timeout = int(opts.get("timeout_s", self.timeout_s) or self.timeout_s)
         observer = _TransportObserver(opts, model)
         client = self._open_client(timeout, observer=observer)
         try:
-            payload = self._payload(system, messages, tools, model, opts, stream=True)
+            payload = self._payload(system, messages, tools, model, opts,
+                                    stream=True, strict_policy=strict_policy)
         except Exception as exc:
             observer.emit(state="provider_request_failed", attempt_index=0,
                           exception_class=type(exc).__name__, reason="serialization_error",
@@ -465,7 +681,8 @@ class OpenRouterProvider:
                           credential_reference_resolved=True, credential_decrypted=True)
         try:
             import httpx
-            transport = _ObservedHTTPTransport(httpx.HTTPTransport(), observer) if observer else None
+            transport = (_ObservedHTTPTransport(
+                httpx.HTTPTransport(retries=0), observer) if observer else None)
             http_client = httpx.Client(transport=transport, timeout=timeout) if transport else None
             client = OpenAI(api_key=key, base_url=BASE_URL, timeout=timeout, max_retries=0,
                             http_client=http_client,
@@ -488,16 +705,28 @@ class OpenRouterProvider:
 
     @staticmethod
     def _payload(system: str, messages: list, tools: list, model: str,
-                 opts: dict, stream: bool = False) -> dict:
+                 opts: dict, stream: bool = False,
+                 strict_policy: dict | None = None) -> dict:
         msgs = [{"role": "system", "content": system}]
         for m in messages:
             msgs.append({"role": m.get("role", "user"),
                          "content": m.get("content", "")})
-        payload: dict = {
-            "model": model,
-            "messages": msgs,
-            "extra_body": {"usage": {"include": True}},
-        }
+        extra_body = opts.get("extra_body")
+        if extra_body is None:
+            extra_body = {}
+        if not isinstance(extra_body, dict):
+            raise TypeError("OpenRouter extra_body must be an object")
+        extra_body = dict(extra_body)
+        usage = extra_body.get("usage")
+        usage = dict(usage) if isinstance(usage, dict) else {}
+        usage["include"] = True
+        extra_body["usage"] = usage
+        if strict_policy is not None:
+            provider = extra_body.get("provider")
+            provider = dict(provider) if isinstance(provider, dict) else {}
+            provider.update(strict_policy)
+            extra_body["provider"] = provider
+        payload: dict = {"model": model, "messages": msgs, "extra_body": extra_body}
         if stream:
             payload["stream"] = True
             payload["stream_options"] = {"include_usage": True}
