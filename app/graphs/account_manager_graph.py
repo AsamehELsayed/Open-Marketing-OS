@@ -559,6 +559,56 @@ def _reseal_campaign_metadata(conn, project_id: str, turn_id: str) -> None:
         pass
 
 
+def _validation_failure_report(result) -> str:
+    """Render the factual validation diagnostic without implying a save."""
+    diagnostic = result.get("diagnostic") if isinstance(result, dict) else {}
+    diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
+    excerpt = str(diagnostic.get("claim_excerpt") or "[claim unavailable]")
+    ordinal = diagnostic.get("deliverable_ordinal")
+    kind = str(diagnostic.get("deliverable_type") or "unknown")
+    affected = (f"Deliverable {ordinal} ({kind})" if ordinal
+                else f"Deliverable ({kind})")
+    reasons = {
+        "persisted_fact_source_match": (
+            "The claim did not match a fact stated in this request, the selected "
+            "Business Profile, or this project's scoped retrieved evidence."),
+        "business_place_source_match": (
+            "The establishment or location claim is not directly supported by "
+            "one of this turn's allowed sources."),
+        "high_risk_source_match": (
+            "The high-risk business claim is not supported by this request or "
+            "the selected project's sources."),
+        "numeric_source_match": (
+            "The numeric claim is not supported by this request or the selected "
+            "project's sources."),
+        "evidence_citation_integrity": (
+            "The evidence statement does not cite an identifier from the "
+            "selected project's retrieved evidence."),
+        "scoped_citation_integrity": (
+            "The citation is not part of the selected project's retrieved "
+            "evidence."),
+    }
+    rule = str(diagnostic.get("rule") or "")
+    reason = reasons.get(
+        rule, str(diagnostic.get("validation_detail") or
+                  rule.replace("_", " ") or "A factual validation check failed."))
+    source_ids = diagnostic.get("available_source_ids") or []
+    source_text = (", ".join(str(value) for value in source_ids)
+                   if source_ids else "No retrieved project source IDs were returned.")
+    return (
+        "Campaign content was generated, but it contains an unverified business "
+        "claim. Nothing was saved.\n\n"
+        f"- Unsupported claim: {excerpt}\n"
+        f"- Affected deliverable: {affected}\n"
+        f"- Why validation failed: {reason}\n"
+        f"- Relevant source references: {source_text}\n"
+        "- Factual validation sources: this turn's request, selected Business "
+        "Profile, and this project's scoped retrieved evidence.\n"
+        "- Next step: Review or correct the Business Profile, or add verified "
+        "project evidence. Then revise or remove the claim and retry."
+    )
+
+
 def _deliverable_report(result) -> str:
     """DEV-032 W2: one honest sentence about this turn's deliverable outcome.
 
@@ -2475,6 +2525,26 @@ def build_account_manager_graph(
         if isinstance(campaign, dict):
             if campaign.get("ok") and campaign.get("campaign_id"):
                 campaign_id = str(campaign["campaign_id"])
+                deliverables = writes.get("deliverables")
+                if (isinstance(deliverables, dict)
+                        and deliverables.get("failure_code") == "output_validation"):
+                    return {"final_answer": (
+                        _validation_failure_report(deliverables)
+                        + "\n\nA campaign record was saved separately and remains "
+                        "available for review.\n\n"
+                        f"Campaign ID: {campaign_id}\n\n"
+                        f"[Open Campaign](/app/campaigns/{campaign_id})"
+                        + external_note
+                    )}
+                if isinstance(deliverables, dict) and not deliverables.get("ok"):
+                    return {"final_answer": (
+                        "Campaign record exists, but campaign content was not "
+                        "produced.\n\n"
+                        f"Campaign ID: {campaign_id}\n\n"
+                        f"[Open Campaign](/app/campaigns/{campaign_id})"
+                        + deliverable_note
+                        + external_note
+                    )}
                 return {"final_answer": (
                     "Campaign draft created successfully.\n\n"
                     f"Campaign ID: {campaign_id}\n\n"

@@ -13,23 +13,27 @@ from app.services.campaign_production import (
 SOURCE_ID = "northstar-notes.md:c000"
 
 
-def _block(facts, *, suggestions="Use a simple product photo."):
+def _block(facts, *, evidence="No project evidence available.",
+           suggestions="Use a simple product photo.",
+           unknowns="No performance results are documented."):
     return (
         '## DELIVERABLE type="strategy_brief" title="Northstar launch" '
         'platform=""\n\n'
         f"## Persisted user facts\n{facts}\n\n"
-        f"## Retrieved evidence\nNo project evidence available.\n\n"
+        f"## Retrieved evidence\n{evidence}\n\n"
         f"## AI suggestions\n{suggestions}\n\n"
         "## Unknown or unsupported information\n"
-        "No performance results are documented.\n"
+        f"{unknowns}\n"
     )
 
 
-def _validate(facts, *, context=None, suggestions="Use a simple product photo."):
+def _validate(facts, *, context=None, allowed_ids=None, evidence="No project evidence available.",
+              suggestions="Use a simple product photo.",
+              unknowns="No performance results are documented."):
     return validate_generated_items(
-        _block(facts, suggestions=suggestions),
+        _block(facts, evidence=evidence, suggestions=suggestions, unknowns=unknowns),
         types=["strategy_brief"],
-        allowed_ids=[SOURCE_ID],
+        allowed_ids=allowed_ids if allowed_ids is not None else [SOURCE_ID],
         context=context or {"profile": {}, "brief_md": "", "evidence": []},
     )
 
@@ -37,8 +41,8 @@ def _validate(facts, *, context=None, suggestions="Use a simple product photo.")
 def test_exact_grounded_fact_is_accepted():
     context = {
         "project_id": "northstar-test-project",
-        "profile": {},
-        "brief_md": "Business name: Northstar Coffee.",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
         "evidence": [],
     }
 
@@ -56,16 +60,188 @@ def test_generation_prompt_keeps_facts_separate_and_quotes_sources():
         user_request="Use the supplied project notes.",
     )
 
-    assert "copy the source wording exactly" in system.casefold()
-    assert "do not paraphrase, combine, translate, or infer facts" in system.casefold()
-    assert "project-scoped evidence" in system.casefold()
+    lowered = system.casefold()
+    assert "copy source wording exactly" in lowered
+    assert "do not paraphrase, translate, merge, or infer" in lowered
+    assert "project-scoped evidence" in lowered
+    assert "supported facts" in lowered
+    assert "unknown information" in lowered
+    assert "creative recommendations" in lowered
+    assert "business location, branch, physical store" in lowered
     assert "Use the supplied project notes." in user
+
+
+def test_process_location_does_not_support_a_cafe_location_in_suggestions():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": "",
+        "evidence": [{
+            "source_id": SOURCE_ID,
+            "text": "Beans are roasted in small batches in Maadi. "
+                    "The café hosts a weekly tasting flight.",
+        }],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.",
+            context=context,
+            suggestions="Visit our Maadi café for a tasting.",
+        )
+
+    assert caught.value.diagnostic["rule"] == "business_place_source_match"
+    assert "Maadi café" in caught.value.diagnostic["claim_excerpt"]
+    assert caught.value.diagnostic["available_source_ids"] == [SOURCE_ID]
+
+
+def test_unknown_wording_does_not_mask_an_unsupported_positive_location():
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.",
+            suggestions=("We are located in Maadi, but our location is unknown."),
+        )
+
+    assert caught.value.diagnostic["rule"] == "business_place_source_match"
+    assert "located in Maadi" in caught.value.diagnostic["claim_excerpt"]
+
+
+def test_standalone_unknown_business_location_is_accepted():
+    rows = _validate(
+        "No persisted facts supplied.",
+        unknowns="Our business location is unknown.",
+    )
+
+    assert "business location is unknown" in rows[0]["content_md"].lower()
+
+
+@pytest.mark.parametrize("claim", [
+    "Visit our Maadi branch.",
+    "The Northstar café is located in Maadi.",
+    "We are opening a new café in Maadi.",
+    "We are located in Maadi.",
+    "We are based in Maadi.",
+    "Find us in Maadi.",
+    "Our address is Maadi, Cairo.",
+    "We have a location in Maadi.",
+])
+def test_unsupported_branch_or_cafe_claim_is_rejected_in_recommendations(claim):
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", suggestions=claim)
+
+    assert caught.value.diagnostic["rule"] == "business_place_source_match"
+
+
+def test_explicitly_supported_cafe_location_in_profile_is_accepted():
+    supported = "Northstar café is located in Cairo, Egypt."
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"description": supported},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    rows = _validate(supported, context=context)
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+def test_properly_cited_scoped_evidence_location_is_accepted():
+    source_id = "doc-a:chunk-1"
+    supported = "Northstar cafe is located in Cairo, Egypt."
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": "",
+        "evidence": [{"source_id": source_id, "text": supported}],
+    }
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        allowed_ids=[source_id],
+        evidence="Northstar cafe is located in Cairo, Egypt [doc-a:chunk-1].",
+    )
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+def test_matching_location_text_with_other_project_citation_is_rejected():
+    source_id = "doc-a:chunk-1"
+    supported = "Northstar cafe is located in Cairo, Egypt."
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": "",
+        "evidence": [{"source_id": source_id, "text": supported}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            allowed_ids=[source_id],
+            evidence=("Northstar cafe is located in Cairo, Egypt "
+                      "[other-project:chunk-1]."),
+        )
+
+    assert caught.value.diagnostic["rule"] == "scoped_citation_integrity"
+
+
+def test_business_brief_alone_does_not_support_persisted_fact():
+    supported = "Northstar café is located in Cairo, Egypt."
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": supported,
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(supported, context=context)
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+
+
+def test_business_brief_alone_does_not_support_location_in_suggestions():
+    supported = "Northstar café is located in Cairo, Egypt."
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": supported,
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", context=context,
+                  suggestions=supported)
+
+    assert caught.value.diagnostic["rule"] == "business_place_source_match"
+
+
+def test_missing_business_information_can_remain_unknown():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {},
+        "brief_md": "",
+        "evidence": [],
+    }
+    unknowns = (
+        "Business location is unknown. Price is unknown. Discount is unknown. "
+        "Certification is unknown. Delivery terms are unknown. "
+        "Performance results and testimonials are unknown."
+    )
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        suggestions="Use a product close-up.", unknowns=unknowns)
+
+    assert "location is unknown" in rows[0]["content_md"].lower()
+    assert "certification is unknown" in rows[0]["content_md"].lower()
 
 
 def test_harmless_business_name_paraphrase_is_accepted():
     context = {
-        "profile": {},
-        "brief_md": "Business name: Northstar Coffee.",
+        "profile": {"description": "Business name: Northstar Coffee."},
+        "brief_md": "",
         "evidence": [],
     }
 
@@ -144,8 +320,8 @@ def test_project_knowledge_tasting_note_paraphrase_is_accepted():
 
 def test_unsupported_business_claim_is_rejected():
     context = {
-        "profile": {},
-        "brief_md": "Business name: Northstar Coffee.",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
         "evidence": [],
     }
 
@@ -183,8 +359,8 @@ def test_invented_commercial_and_high_risk_claims_remain_rejected(claim):
 def test_rejection_diagnostic_is_bounded_project_scoped_and_actionable():
     context = {
         "project_id": "northstar-test-project",
-        "profile": {},
-        "brief_md": "Business name: Northstar Coffee.",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
         "evidence": [{"source_id": SOURCE_ID,
                       "text": "Northstar House Blend is a coffee."}],
     }

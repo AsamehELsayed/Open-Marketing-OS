@@ -67,7 +67,6 @@ _TYPE_ALIASES: tuple[tuple[str, str], ...] = (
     ("advertisement", "ad_copy"),
     ("advertising copy", "ad_copy"),
     ("ads", "ad_copy"),
-    ("ad", "ad_copy"),
     ("creative brief", "creative_brief"),
     ("creative concept", "creative_brief"),
     ("creative direction", "creative_brief"),
@@ -181,12 +180,19 @@ def requested_types(text: str) -> list[str]:
     lowered = f" {str(text or '').lower()} "
     found = {canonical for alias, canonical in _TYPE_ALIASES
              if _mentions(lowered, alias)}
+    # A bare singular "ad" is ambiguous (for example, "no ad spend").
+    # Count it only when a creation verb makes the deliverable explicit.
+    if re.search(
+            r"\b(?:create|write|draft|make|generate|produce)\s+"
+            r"(?:(?:a|an|the|some)\s+)?(?:\w+\s+){0,2}ad\b",
+            lowered):
+        found.add("ad_copy")
     return [kind for kind in DELIVERABLE_TYPES if kind in found]
 
 
 def resolved_types(text: str) -> list[str]:
-    """Requested types, or the full standard set when none were named."""
-    return requested_types(text) or list(DELIVERABLE_TYPES)
+    """Requested types, or one bounded default when no type was named."""
+    return requested_types(text) or ["social_post"]
 
 
 def requests_deliverables(text: str) -> bool:
@@ -431,6 +437,7 @@ def build_generation_context(conn, *, project_id: str, campaign_title: str = "",
 
     return {
         "project_id": pid,
+        "campaign_title": str(campaign_title or "")[:MAX_TITLE_CHARS],
         "profile": profile,
         "brief_md": brief_md[:8000],
         "evidence": evidence,
@@ -451,12 +458,29 @@ _SCHEMA_RULES = (
     "The block body must contain these four headings in this order: "
     "## Persisted user facts, ## Retrieved evidence, ## AI suggestions, and "
     "## Unknown or unsupported information.\n"
-    "Persisted user facts: only facts stated in the user request, business "
-    "profile, brief, or supplied project-scoped evidence. Copy the source wording "
-    "exactly; do not paraphrase, combine, translate, or infer facts. If you "
-    "cannot quote a fact exactly, omit it from this section and put any "
-    "interpretation under AI suggestions. Never invent a price, discount, "
-    "claim, statistic, budget, metric, testimonial, date, or research finding.\n"
+    "Use these factual categories throughout every block:\n"
+    "SUPPORTED FACTS: Facts copied exactly from this turn's user request or "
+    "selected client Business Profile, plus claims directly stated in the "
+    "supplied project-scoped evidence. Profile values are user-supplied and "
+    "not independently verified. The Business Brief is a summary aid, not a "
+    "separate source; treat its statements as supported only when the fact also "
+    "appears in this request, the selected profile, or supplied project evidence. "
+    "Do not combine separate clauses, "
+    "fields, or evidence statements to create a new relationship. In particular, "
+    "a roasting/process location and a separate café or tasting statement do "
+    "not establish where a café, branch, or store is located. Put supported "
+    "facts under Persisted user facts or Retrieved evidence as applicable. Copy "
+    "source wording exactly; do not paraphrase, translate, merge, or infer.\n"
+    "UNKNOWN INFORMATION: Any business fact absent from those allowed sources. "
+    "Leave it unspecified; where relevant, name it under Unknown or unsupported "
+    "information rather than filling a plausible value.\n"
+    "CREATIVE RECOMMENDATIONS: Marketing ideas clearly labeled as suggestions "
+    "under AI suggestions. Be creative about message, format, imagery, and "
+    "testing ideas, but do not present a suggestion as an existing business fact.\n"
+    "Never invent or imply a business location, branch, physical store, product "
+    "price, discount, certification, delivery promise, performance result, or "
+    "testimonial. If a fact is missing, leave it unspecified. Marketing "
+    "creativity is allowed; fabricating business facts is not.\n"
     "Retrieved evidence: cite supplied evidence only as [document_id:chunk_id] "
     "copied exactly from the supplied list. If no evidence was supplied, write "
     "'No project evidence available' and cite nothing.\n"
@@ -681,16 +705,17 @@ def _validation_error_message(label: str, diagnostic: dict) -> str:
 
 
 def _source_texts(context: dict | None, user_request: str) -> list[str]:
-    """Collect only sources explicitly allowed for this generation turn."""
+    """Collect sources allowed to substantiate facts for this generation turn.
+
+    The Business Brief remains available to the provider as a summary aid, but
+    it is derived context rather than an independent source for validation.
+    """
     scoped = context if isinstance(context, dict) else {}
     sources = [str(user_request or "")]
     profile = scoped.get("profile")
     if isinstance(profile, dict):
         sources.extend(str(value) for value in profile.values()
                        if isinstance(value, str) and value.strip())
-    brief = scoped.get("brief_md")
-    if isinstance(brief, str) and brief.strip():
-        sources.append(brief)
     evidence = scoped.get("evidence")
     if isinstance(evidence, list):
         sources.extend(str(row.get("text") or "") for row in evidence
@@ -820,6 +845,77 @@ def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label:
                 diagnostic=diagnostic)
 
 
+_ESTABLISHMENT_TERMS = (
+    r"caf[eé]s?|coffee\s+shops?|branch(?:es)?|stores?|shops?|offices?|showrooms?"
+)
+_BUSINESS_PLACE_CLAIM_RE = re.compile(
+    rf"(?:"
+    rf"\b(?:we\s+(?:are|were|will\s+be)|we['’]re)\s+"
+    rf"(?:(?:located|based)\s+(?:in|at)|(?:in|at))\s+"
+    rf"[\w’'-]+"
+    rf"|\bfind\s+us\s+(?:in|at)\s+[\w’'-]+"
+    rf"|\b(?:our|the\s+business['’]s?)\s+address\s+"
+    rf"(?:is\s+|:\s*)[\w’'-]+"
+    rf"|\b(?:our|the\s+business['’]s?)\s+location\s+"
+    rf"(?:is\s+(?:in|at)\s+|:\s*)[\w’'-]+"
+    rf"|\bwe\s+have\s+(?:a\s+)?(?:location|{_ESTABLISHMENT_TERMS})\s+"
+    rf"(?:in|at)\s+[\w’'-]+"
+    rf"|\b(?:our|the)\s+(?:(?:[\w’'-]+)\s+){{0,3}}"
+    rf"(?:{_ESTABLISHMENT_TERMS})\b"
+    rf"|\b(?:visit|stop\s+by|come\s+to|find\s+us\s+at)\s+"
+    rf"(?:(?:our|the)\s+)?(?:(?:[\w’'-]+)\s+){{0,3}}"
+    rf"(?:{_ESTABLISHMENT_TERMS})\b"
+    rf"|\b(?:{_ESTABLISHMENT_TERMS})\b[^.!?;\r\n]{{0,80}}"
+    rf"\b(?:in|at|near|located|based|on)\s+[\w’'-]+"
+    rf"|\b(?:in|at|near)\s+[A-Z][\w’'-]*(?:\s+[A-Z][\w’'-]*){{0,2}}"
+    rf"\s+(?:{_ESTABLISHMENT_TERMS})\b"
+    rf"|\b(?:we\s+(?:are|will\s+be|have)|the\s+business\s+has)\s+"
+    rf"(?:opening|opened|operating|running|a\s+new)\b[^.!?;\r\n]{{0,80}}"
+    rf"(?:{_ESTABLISHMENT_TERMS})\b"
+    rf")",
+    re.IGNORECASE,
+)
+def _validate_business_place_claims(markdown: str, source_texts: list[str], *,
+                                    label: str, source_ids=None,
+                                    project_id: str = "") -> None:
+    """Reject unsupported establishment/location statements in every section.
+
+    Match the complete claim against one allowed source. This deliberately
+    prevents facts in separate clauses (such as roasting in a city and a café
+    tasting elsewhere in the same note) from being merged into a shop-location
+    assertion. It cannot correct an inaccurate location already stored in a
+    selected Business Profile or derived Brief.
+    """
+    normalized_sources = [
+        _normalized_fact_text(source) for source in source_texts if source
+    ]
+    for fragment in _claim_fragments(markdown):
+        if not _BUSINESS_PLACE_CLAIM_RE.search(fragment):
+            continue
+        # Do not let an unknown/absence phrase elsewhere in the same fragment
+        # suppress a positive location assertion (for example, "We are located
+        # in Maadi, but our location is unknown."). Standalone unknown wording
+        # such as "Our business location is unknown" does not match the
+        # business-place claim pattern above and remains valid.
+        # Citation markup is metadata, not part of the factual statement.
+        # Citation validity is checked independently by
+        # _validate_evidence_claims() and _has_unsupported_citations(); keep
+        # this source comparison focused on the claim text only.
+        source_match_claim = re.sub(
+            r"\[[^\]\r\n]+:[^\]\r\n]+\]", "", fragment)
+        normalized_claim = _normalized_fact_text(source_match_claim)
+        if normalized_claim and any(
+                normalized_claim in source for source in normalized_sources):
+            continue
+        diagnostic = _validation_diagnostic(
+            label=label, rule="business_place_source_match", claim=fragment,
+            source_ids=source_ids, classification="unsupported",
+            project_id=project_id)
+        raise DeliverableValidationError(
+            _validation_error_message(label, diagnostic),
+            diagnostic=diagnostic)
+
+
 def validate_generated_items(text: str, *, types: list[str], allowed_ids,
                              single: bool = False, context: dict | None = None,
                              user_request: str = "") -> list[dict]:
@@ -903,6 +999,10 @@ def validate_generated_items(text: str, *, types: list[str], allowed_ids,
             project_id=str((context or {}).get("project_id") or ""))
         _validate_evidence_claims(
             content, allowed_ids, label=f"{label} ({kind})",
+            project_id=str((context or {}).get("project_id") or ""))
+        _validate_business_place_claims(
+            f"{title}\n{content}", sources, label=f"{label} ({kind})",
+            source_ids=diagnostic_source_ids,
             project_id=str((context or {}).get("project_id") or ""))
         _validate_high_risk_claims(
             f"{title}\n{content}", sources, label=f"{label} ({kind})",
@@ -1191,9 +1291,9 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
                 provider="OPENROUTER", model=str(model_id or ""),
                 failure_code="strict_preflight_failed", preserved_existing=True)
 
+    requested = list(types) if types else resolved_types(user_request)
     wanted = list(dict.fromkeys(
-        kind for kind in (list(types) if types else resolved_types(user_request))
-        if kind in DELIVERABLE_TYPES))
+        kind for kind in requested if kind in DELIVERABLE_TYPES))
     if not wanted:
         return _failure("No deliverable types were requested, so nothing was generated.",
                         status="skipped")
