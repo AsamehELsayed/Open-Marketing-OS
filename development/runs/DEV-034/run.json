@@ -1,0 +1,54 @@
+{
+  "run_id": "DEV-034",
+  "title": "Campaign generation quality and validation feedback",
+  "classification": "MEDIUM",
+  "status": "approved",
+  "planner": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-034/plan.md"
+  },
+  "workers": [
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-034/workers/w1.md"
+    },
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-034/remediation-execution.md"
+    },
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-034/remediation-execution-2.md"
+    },
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-034/remediation-execution-3.md"
+    }
+  ],
+  "qa": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-034/qa-4.md"
+  },
+  "reviewer": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-034/review-2.md"
+  },
+  "required_roles": [
+    "planner",
+    "implementer",
+    "qa",
+    "reviewer"
+  ],
+  "founder_plan_approved": true,
+  "plan_approved_at": "2026-10-11T18:11:41Z",
+  "created_at": "2026-10-11T17:47:07Z",
+  "updated_at": "2026-10-11T19:11:10Z",
+  "current_stage": "approved"
+}

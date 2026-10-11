@@ -529,14 +529,59 @@ def test_forbidden_deliverable_action_blocks_the_write():
         ("make an ad copy", ["ad_copy"]),
         ("a social post and a creative brief", ["social_post", "creative_brief"]),
         ("give me the content calendar", ["content_calendar"]),
-        # An unsupported kind names no supported type, so the standard five run.
-        ("create a campaign with a press release", list(DELIVERABLE_TYPES)),
-        ("create a campaign for our store", list(DELIVERABLE_TYPES)),
+        # Generic/unsupported requests use one bounded default, not five.
+        ("create a campaign with a press release", ["social_post"]),
+        ("create a campaign for our store", ["social_post"]),
+        ("Create a seven-day draft campaign with no ad spend.", ["social_post"]),
+        ("Create an ad", ["ad_copy"]),
     ],
 )
-def test_requested_types_map_to_the_five_supported_kinds(text, expected):
+def test_requested_types_are_explicit_or_use_one_bounded_default(text, expected):
     assert production.resolved_types(text) == expected
     assert all(kind in DELIVERABLE_TYPES for kind in expected)
+
+
+def test_provider_receives_the_exact_bounded_scoped_prompt(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    _install_storage(monkeypatch)
+    provider = ScriptedProvider(text=(
+        _social()
+        + _block("creative_brief", "Huila visual direction",
+                 facts="Business name: Northstar Roasters\nIndustry: coffee\n"
+                       "Audience: Northstar Roasters customers\n"
+                       "Offer: small-batch coffee",
+                 evidence="Huila region lots [doc-a:chunk-1].",
+                 suggestions="Use a close-up coffee preparation image.",
+                 unknowns="No product price or store location is documented.")))
+    _install_router(monkeypatch, provider)
+    _scoped_retrieval(monkeypatch)
+    request = (
+        "Create a marketing campaign for Northstar to introduce Huila region "
+        "coffee with one social post and one creative brief. No distribution "
+        "or ad spend is requested.")
+
+    out = _graph(conn).invoke(
+        _state(request), config={"configurable": {"thread_id": "t1"}})
+
+    result = out["write_results"]["deliverables"]
+    assert result["ok"] is True
+    assert len(provider.calls) == 1
+    captured = provider.calls[0]
+    user_payload = json.loads(captured["user"])
+    assert all(name in captured["system"] for name in (
+        "SUPPORTED FACTS", "UNKNOWN INFORMATION", "CREATIVE RECOMMENDATIONS"))
+    assert user_payload["user_request"] == request
+    assert user_payload["requested_types"] == ["social_post", "creative_brief"]
+    campaign_id = out["write_results"]["campaign"]["campaign_id"]
+    campaign_title = conn.execute(
+        "SELECT title FROM campaigns WHERE id=?", (campaign_id,)
+    ).fetchone()["title"]
+    assert user_payload["campaign_title"] == campaign_title
+    assert user_payload["business_profile"]["business_name"] == "Northstar Roasters"
+    assert "Northstar is a small roastery." in user_payload["business_brief"]
+    assert user_payload["evidence"][0]["source_id"] == "doc-a:chunk-1"
+    assert "Harbor" not in captured["user"]
+    assert "SECRET-BRIEF-XYZ" not in captured["user"]
 
 
 def test_campaign_intake_records_only_what_the_user_said():
@@ -1358,6 +1403,44 @@ def test_incomplete_or_duplicate_batch_preserves_existing_deliverables(
     assert len(storage["calls"]) == calls_before
 
 
+def test_validation_failure_has_actionable_claim_diagnostic_and_no_success_claim(
+        tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    storage = _install_storage(monkeypatch)
+    provider = ScriptedProvider(text=_social(
+        suggestions="Visit our Maadi café for the weekly tasting."))
+    _install_router(monkeypatch, provider)
+    _scoped_retrieval(monkeypatch)
+
+    out = _graph(conn).invoke(
+        _state("Create a marketing campaign with a social post."),
+        config={"configurable": {"thread_id": "t1"}})
+
+    result = out["write_results"]["deliverables"]
+    final = out["final_answer"]
+    assert result["ok"] is False
+    assert result["failure_code"] == "output_validation"
+    assert storage["calls"] == []
+    assert final.startswith(
+        "Campaign content was generated, but it contains an unverified "
+        "business claim. Nothing was saved.")
+    assert "Maadi café" in final
+    assert "Deliverable 1 (social_post)" in final
+    assert "not directly supported" in final
+    assert "doc-a:chunk-1" in final
+    assert (
+        "Factual validation sources: this turn's request, selected Business "
+        "Profile, and this project's scoped retrieved evidence."
+    ) in final
+    assert "Business Brief" not in final
+    assert "Review or correct the Business Profile" in final
+    assert "revise or remove the claim and retry" in final
+    assert "Campaign draft created successfully." not in final
+    assert "A campaign record was saved separately" in final
+    campaign_id = out["write_results"]["campaign"]["campaign_id"]
+    assert _stored(storage, conn, "p1", campaign_id) == []
+
+
 def test_unavailable_provider_reports_honestly_and_saves_nothing(
         tmp_path, monkeypatch):
     conn = _conn(tmp_path)
@@ -1376,7 +1459,8 @@ def test_unavailable_provider_reports_honestly_and_saves_nothing(
     assert result["preserved_existing"] is True
     assert storage["calls"] == []
     assert out["write_results"]["campaign"]["ok"] is True
-    assert "Campaign draft created successfully." in out["final_answer"]
+    assert "Campaign record exists, but campaign content was not produced." in out["final_answer"]
+    assert "Campaign draft created successfully." not in out["final_answer"]
     assert "No campaign deliverables were saved." in out["final_answer"]
     assert "manually" in out["final_answer"]
 
