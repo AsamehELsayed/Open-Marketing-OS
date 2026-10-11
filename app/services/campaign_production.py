@@ -1006,7 +1006,9 @@ def _router():
 
 def complete(conn, *, turn_id: str, project_id: str, system: str, user: str,
              provider: str = "AUTO", model_id: str = "",
-             call_prefix: str = "", max_tokens: int = 2400) -> tuple[str, dict]:
+             call_prefix: str = "", max_tokens: int = 2400,
+             strict_zero_cost: bool = False,
+             strict_eligibility=None) -> tuple[str, dict]:
     """Run one ModelRouter completion with the turn's selected provider/model.
 
     Returns ``(text, provenance identity)``. Raises
@@ -1019,6 +1021,23 @@ def complete(conn, *, turn_id: str, project_id: str, system: str, user: str,
             "project_id is required before generation (fail closed)",
             provider=str(provider or ""), model=str(model_id or ""),
             failure_code="missing_project_id")
+    strict_opts = {}
+    if strict_zero_cost:
+        if resolve_mode(provider) != "OPENROUTER":
+            raise DeliverableGenerationError(
+                "Strict zero-cost generation requires the explicit OPENROUTER route.",
+                provider=str(provider or ""), model=str(model_id or ""),
+                failure_code="strict_preflight_failed")
+        try:
+            from app.services.llm.openrouter_provider import strict_routing_policy
+            strict_routing_policy(model_id, strict_eligibility)
+        except Exception as exc:
+            raise DeliverableGenerationError(
+                f"Strict zero-cost eligibility is not verified: {exc}"[:300],
+                provider="OPENROUTER", model=str(model_id or ""),
+                failure_code="strict_preflight_failed") from exc
+        strict_opts = {"_strict_zero_cost": True,
+                       "_strict_eligibility": strict_eligibility}
     try:
         router = _router()
     except Exception as exc:
@@ -1048,7 +1067,7 @@ def complete(conn, *, turn_id: str, project_id: str, system: str, user: str,
             messages=[{"role": "user", "content": user}],
             tools=[],
             mode=mode,
-            opts={"max_tokens": int(max_tokens)},
+            opts={"max_tokens": int(max_tokens), **strict_opts},
             model_override=model_override,
             call_id=call_id,
             adapter="campaign_production",
@@ -1144,7 +1163,9 @@ def _failure(error: str, *, status: str = "failed", max_error: int = 400,
 
 def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
                    user_request: str, types=None, campaign_title: str = "",
-                   provider: str = "AUTO", model_id: str = "") -> dict:
+                   provider: str = "AUTO", model_id: str = "",
+                   strict_zero_cost: bool = False,
+                   strict_eligibility=None) -> dict:
     """Generate one deliverable batch and persist it atomically through W1.
 
     Returns an honest result: persisted ids and types, or a campaign-only
@@ -1155,6 +1176,20 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
     cid = str(campaign_id or "").strip()
     if not pid or not cid:
         return _failure("A campaign deliverable needs both a project and a campaign.")
+    if strict_zero_cost:
+        if resolve_mode(provider) != "OPENROUTER":
+            return _failure(
+                "Strict zero-cost generation requires the explicit OPENROUTER route.",
+                provider=str(provider or ""), model=str(model_id or ""),
+                failure_code="strict_preflight_failed", preserved_existing=True)
+        try:
+            from app.services.llm.openrouter_provider import strict_routing_policy
+            strict_routing_policy(model_id, strict_eligibility)
+        except Exception as exc:
+            return _failure(
+                f"Strict zero-cost eligibility is not verified: {exc}",
+                provider="OPENROUTER", model=str(model_id or ""),
+                failure_code="strict_preflight_failed", preserved_existing=True)
 
     wanted = list(dict.fromkeys(
         kind for kind in (list(types) if types else resolved_types(user_request))
@@ -1204,6 +1239,8 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
             provider=provider, model_id=model_id,
             call_prefix=hashlib.sha256(
                 f"{turn_id}:{cid}:batch".encode()).hexdigest()[:12],
+            strict_zero_cost=strict_zero_cost,
+            strict_eligibility=strict_eligibility,
         )
     except DeliverableGenerationError as exc:
         return _failure(exc, provider=exc.provider, model=exc.model,
