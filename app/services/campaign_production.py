@@ -25,6 +25,7 @@ import hashlib
 import json
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 
 MAX_CONTEXT_EVIDENCE = 8
 MAX_EVIDENCE_CHARS = 1200
@@ -142,6 +143,10 @@ REQUIRED_SECTION_PATTERNS: tuple[tuple[str, str], ...] = (
 
 class DeliverableValidationError(ValueError):
     """Model output failed the honesty contract; nothing may be persisted."""
+
+    def __init__(self, message: str, *, diagnostic: dict | None = None):
+        super().__init__(message)
+        self.diagnostic = dict(diagnostic or {})
 
 
 class DeliverableGenerationError(RuntimeError):
@@ -446,9 +451,12 @@ _SCHEMA_RULES = (
     "The block body must contain these four headings in this order: "
     "## Persisted user facts, ## Retrieved evidence, ## AI suggestions, and "
     "## Unknown or unsupported information.\n"
-    "Persisted user facts: only values supplied in the business profile. Never "
-    "invent a price, discount, claim, statistic, budget, metric, testimonial, "
-    "date, or research finding.\n"
+    "Persisted user facts: only facts stated in the user request, business "
+    "profile, brief, or supplied project-scoped evidence. Copy the source wording "
+    "exactly; do not paraphrase, combine, translate, or infer facts. If you "
+    "cannot quote a fact exactly, omit it from this section and put any "
+    "interpretation under AI suggestions. Never invent a price, discount, "
+    "claim, statistic, budget, metric, testimonial, date, or research finding.\n"
     "Retrieved evidence: cite supplied evidence only as [document_id:chunk_id] "
     "copied exactly from the supplied list. If no evidence was supplied, write "
     "'No project evidence available' and cite nothing.\n"
@@ -533,8 +541,143 @@ def _has_unsupported_citations(markdown: str, allowed_ids) -> bool:
             "The citation validator is unavailable; nothing was saved.") from exc
 
 
+_GROUPED_NUMBER_RE = re.compile(r"(?<!\d)\d{1,3}(?:,\d{3})+(?!\d)")
+_MASS_QUANTITY_RE = re.compile(
+    r"(?<![\w.])(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*"
+    r"(?P<unit>milligrams?|mg|kilograms?|kg|grams?|g)(?!\w)", re.IGNORECASE)
+_EMAIL_RE = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_PHONE_RE = re.compile(r"(?<!\w)\+?\d(?:[\s().-]*\d){8,}(?!\w)")
+
+
+def _decimal_text(value: Decimal) -> str:
+    rendered = format(value.normalize(), "f")
+    return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+
+
+def _normalize_safe_quantities(text: str) -> str:
+    """Normalize unambiguous comma groups and metric mass equivalents only."""
+    value = _GROUPED_NUMBER_RE.sub(lambda match: match.group(0).replace(",", ""),
+                                   str(text or ""))
+
+    def mass_replacement(match):
+        try:
+            amount = Decimal(match.group("number").replace(",", ""))
+        except InvalidOperation:
+            return match.group(0)
+        unit = match.group("unit").casefold()
+        if unit in {"kg", "kilogram", "kilograms"}:
+            grams = amount * Decimal("1000")
+        elif unit in {"mg", "milligram", "milligrams"}:
+            grams = amount / Decimal("1000")
+        else:
+            grams = amount
+        return f"{_decimal_text(grams)} g"
+
+    return _MASS_QUANTITY_RE.sub(mass_replacement, value)
+
+
 def _normalized_claim(text: str) -> str:
-    return " ".join(re.findall(r"[\w]+", str(text or "").casefold()))
+    return " ".join(re.findall(
+        r"[\w]+", _normalize_safe_quantities(text).casefold()))
+
+
+def _normalized_fact_text(text: str) -> str:
+    """Apply only small, explicit synonym rules with stable fact meaning."""
+    value = _normalize_safe_quantities(text)
+    value = re.sub(r"(?i)\bflavou?r notes\b", "tasting notes", value)
+    value = re.sub(
+        r"(?i)\bthe\s+(?:business|company)\s+is\s+(?:named|called)\b",
+        "business name", value)
+    value = re.sub(
+        r"(?i)\b(?:business|company)\s+name\s+is\b",
+        "business name", value)
+    return _normalized_claim(value)
+
+
+def _safe_claim_excerpt(value: str, *, limit: int = 160) -> str:
+    """Bound and redact a rejected claim before it reaches UI or evidence."""
+    try:
+        from app.contracts.events import sanitize_user_text
+        text = sanitize_user_text(str(value or ""), max_length=limit * 2)
+    except Exception:
+        text = "[claim omitted for privacy]"
+    text = _EMAIL_RE.sub("[redacted email]", text)
+    text = _PHONE_RE.sub("[redacted phone]", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
+
+def _validation_diagnostic(*, label: str, rule: str, claim: str,
+                           source_ids, classification: str,
+                           project_id: str = "") -> dict:
+    match = re.fullmatch(r"Deliverable\s+(\d+)\s+\(([^)]+)\)", label)
+    try:
+        from app.contracts.events import sanitize_user_text
+    except Exception:
+        sanitize_user_text = None
+
+    def clean_id(value):
+        text = str(value or "")
+        if sanitize_user_text is None:
+            return text[:120]
+        return sanitize_user_text(text, 120)
+
+    ids = []
+    for source_id in source_ids or []:
+        value = clean_id(source_id)
+        if value and value not in ids:
+            ids.append(value)
+        if len(ids) == 3:
+            break
+    scope_hash = (hashlib.sha256(str(project_id).encode()).hexdigest()[:16]
+                  if project_id else "")
+    return {
+        "deliverable_id": None,
+        "deliverable_ordinal": int(match.group(1)) if match else None,
+        "deliverable_type": match.group(2) if match else "",
+        "rule": str(rule),
+        "claim_excerpt": _safe_claim_excerpt(claim),
+        "available_source_ids": ids,
+        "classification": classification,
+        "project_scope_hash": scope_hash,
+        "can_revise": True,
+        "can_retry": True,
+        "persisted": False,
+    }
+
+
+def _validation_error_payload(exc: DeliverableValidationError, *, context: dict,
+                              project_id: str) -> tuple[str, dict]:
+    if exc.diagnostic:
+        return str(exc), dict(exc.diagnostic)
+    source_ids = (context or {}).get("evidence_ids") or []
+    diagnostic = _validation_diagnostic(
+        label="Campaign batch", rule="deliverable_output_format", claim="",
+        source_ids=source_ids, classification="malformed",
+        project_id=project_id)
+    diagnostic["deliverable_type"] = "unknown"
+    detail = _safe_claim_excerpt(str(exc), limit=140)
+    diagnostic["validation_detail"] = detail
+    sources = ", ".join(diagnostic.get("available_source_ids") or []) or "none"
+    message = (
+        "Campaign batch failed deliverable output format validation "
+        "(malformed); no deliverable ID or type could be assigned. "
+        f"Validation detail: {detail}. Available project evidence IDs: "
+        f"{sources}. Revise the draft or retry. Nothing was saved.")
+    return message, diagnostic
+
+
+def _validation_error_message(label: str, diagnostic: dict) -> str:
+    sources = ", ".join(diagnostic.get("available_source_ids") or []) or "none"
+    claim = diagnostic.get("claim_excerpt") or "[claim omitted]"
+    rule = str(diagnostic.get("rule") or "validation").replace("_", " ")
+    return (
+        f"{label} failed {rule} "
+        f"({diagnostic.get('classification', 'unverified')}); it was not saved "
+        f"and has no deliverable ID. Claim: \"{claim}\". Available project "
+        f"evidence IDs: {sources}. Revise or remove the claim, then retry. "
+        "Nothing was saved.")
 
 
 def _source_texts(context: dict | None, user_request: str) -> list[str]:
@@ -572,9 +715,10 @@ def _claim_fragments(text: str) -> list[str]:
             if part.strip()]
 
 
-def _validate_persisted_facts(markdown: str, source_texts: list[str], *, label: str) -> None:
+def _validate_persisted_facts(markdown: str, source_texts: list[str], *, label: str,
+                              source_ids=None, project_id: str = "") -> None:
     facts = _section_body(markdown, "Persisted user facts")
-    sources = _normalized_claim(" ".join(source_texts))
+    sources = _normalized_fact_text(" ".join(source_texts))
     for fragment in _claim_fragments(facts):
         claim = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", fragment)
         claim = re.sub(r"^\*\*(.+?)\*\*:\s*", r"\1: ", claim).strip()
@@ -585,23 +729,32 @@ def _validate_persisted_facts(markdown: str, source_texts: list[str], *, label: 
             if len(label_part.strip()) <= 40 and re.fullmatch(
                     r"[\w /-]+", label_part.strip()):
                 claim = value_part.strip()
-        normalized = _normalized_claim(claim)
+        normalized = _normalized_fact_text(claim)
         if not normalized or normalized not in sources:
+            diagnostic = _validation_diagnostic(
+                label=label, rule="persisted_fact_source_match", claim=claim,
+                source_ids=source_ids,
+                classification="unverified" if sources else "unsupported",
+                project_id=project_id)
             raise DeliverableValidationError(
-                f"{label} contains a persisted fact that is not an exact value "
-                "from this turn's request, project profile, brief, or scoped "
-                "evidence. Nothing was saved.")
+                _validation_error_message(label, diagnostic),
+                diagnostic=diagnostic)
 
 
-def _validate_evidence_claims(markdown: str, allowed_ids, *, label: str) -> None:
+def _validate_evidence_claims(markdown: str, allowed_ids, *, label: str,
+                              project_id: str = "") -> None:
     evidence = _section_body(markdown, "Retrieved evidence")
     for fragment in _claim_fragments(evidence):
         if _normalized_claim(fragment) == "no project evidence available":
             continue
         if not evidence_ids_in(fragment, allowed_ids):
+            diagnostic = _validation_diagnostic(
+                label=label, rule="evidence_citation_integrity", claim=fragment,
+                source_ids=allowed_ids, classification="unsupported",
+                project_id=project_id)
             raise DeliverableValidationError(
-                f"{label} makes a retrieved-evidence statement without a valid "
-                "scoped citation. Nothing was saved.")
+                _validation_error_message(label, diagnostic),
+                diagnostic=diagnostic)
 
 
 _HIGH_RISK_TERMS = re.compile(
@@ -611,6 +764,7 @@ _HIGH_RISK_TERMS = re.compile(
     r"revenue|growth|increases?|decreases?|sales|followers|impressions|clicks|"
     r"dates?|dollars?|euros?|pounds?|january|february|march|april|may|june|"
     r"july|august|september|october|november|december|monday|tuesday|"
+    r"certified|certifications?|certificates?|organic|"
     r"wednesday|thursday|friday|saturday|sunday)\b",
     re.IGNORECASE,
 )
@@ -622,18 +776,27 @@ _NEGATION_SUFFIX = re.compile(
     r"(?:not\b|unknown\b|unconfirmed\b|unverified\b)", re.IGNORECASE)
 
 
-def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label: str) -> None:
-    """Reject unsupported numeric and high-risk terms by exact source match."""
+def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label: str,
+                               source_ids=None, project_id: str = "") -> None:
+    """Reject unsupported numeric and high-risk terms against scoped sources."""
     # Remove citation identifiers first so chunk numbers are not treated as claims.
-    text = re.sub(r"\[[^\]\r\n]+:[^\]\r\n]+\]", "", markdown)
+    text = _normalize_safe_quantities(
+        re.sub(r"\[[^\]\r\n]+:[^\]\r\n]+\]", "", markdown))
     source = _normalized_claim(" ".join(source_texts))
     for match in re.finditer(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text):
         value = _normalized_claim(match.group(0))
         if value and value not in source:
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            line_end = text.find("\n", match.end())
+            if line_end < 0:
+                line_end = len(text)
+            diagnostic = _validation_diagnostic(
+                label=label, rule="numeric_source_match",
+                claim=text[line_start:line_end], source_ids=source_ids,
+                classification="unsupported", project_id=project_id)
             raise DeliverableValidationError(
-                f"{label} contains an unsupported numeric value; only values "
-                "present in this turn's request or scoped project sources are "
-                "allowed. Nothing was saved.")
+                _validation_error_message(label, diagnostic),
+                diagnostic=diagnostic)
 
     for match in _HIGH_RISK_TERMS.finditer(text):
         start = max(0, match.start() - 64)
@@ -648,9 +811,13 @@ def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label:
             line_end = len(text)
         statement = _normalized_claim(text[line_start:line_end])
         if not statement or statement not in source:
+            diagnostic = _validation_diagnostic(
+                label=label, rule="high_risk_source_match",
+                claim=text[line_start:line_end], source_ids=source_ids,
+                classification="unsupported", project_id=project_id)
             raise DeliverableValidationError(
-                f"{label} contains an unsupported high-risk factual claim "
-                f"({match.group(0)}). Nothing was saved.")
+                _validation_error_message(label, diagnostic),
+                diagnostic=diagnostic)
 
 
 def validate_generated_items(text: str, *, types: list[str], allowed_ids,
@@ -719,14 +886,28 @@ def validate_generated_items(text: str, *, types: list[str], allowed_ids,
                 f"{label} ({kind}) did not separate "
                 f"{', '.join(missing)}, so nothing was saved.")
         if _has_unsupported_citations(content, allowed_ids):
+            diagnostic_source_ids = (context or {}).get("evidence_ids") or allowed_ids
+            diagnostic = _validation_diagnostic(
+                label=f"{label} ({kind})", rule="scoped_citation_integrity",
+                claim=_section_body(content, "Retrieved evidence"),
+                source_ids=diagnostic_source_ids, classification="unsupported",
+                project_id=str((context or {}).get("project_id") or ""))
             raise DeliverableValidationError(
-                f"{label} ({kind}) cited a source that is not part of this "
-                "project's scoped knowledge, so nothing was saved.")
+                _validation_error_message(f"{label} ({kind})", diagnostic),
+                diagnostic=diagnostic)
         sources = _source_texts(context, user_request)
-        _validate_persisted_facts(content, sources, label=f"{label} ({kind})")
-        _validate_evidence_claims(content, allowed_ids, label=f"{label} ({kind})")
+        diagnostic_source_ids = (context or {}).get("evidence_ids") or allowed_ids
+        _validate_persisted_facts(
+            content, sources, label=f"{label} ({kind})",
+            source_ids=diagnostic_source_ids,
+            project_id=str((context or {}).get("project_id") or ""))
+        _validate_evidence_claims(
+            content, allowed_ids, label=f"{label} ({kind})",
+            project_id=str((context or {}).get("project_id") or ""))
         _validate_high_risk_claims(
-            f"{title}\n{content}", sources, label=f"{label} ({kind})")
+            f"{title}\n{content}", sources, label=f"{label} ({kind})",
+            source_ids=diagnostic_source_ids,
+            project_id=str((context or {}).get("project_id") or ""))
         validated.append({
             "type": kind,
             "title": title[:MAX_TITLE_CHARS],
@@ -951,8 +1132,10 @@ def _w1_items(items: list) -> list:
             for item in items]
 
 
-def _failure(error: str, *, status: str = "failed", **extra) -> dict:
-    return {"ok": False, "status": status, "error": str(error).strip()[:400], **extra}
+def _failure(error: str, *, status: str = "failed", max_error: int = 400,
+             **extra) -> dict:
+    return {"ok": False, "status": status,
+            "error": str(error).strip()[:max_error], **extra}
 
 
 # ---------------------------------------------------------------------------
@@ -1032,9 +1215,12 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
             text, types=wanted, allowed_ids=context["evidence_ids"],
             context=context, user_request=user_request)
     except DeliverableValidationError as exc:
-        return _failure(exc, provider=identity["provider"], model=identity["model"],
+        error, diagnostic = _validation_error_payload(
+            exc, context=context, project_id=pid)
+        return _failure(error, provider=identity["provider"], model=identity["model"],
                         failure_code="output_validation", campaign_id=cid,
-                        preserved_existing=True)
+                        preserved_existing=True,
+                        diagnostic=diagnostic, max_error=900)
 
     before = _existing_ids(conn, project_id=pid, campaign_id=cid)
     provenance = {
@@ -1140,9 +1326,12 @@ def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
             allowed_ids=context["evidence_ids"], single=True,
             context=context, user_request=instruction)
     except DeliverableValidationError as exc:
-        return _failure(exc, provider=identity["provider"], model=identity["model"],
+        error, diagnostic = _validation_error_payload(
+            exc, context=context, project_id=pid)
+        return _failure(error, provider=identity["provider"], model=identity["model"],
                         failure_code="output_validation", campaign_id=cid,
-                        deliverable_id=did, preserved_existing=True)
+                        deliverable_id=did, preserved_existing=True,
+                        diagnostic=diagnostic, max_error=900)
 
     revised = items[0]
     # ``type`` is deliberately never sent: W1 stores the editorial kind on the

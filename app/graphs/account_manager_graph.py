@@ -571,7 +571,7 @@ def _deliverable_report(result) -> str:
         return (" No campaign deliverables were saved because your instructions "
                 "prohibited that write.")
     if not result.get("ok"):
-        detail = str(result.get("error") or "").strip()[:300]
+        detail = str(result.get("error") or "").strip()[:900]
         if not detail:
             return ""
         if result.get("status") == "needs_clarification":

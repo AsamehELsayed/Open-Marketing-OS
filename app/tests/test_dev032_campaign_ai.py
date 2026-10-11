@@ -1103,7 +1103,7 @@ def _seed_one(conn, monkeypatch):
         (_block("social_post", "Launch", platform="instagram",
                 facts="Northstar Roasters.", evidence="See [other-client:chunk-9].",
                 suggestions="Be direct.", unknowns="No price is stated."),
-         "not part of this project's scoped knowledge"),
+         "scoped citation integrity"),
         (_block("social_post", "Launch", platform="instagram",
                 facts="Northstar Roasters.", evidence="No project evidence available.",
                 suggestions="Be direct.").split("## Unknown")[0],
@@ -1133,6 +1133,13 @@ def test_malformed_output_preserves_existing_deliverables(
     assert result["failure_code"] == "output_validation"
     assert result["preserved_existing"] is True
     assert reason in result["error"]
+    diagnostic = result["diagnostic"]
+    assert diagnostic["deliverable_id"] is None
+    assert diagnostic["rule"]
+    assert diagnostic["classification"] in {"malformed", "unsupported"}
+    assert diagnostic["can_revise"] is True
+    assert diagnostic["can_retry"] is True
+    assert "Nothing was saved" in result["error"]
     assert _stored(storage, conn, "p1", campaign_id) == before
     assert len(storage["calls"]) == calls_before
 
@@ -1235,6 +1242,18 @@ def test_unsupported_persisted_fact_is_rejected_without_overwriting(
     assert result["failure_code"] == "output_validation"
     assert result["preserved_existing"] is True
     assert "persisted fact" in result["error"].lower()
+    diagnostic = result["diagnostic"]
+    assert diagnostic["deliverable_id"] is None
+    assert diagnostic["deliverable_ordinal"] == 1
+    assert diagnostic["deliverable_type"] == "social_post"
+    assert diagnostic["rule"] == "persisted_fact_source_match"
+    assert diagnostic["classification"] == "unverified"
+    assert diagnostic["available_source_ids"]
+    assert "certified organic" in diagnostic["claim_excerpt"].lower()
+    assert diagnostic["can_revise"] is True
+    assert diagnostic["can_retry"] is True
+    assert "Revise or remove" in result["error"]
+    assert "Nothing was saved" in result["error"]
     assert _stored(storage, conn, "p1", campaign_id) == before
     assert len(storage["calls"]) == writes_before
 

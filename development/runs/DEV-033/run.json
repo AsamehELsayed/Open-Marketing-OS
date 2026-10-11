@@ -1,0 +1,29 @@
+{
+  "run_id": "DEV-033",
+  "title": "Campaign generation validation diagnostics fix",
+  "classification": "SMALL",
+  "status": "qa",
+  "planner": null,
+  "workers": [
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-033/workers/implementer.md"
+    }
+  ],
+  "qa": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-033/qa.md"
+  },
+  "reviewer": null,
+  "required_roles": [
+    "implementer",
+    "qa"
+  ],
+  "founder_plan_approved": false,
+  "plan_approved_at": null,
+  "created_at": "2026-10-11T13:09:56Z",
+  "updated_at": "2026-10-11T13:47:45Z",
+  "current_stage": "qa"
+}
