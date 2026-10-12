@@ -87,3 +87,13 @@ Extended only `_safe_citation_token()` to redact any diagnostic token containing
 - `git diff --check` — **clean**.
 
 All surfaced tests use fake model/router providers and local test databases. **Real model/provider calls: 0.** No Northstar data was read or changed. No commit or push was made. Independent re-QA and re-review remain required before PR creation.
+
+## CI sentinel allowlist remediation
+
+**Trigger:** PR #10's required `Secret hygiene` job rejected the synthetic GitHub-token-shaped test value used by the new privacy regressions. The same run's Gitleaks scan reported no leaks; the repository-specific scanner flagged only the deliberate fixture in three test locations.
+
+**In-scope fix:** Add the exact synthetic literal to the existing file-and-literal-scoped sentinel allowlist for the two test files that contain it. No scanner patterns, citation behavior, provider behavior, or production code changed.
+
+**Verification:** `python scripts/package/secret_scan.py --root .` reports 14 allowlisted sentinels, zero real secret hits, and zero home-path hits. Focused deterministic citation/privacy tests pass (17 passed, 114 deselected, one existing Starlette/anyio deprecation warning). The independent QA must rerun the full targeted three-file suite and independently verify the bounded exception before re-review.
+
+**Scope:** No real credentials, rejected model prose, Northstar data, or provider calls were used. The existing PR branch is updated only after independent QA and re-review approve this remediation.
