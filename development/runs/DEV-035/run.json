@@ -1,0 +1,33 @@
+{
+  "run_id": "DEV-035",
+  "title": "Markdown field-label validation",
+  "classification": "SMALL",
+  "status": "approved",
+  "planner": null,
+  "workers": [
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-035/workers/implementer.md"
+    }
+  ],
+  "qa": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-035/qa.md"
+  },
+  "reviewer": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-035/review.md"
+  },
+  "required_roles": [
+    "implementer",
+    "qa"
+  ],
+  "founder_plan_approved": false,
+  "plan_approved_at": null,
+  "created_at": "2026-10-12T14:27:44Z",
+  "updated_at": "2026-10-12T14:52:44Z",
+  "current_stage": "approved"
+}

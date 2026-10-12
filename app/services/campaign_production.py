@@ -740,13 +740,33 @@ def _claim_fragments(text: str) -> list[str]:
             if part.strip()]
 
 
+_PERSISTED_FACT_FIELD_LABELS = frozenset({
+    "business name", "website", "industry", "description", "audience",
+    "location", "offer", "differentiators",
+})
+_BOLD_PERSISTED_FACT_LABEL_RE = re.compile(
+    r"^\*\*(?P<label>[\w /-]+?)(?P<inner_colon>:)?\*\*"
+    r"(?P<outer_colon>:)?\s*(?P<value>\S.*)$")
+
+
+def _normalize_bold_persisted_fact_label(claim: str) -> str:
+    """Remove Markdown only around a recognized field label, preserving its value."""
+    match = _BOLD_PERSISTED_FACT_LABEL_RE.match(claim)
+    if match is None or not (match.group("inner_colon") or match.group("outer_colon")):
+        return claim
+    label = match.group("label").strip().casefold()
+    if label not in _PERSISTED_FACT_FIELD_LABELS:
+        return claim
+    return match.group("value").strip()
+
+
 def _validate_persisted_facts(markdown: str, source_texts: list[str], *, label: str,
                               source_ids=None, project_id: str = "") -> None:
     facts = _section_body(markdown, "Persisted user facts")
     sources = _normalized_fact_text(" ".join(source_texts))
     for fragment in _claim_fragments(facts):
         claim = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", fragment)
-        claim = re.sub(r"^\*\*(.+?)\*\*:\s*", r"\1: ", claim).strip()
+        claim = _normalize_bold_persisted_fact_label(claim).strip()
         if _normalized_claim(claim) == "no persisted facts supplied":
             continue
         if ":" in claim:
