@@ -3,13 +3,121 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app import deps
 from app.database.sqlite import connect, get_user_version
+from app.routes import business_workspace as business_workspace_routes
 from app.routes.business_workspace import router
 from app.services import business_workspace
 from app.services.rag.indexing_service import IndexingService
+
+
+def _legacy_has_unsupported_citations(markdown, allowed_ids):
+    """Golden copy of the pre-DEV-036 predicate for explicit parity checks."""
+    import re
+
+    canonical = []
+    for match in re.finditer(r"\[([^\]\r\n]*)\]", markdown):
+        source_id = match.group(1)
+        if ":" not in source_id:
+            continue
+        if source_id not in allowed_ids:
+            return True
+        canonical.append((match.start(1), match.end(1), source_id))
+
+    urls = [match.span() for match in re.finditer(
+        r"https?://[^\s)\]]+", markdown, re.IGNORECASE)]
+    source_like_tokens = re.finditer(
+        r"(?<![\w/])([A-Za-z0-9_./-]+:[A-Za-z0-9_./-]+)(?![\w/])", markdown
+    )
+    for match in source_like_tokens:
+        token = match.group(1)
+        if re.fullmatch(r"\d{1,2}:\d{2}(?::\d{2})?", token):
+            continue
+        if any(start <= match.start(1) < end for start, end in urls):
+            continue
+        if any(start == match.start(1) and end == match.end(1) and source_id == token
+               for start, end, source_id in canonical):
+            continue
+        return True
+    return False
+
+
+@pytest.mark.parametrize(
+    ("markdown", "allowed_ids", "expected_rejected", "expected_reason", "expected_form", "expected_token"),
+    [
+        ("Evidence [doc-a:chunk-a].", {"doc-a:chunk-a"}, False, None, None, None),
+        ("Evidence [unknown:chunk-a].", {"doc-a:chunk-a"}, True,
+         "unknown_bracketed_id", "bracketed_id", "unknown:chunk-a"),
+        ("Evidence unknown:chunk-a.", {"doc-a:chunk-a"}, True,
+         "noncanonical_source_like_token", "source_like_token", "unknown:chunk-a."),
+        ("Evidence (unknown:chunk-a).", {"doc-a:chunk-a"}, True,
+         "noncanonical_source_like_token", "source_like_token", "unknown:chunk-a"),
+        ("At 12:30, see https://example.test/path:part.", set(), False, None, None, None),
+        ("Bare earlier:token then [unknown:chunk-a].", set(), True,
+         "unknown_bracketed_id", "bracketed_id", "unknown:chunk-a"),
+        ("[first:bad] then [second:bad]", set(), True,
+         "unknown_bracketed_id", "bracketed_id", "first:bad"),
+        ("password:credential-secret", set(), True,
+         "noncanonical_source_like_token", "source_like_token", "[redacted]"),
+    ],
+)
+def test_citation_diagnostic_preserves_decisions_and_reports_first_failure(
+        markdown, allowed_ids, expected_rejected, expected_reason,
+        expected_form, expected_token):
+    diagnostic = business_workspace_routes.diagnose_unsupported_citations(
+        markdown, allowed_ids)
+
+    assert _legacy_has_unsupported_citations(markdown, allowed_ids) is expected_rejected
+    assert business_workspace_routes.has_unsupported_citations(
+        markdown, allowed_ids) is expected_rejected
+    assert (diagnostic is not None) is expected_rejected
+    if diagnostic is None:
+        assert expected_reason is expected_form is expected_token is None
+        return
+    assert set(diagnostic) == {"reason_code", "token_form", "token"}
+    assert diagnostic == {
+        "reason_code": expected_reason,
+        "token_form": expected_form,
+        "token": expected_token,
+    }
+    assert len(diagnostic["token"]) <= 96
+
+
+@pytest.mark.parametrize("sensitive_id", [
+    "alice@example.com:customer-1",
+    "ghp_FAKEABCDEFGHIJKLMNOPQRSTUV012345:chunk-1",
+    "xoxb-fake-AAAA-BBBB-CCCC:chunk-1",
+    "+1-202-555-0123:chunk-1",
+    "202-555-0123:chunk-1",
+    "123-45-6789:chunk-1",
+])
+def test_citation_diagnostic_redacts_sensitive_identifier_tokens(sensitive_id):
+    diagnostic = business_workspace_routes.diagnose_unsupported_citations(
+        f"[{sensitive_id}]", set())
+
+    assert diagnostic == {
+        "reason_code": "unknown_bracketed_id",
+        "token_form": "bracketed_id",
+        "token": "[redacted]",
+    }
+    assert sensitive_id not in json.dumps(diagnostic)
+
+
+def test_citation_diagnostic_bounds_offending_tokens():
+    secret = "[api_key:sk-" + "x" * 160 + "]"
+    diagnostic = business_workspace_routes.diagnose_unsupported_citations(secret, set())
+    long_token = "a" * 160 + ":" + "b" * 160
+    bounded = business_workspace_routes.diagnose_unsupported_citations(long_token, set())
+
+    assert diagnostic == {
+        "reason_code": "unknown_bracketed_id",
+        "token_form": "bracketed_id",
+        "token": "[redacted]",
+    }
+    assert len(bounded["token"]) <= 96
 
 
 def test_v13_migration_and_client_profile_revision(tmp_path, monkeypatch):
@@ -179,26 +287,54 @@ def test_generation_labels_scoped_evidence_and_requires_overwrite(tmp_path, monk
         })
         assert manual.status_code == 200
         manual_revision = manual.json()["data"]["brief_revision"]
+        before_citation_rejection = client.get(
+            f"/api/projects/{pid}/business-brief").json()["data"]
+        invalid_calls = []
+        sensitive_ids = (
+            "alice@example.com:customer-1",
+            "ghp_FAKEABCDEFGHIJKLMNOPQRSTUV012345:chunk-1",
+            "xoxb-fake-AAAA-BBBB-CCCC:chunk-1",
+            "+1-202-555-0123:chunk-1",
+            "202-555-0123:chunk-1",
+            "123-45-6789:chunk-1",
+        )
+        for index, sensitive_id in enumerate(sensitive_ids):
+            rejected_marker = f"PRIVATE-MODEL-OUTPUT-MARKER-{index}"
 
-        class InvalidCitationRouter:
-            def complete(self, _conn, **_kwargs):
-                return SimpleNamespace(text=(
-                    "## Persisted user facts\nNorthstar Coffee.\n"
-                    "## Retrieved evidence\nOat lattes [invented:source].\n"
-                    "## AI suggestions\nTry a weekday offer.\n"
-                    "## Unknown or unsupported information\nBudget is unknown."
-                )), SimpleNamespace(provider="fake", model="fake-model")
+            class InvalidCitationRouter:
+                def complete(self, _conn, **_kwargs):
+                    invalid_calls.append(1)
+                    return SimpleNamespace(text=(
+                        "## Persisted user facts\nNorthstar Coffee.\n"
+                        f"## Retrieved evidence\nOat lattes [{sensitive_id}].\n"
+                        f"## AI suggestions\n{rejected_marker} Try a weekday offer.\n"
+                        "## Unknown or unsupported information\nBudget is unknown."
+                    )), SimpleNamespace(provider="fake", model="fake-model")
 
-        monkeypatch.setattr(graph_runtime, "_get_model_router", lambda: InvalidCitationRouter())
-        invalid_citation = client.post(f"/api/projects/{pid}/business-brief/generate", json={"overwrite_confirmed": True})
-        assert invalid_citation.status_code == 503
-        assert invalid_citation.json()["detail"]["code"] == "invalid_model_output"
-        assert invalid_citation.json()["detail"]["provider"] == "fake"
-        assert invalid_citation.json()["detail"]["model"] == "fake-model"
-        assert "unsupported or noncanonical source reference" in invalid_citation.json()["detail"]["error"]
-        saved = client.get(f"/api/projects/{pid}/business-brief").json()["data"]
-        assert saved["brief_md"] == "Founder-edited version"
-        assert saved["brief_revision"] == manual_revision
+            monkeypatch.setattr(
+                graph_runtime, "_get_model_router", lambda: InvalidCitationRouter())
+            invalid_citation = client.post(
+                f"/api/projects/{pid}/business-brief/generate",
+                json={"overwrite_confirmed": True})
+            assert invalid_citation.status_code == 503
+            assert invalid_citation.json()["detail"]["code"] == "invalid_model_output"
+            assert invalid_citation.json()["detail"]["provider"] == "fake"
+            assert invalid_citation.json()["detail"]["model"] == "fake-model"
+            assert "unsupported or noncanonical source reference" in invalid_citation.json()["detail"]["error"]
+            assert invalid_citation.json()["detail"]["citation_diagnostic"] == {
+                "reason_code": "unknown_bracketed_id",
+                "token_form": "bracketed_id",
+                "token": "[redacted]",
+            }
+            assert rejected_marker not in json.dumps(invalid_citation.json())
+            assert sensitive_id not in json.dumps(invalid_citation.json())
+            saved = client.get(f"/api/projects/{pid}/business-brief").json()["data"]
+            assert saved == before_citation_rejection
+            assert rejected_marker not in json.dumps(saved)
+            assert sensitive_id not in json.dumps(saved)
+            assert saved["brief_md"] == "Founder-edited version"
+            assert saved["brief_revision"] == manual_revision
+        assert invalid_calls == [1, 1, 1, 1, 1, 1]
 
         for citation_form in (
             "Source: invented:reference",

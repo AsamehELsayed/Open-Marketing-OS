@@ -1,0 +1,44 @@
+{
+  "run_id": "DEV-036",
+  "title": "Citation diagnostic precision",
+  "classification": "MEDIUM",
+  "status": "approved",
+  "planner": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-036/plan.md"
+  },
+  "workers": [
+    {
+      "agent": "opencode",
+      "status": "failed",
+      "artifact": ""
+    },
+    {
+      "agent": "general",
+      "status": "completed",
+      "artifact": "development/runs/DEV-036/workers/W1.md"
+    }
+  ],
+  "qa": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-036/qa-remediation2.md"
+  },
+  "reviewer": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-036/review-remediation2.md"
+  },
+  "required_roles": [
+    "planner",
+    "implementer",
+    "qa",
+    "reviewer"
+  ],
+  "founder_plan_approved": true,
+  "plan_approved_at": "2026-10-12T17:08:12Z",
+  "created_at": "2026-10-12T16:57:53Z",
+  "updated_at": "2026-10-12T18:44:53Z",
+  "current_stage": "approved"
+}
