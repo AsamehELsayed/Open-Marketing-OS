@@ -1,0 +1,29 @@
+{
+  "max_concurrency": 1,
+  "workers": [
+    {
+      "worker_id": "W1",
+      "role": "implementer",
+      "task": "Implement additive first-failure citation diagnostics and deterministic brief/campaign regressions while preserving every current accept/reject outcome, project isolation, and no-write/atomic behavior. Never persist or return rejected prose/full completions. Do not sub-delegate; no real model/provider calls.",
+      "depends_on": [],
+      "files_or_scope": [
+        "app/routes/business_workspace.py",
+        "app/services/campaign_production.py",
+        "app/tests/test_dev031_business_workspace.py",
+        "app/tests/test_dev032_campaign_ai.py",
+        "app/tests/test_dev033_campaign_validation.py",
+        "development/runs/DEV-036/workers/W1.md"
+      ],
+      "can_run_parallel": false,
+      "command": [
+        "opencode",
+        "run",
+        "--auto"
+      ],
+      "stdin_text": "Read development/runs/DEV-036/plan.md and follow packet W1 exactly. Follow test-driven development: first add deterministic failing regression tests and run the focused tests to capture the red result; then implement the shared diagnostic and rerun the focused suite to green. Preserve the existing citation validator acceptance/rejection behavior and precedence. Add a structured first-failure diagnostic that distinguishes unknown bracketed IDs from noncanonical source-like tokens using only sanitized, bounded token metadata. Do not include or persist rejected prose or full completions. Preserve project isolation, brief conditional persistence, campaign batch atomicity, and existing user-visible failure semantics. Add deterministic regression coverage in the assigned test files; patch fake routers/providers and make zero real model/provider calls. Do not touch Northstar data, Real Estate AI, DEV-034, or PR #9. Do not sub-delegate. Run the test command from the plan, inspect the final diff for scope, and write development/runs/DEV-036/workers/W1.md with files changed, tests/results, and known limitations without quoting rejected output.",
+      "output_artifact": "development/runs/DEV-036/workers/W1.md",
+      "worktree": false,
+      "timeout": 1200
+    }
+  ]
+}

@@ -284,6 +284,40 @@ def test_matching_location_text_with_other_project_citation_is_rejected():
     assert caught.value.diagnostic["rule"] == "scoped_citation_integrity"
 
 
+def test_scoped_citation_failure_exposes_only_safe_token_diagnostic():
+    rejected_marker = "PRIVATE-REJECTED-OUTPUT-MARKER-63"
+    sensitive_id = "private-doc:chunk-2"
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.",
+            evidence=f"Unsupported source [{sensitive_id}].",
+            suggestions=f"{rejected_marker} Use a clear call to action.",
+            context={
+                "project_id": "isolated-project-secret",
+                "profile": {}, "brief_md": "",
+                "evidence": [{"source_id": SOURCE_ID, "text": "Scoped source."}],
+                "evidence_ids": [SOURCE_ID],
+            },
+            allowed_ids=[SOURCE_ID],
+        )
+
+    diagnostic = caught.value.diagnostic
+    assert diagnostic["rule"] == "scoped_citation_integrity"
+    assert diagnostic["citation_diagnostic"] == {
+        "reason_code": "unknown_bracketed_id",
+        "token_form": "bracketed_id",
+        "token": "[redacted]",
+    }
+    assert "claim_excerpt" not in diagnostic
+    assert "available_source_ids" not in diagnostic
+    assert "project_scope_hash" not in diagnostic
+    assert rejected_marker not in str(diagnostic)
+    assert sensitive_id not in str(diagnostic)
+    assert "isolated-project-secret" not in str(diagnostic)
+    assert rejected_marker not in str(caught.value)
+    assert sensitive_id not in str(caught.value)
+
+
 def test_business_brief_alone_does_not_support_persisted_fact():
     supported = "Northstar café is located in Cairo, Egypt."
     context = {

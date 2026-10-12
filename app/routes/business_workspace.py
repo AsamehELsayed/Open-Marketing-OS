@@ -16,21 +16,59 @@ class Payload(BaseModel):
 
 
 class BriefOutputValidationError(ValueError):
-    def __init__(self, message: str, *, provider: str = "", model: str = ""):
+    def __init__(self, message: str, *, provider: str = "", model: str = "",
+                 citation_diagnostic: dict | None = None):
         super().__init__(message)
         self.provider = provider
         self.model = model
+        self.citation_diagnostic = dict(citation_diagnostic or {})
 
 
-def has_unsupported_citations(markdown, allowed_ids):
-    """Accept only exact, bracketed references copied from scoped evidence."""
+_SENSITIVE_CITATION_TOKEN_RE = re.compile(
+    r"(?:api[_-]?key|access[_-]?key|secret|token|password|credential|"
+    r"bearer|authorization|private|ssn|social[_-]?security|"
+    r"sk-[a-z0-9_-]{8,}|\d{7,}|"
+    r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}|"
+    r"gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|"
+    r"xox[baprs]-[a-z0-9-]{8,}|glpat-[a-z0-9_-]{16,}|"
+    r"AKIA[0-9A-Z]{16})",
+    re.IGNORECASE,
+)
+_CITATION_DIAGNOSTIC_TOKEN_LIMIT = 96
+
+
+def _safe_citation_token(token: str) -> str:
+    """Bound diagnostics and redact credential or personal-number shapes."""
+    if (sum(character.isdigit() for character in token) >= 7
+            or _SENSITIVE_CITATION_TOKEN_RE.search(token)):
+        return "[redacted]"
+    if len(token) > _CITATION_DIAGNOSTIC_TOKEN_LIMIT:
+        return token[:_CITATION_DIAGNOSTIC_TOKEN_LIMIT - 3] + "..."
+    return token
+
+
+def _citation_failure(reason_code: str, token_form: str, token: str) -> dict:
+    return {
+        "reason_code": reason_code,
+        "token_form": token_form,
+        "token": _safe_citation_token(token),
+    }
+
+
+def diagnose_unsupported_citations(markdown, allowed_ids):
+    """Return a bounded first-failure diagnostic, or ``None`` when accepted.
+
+    The scan order and predicates intentionally match the historical boolean
+    validator: bracketed IDs are checked first, then source-like tokens.
+    """
     canonical = []
     for match in re.finditer(r"\[([^\]\r\n]*)\]", markdown):
         source_id = match.group(1)
         if ":" not in source_id:
             continue
         if source_id not in allowed_ids:
-            return True
+            return _citation_failure(
+                "unknown_bracketed_id", "bracketed_id", source_id)
         canonical.append((match.start(1), match.end(1), source_id))
 
     urls = [match.span() for match in re.finditer(r"https?://[^\s)\]]+", markdown, re.IGNORECASE)]
@@ -46,8 +84,14 @@ def has_unsupported_citations(markdown, allowed_ids):
         if any(start == match.start(1) and end == match.end(1) and source_id == token
                for start, end, source_id in canonical):
             continue
-        return True
-    return False
+        return _citation_failure(
+            "noncanonical_source_like_token", "source_like_token", token)
+    return None
+
+
+def has_unsupported_citations(markdown, allowed_ids):
+    """Boolean-compatible wrapper around the shared citation detector."""
+    return diagnose_unsupported_citations(markdown, allowed_ids) is not None
 
 
 def ok(data):
@@ -165,11 +209,13 @@ def generate_brief(project_id: str, payload: Payload):
                     provider=provider, model=model,
                 )
             allowed = {e["source_id"] for e in evidence}
-            if has_unsupported_citations(text, allowed):
+            citation_diagnostic = diagnose_unsupported_citations(text, allowed)
+            if citation_diagnostic is not None:
                 raise BriefOutputValidationError(
                     "The model returned an unsupported or noncanonical source reference, "
                     "so the brief was not saved. "
                     "Try again or write the brief manually.", provider=provider, model=model,
+                    citation_diagnostic=citation_diagnostic,
                 )
             required_sections = (
                 r"(?im)^\s*#{1,6}\s*Persisted user facts\b",
@@ -249,7 +295,11 @@ def generate_brief(project_id: str, payload: Payload):
                     "The model could not generate this brief right now. Check the "
                     "provider in Settings or try again."
                 )
-            raise HTTPException(503, {
+            detail = {
                 "status": "failed", "provider": provider, "model": model,
                 "code": failure_code or "provider_failure", "error": message,
-            })
+            }
+            citation_diagnostic = getattr(exc, "citation_diagnostic", None)
+            if citation_diagnostic:
+                detail["citation_diagnostic"] = dict(citation_diagnostic)
+            raise HTTPException(503, detail)

@@ -557,12 +557,39 @@ def evidence_ids_in(markdown: str, allowed_ids) -> list[str]:
 
 def _has_unsupported_citations(markdown: str, allowed_ids) -> bool:
     """Reuse the business brief's canonical citation check (single source)."""
+    return _unsupported_citation_diagnostic(markdown, allowed_ids) is not None
+
+
+def _unsupported_citation_diagnostic(markdown: str, allowed_ids) -> dict | None:
+    """Use the shared detector and fail closed if its module is unavailable."""
     try:
-        from app.routes.business_workspace import has_unsupported_citations
-        return bool(has_unsupported_citations(markdown, set(allowed_ids or ())))
+        from app.routes.business_workspace import diagnose_unsupported_citations
+        return diagnose_unsupported_citations(
+            markdown, set(allowed_ids or ()))
     except Exception as exc:
         raise DeliverableValidationError(
             "The citation validator is unavailable; nothing was saved.") from exc
+
+
+def _scoped_citation_failure(label: str, citation_diagnostic: dict) -> tuple[str, dict]:
+    """Build citation-only failure data without retaining rejected prose or IDs."""
+    match = re.fullmatch(r"Deliverable\s+(\d+)\s+\(([^)]+)\)", label)
+    diagnostic = {
+        "deliverable_id": None,
+        "deliverable_ordinal": int(match.group(1)) if match else None,
+        "deliverable_type": match.group(2) if match else "",
+        "rule": "scoped_citation_integrity",
+        "citation_diagnostic": dict(citation_diagnostic),
+        "classification": "unsupported",
+        "can_revise": True,
+        "can_retry": True,
+        "persisted": False,
+    }
+    message = (
+        f"{label} failed scoped citation integrity (unsupported); the "
+        "deliverable was not saved. Correct the source reference and retry. "
+        "Nothing was saved.")
+    return message, diagnostic
 
 
 _GROUPED_NUMBER_RE = re.compile(r"(?<!\d)\d{1,3}(?:,\d{3})+(?!\d)")
@@ -1001,16 +1028,13 @@ def validate_generated_items(text: str, *, types: list[str], allowed_ids,
             raise DeliverableValidationError(
                 f"{label} ({kind}) did not separate "
                 f"{', '.join(missing)}, so nothing was saved.")
-        if _has_unsupported_citations(content, allowed_ids):
-            diagnostic_source_ids = (context or {}).get("evidence_ids") or allowed_ids
-            diagnostic = _validation_diagnostic(
-                label=f"{label} ({kind})", rule="scoped_citation_integrity",
-                claim=_section_body(content, "Retrieved evidence"),
-                source_ids=diagnostic_source_ids, classification="unsupported",
-                project_id=str((context or {}).get("project_id") or ""))
+        citation_diagnostic = _unsupported_citation_diagnostic(
+            content, allowed_ids)
+        if citation_diagnostic is not None:
+            message, diagnostic = _scoped_citation_failure(
+                f"{label} ({kind})", citation_diagnostic)
             raise DeliverableValidationError(
-                _validation_error_message(f"{label} ({kind})", diagnostic),
-                diagnostic=diagnostic)
+                message, diagnostic=diagnostic)
         sources = _source_texts(context, user_request)
         diagnostic_source_ids = (context or {}).get("evidence_ids") or allowed_ids
         _validate_persisted_facts(

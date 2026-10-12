@@ -1189,6 +1189,61 @@ def test_malformed_output_preserves_existing_deliverables(
     assert len(storage["calls"]) == calls_before
 
 
+def test_scoped_citation_diagnostic_is_private_and_batch_is_not_written(
+        tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    storage, provider, campaign_id = _seed_one(conn, monkeypatch)
+    before = [dict(row) for row in _stored(storage, conn, "p1", campaign_id)]
+    writes_before = len(storage["calls"])
+    model_calls_before = len(provider.calls)
+    sensitive_ids = (
+        "alice@example.com:customer-1",
+        "ghp_FAKEABCDEFGHIJKLMNOPQRSTUV012345:chunk-1",
+        "xoxb-fake-AAAA-BBBB-CCCC:chunk-1",
+        "+1-202-555-0123:chunk-1",
+        "202-555-0123:chunk-1",
+        "123-45-6789:chunk-1",
+    )
+    for index, sensitive_id in enumerate(sensitive_ids):
+        marker = f"PRIVATE-CAMPAIGN-OUTPUT-MARKER-{index}"
+        provider.text = _social(
+            evidence=f"Unsupported claim [{sensitive_id}].",
+            suggestions=f"{marker} Continue with a simple post.")
+
+        result = production.generate_batch(
+            conn, project_id="p1", campaign_id=campaign_id,
+            turn_id=f"t{index + 2}",
+            user_request="Create a marketing campaign with a social post.",
+            types=["social_post"], provider="LOCAL", model_id="dev032-fake-model")
+
+        assert result["ok"] is False
+        assert result["failure_code"] == "output_validation"
+        assert result["preserved_existing"] is True
+        diagnostic = result["diagnostic"]
+        assert set(diagnostic) == {
+            "deliverable_id", "deliverable_ordinal", "deliverable_type", "rule",
+            "citation_diagnostic", "classification", "can_revise", "can_retry",
+            "persisted",
+        }
+        assert diagnostic["rule"] == "scoped_citation_integrity"
+        assert diagnostic["citation_diagnostic"] == {
+            "reason_code": "unknown_bracketed_id",
+            "token_form": "bracketed_id",
+            "token": "[redacted]",
+        }
+        serialized = json.dumps({"error": result["error"], "diagnostic": diagnostic})
+        assert marker not in serialized
+        assert sensitive_id not in serialized
+        assert "claim_excerpt" not in diagnostic
+        assert "available_source_ids" not in diagnostic
+        assert "project_scope_hash" not in diagnostic
+        assert "Nothing was saved" in result["error"]
+    assert provider.calls and len(provider.calls) == model_calls_before + len(sensitive_ids)
+    assert all(call.get("user") for call in provider.calls)
+    assert _stored(storage, conn, "p1", campaign_id) == before
+    assert len(storage["calls"]) == writes_before
+
+
 def test_empty_completion_preserves_existing_deliverables(tmp_path, monkeypatch):
     conn = _conn(tmp_path)
     storage, provider, campaign_id = _seed_one(conn, monkeypatch)
