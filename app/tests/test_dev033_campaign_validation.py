@@ -51,6 +51,104 @@ def test_exact_grounded_fact_is_accepted():
     assert rows[0]["type"] == "strategy_brief"
 
 
+@pytest.mark.parametrize("facts", [
+    "Business name: Northstar Coffee",
+    "**Business name**: Northstar Coffee",
+    "**Business name:** Northstar Coffee",
+    "- **Business name:** Northstar Coffee",
+])
+def test_supported_business_name_accepts_plain_and_markdown_field_labels(facts):
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    rows = _validate(facts, context=context)
+
+    assert rows[0]["type"] == "strategy_brief"
+    assert facts in rows[0]["content_md"]
+
+
+def test_invented_business_name_with_markdown_field_label_is_rejected():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("**Business name:** Northstar Roasters", context=context)
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+
+
+def test_unsupported_business_location_remains_rejected():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("Location: Maadi, Cairo, Egypt", context=context)
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+
+
+def test_supported_name_does_not_mask_an_invented_location_in_same_claim():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "**Business name:** Northstar Coffee is located in Maadi",
+            context=context,
+        )
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+    assert "located in Maadi" in caught.value.diagnostic["claim_excerpt"]
+
+
+@pytest.mark.parametrize("claim", [
+    "Offer: Northstar Coffee costs EGP 500",
+    "Certification: certified organic",
+])
+def test_unsupported_price_or_certification_remains_rejected(claim):
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(claim, context=context)
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+
+
+def test_unrecognized_bold_label_cannot_hide_an_unsupported_fact():
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {"business_name": "Northstar Coffee"},
+        "brief_md": "",
+        "evidence": [],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("**Campaign note:** Northstar Coffee", context=context)
+
+    assert caught.value.diagnostic["rule"] == "persisted_fact_source_match"
+
+
 def test_generation_prompt_keeps_facts_separate_and_quotes_sources():
     from app.services.campaign_production import build_generation_prompt
 
