@@ -599,11 +599,58 @@ _MASS_QUANTITY_RE = re.compile(
 _EMAIL_RE = re.compile(
     r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PHONE_RE = re.compile(r"(?<!\w)\+?\d(?:[\s().-]*\d){8,}(?!\w)")
+_NUMERIC_TOKEN_RE = re.compile(
+    r"(?<![\w.])(?P<sign>[-−])?(?P<number>\d{1,3}(?:,\d{3})+|\d+)"
+    r"(?:\.(?P<fraction>\d+))?(?P<scale_suffix>[kK])?(?!\w|[.,]\d)")
+_CURRENCY_PREFIX_RE = re.compile(
+    r"(?i)(?:(?P<code>EGP|USD|EUR|GBP|CAD|AUD)\b\s*|"
+    r"(?P<symbol>[$€£])\s*)$")
+_CURRENCY_SUFFIX_RE = re.compile(
+    r"(?i)^\s*(?P<code>EGP|USD|EUR|GBP|CAD|AUD|dollars?|euros?|pounds?)\b")
+_NUMERIC_UNIT_SUFFIX_RE = re.compile(
+    r"(?i)^\s*(?P<unit>percentage\s+points?|%|percent(?:age)?|"
+    r"grams?|g|kilograms?|kg|"
+    r"milligrams?|mg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|"
+    r"followers?|impressions?|clicks?|saves?|conversions?|orders?|"
+    r"leads?|visits?|customers?|posts?|days?|weeks?|months?|years?|"
+    r"hours?|minutes?)(?!\w)")
+_RANGE_SUFFIX_RE = re.compile(
+    r"(?i)^\s*[\-–—]\s*\d+(?:[.,]\d+)*(?:\s*(?P<unit>"
+    r"percentage\s+points?|%|percent(?:age)?|"
+    r"EGP|USD|EUR|GBP|CAD|AUD|[$€£]|grams?|g|kilograms?|kg|"
+    r"milligrams?|mg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l)(?!\w))?")
+_NUMERIC_SCALE_RE = re.compile(
+    r"(?i)^\s*(?P<scale>hundred|thousand|million|billion|trillion|dozen|k)\b")
+_ARBITRARY_UNIT_RE = re.compile(r"(?i)^\s+(?P<unit>[a-z][a-z-]*)\b")
+_NON_UNIT_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "of", "to", "by", "per", "for",
+    "is", "are", "was", "were", "has", "have", "had", "with", "from",
+    "in", "on", "at", "after", "before", "about", "around", "over",
+    "under", "more", "less", "above", "below", "than", "each", "every",
+})
+_COUNT_UNITS = {
+    "follower": "followers", "followers": "followers",
+    "impression": "impressions", "impressions": "impressions",
+    "click": "clicks", "clicks": "clicks", "save": "saves", "saves": "saves",
+    "conversion": "conversions", "conversions": "conversions",
+    "order": "orders", "orders": "orders", "lead": "leads", "leads": "leads",
+    "visit": "visits", "visits": "visits", "customer": "customers",
+    "customers": "customers", "post": "posts", "posts": "posts",
+    "day": "days", "days": "days", "week": "weeks", "weeks": "weeks",
+    "month": "months", "months": "months", "year": "years", "years": "years",
+    "hour": "hours", "hours": "hours", "minute": "minutes", "minutes": "minutes",
+}
 
 
 def _decimal_text(value: Decimal) -> str:
     rendered = format(value.normalize(), "f")
     return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+
+
+def _is_range_dash(value: str, sign_start: int) -> bool:
+    """A hyphen after a number is range punctuation, not a negative sign."""
+    return (0 <= sign_start < len(value) and value[sign_start] == "-"
+            and bool(re.search(r"\d\s*$", value[:sign_start])))
 
 
 def _normalize_safe_quantities(text: str) -> str:
@@ -616,6 +663,10 @@ def _normalize_safe_quantities(text: str) -> str:
             amount = Decimal(match.group("number").replace(",", ""))
         except InvalidOperation:
             return match.group(0)
+        sign_start = match.start() - 1
+        if (sign_start >= 0 and value[sign_start] in "-−"
+                and not _is_range_dash(value, sign_start)):
+            amount = -amount
         unit = match.group("unit").casefold()
         if unit in {"kg", "kilogram", "kilograms"}:
             grams = amount * Decimal("1000")
@@ -626,6 +677,111 @@ def _normalize_safe_quantities(text: str) -> str:
         return f"{_decimal_text(grams)} g"
 
     return _MASS_QUANTITY_RE.sub(mass_replacement, value)
+
+
+def _numeric_fact_key(value: str, match: re.Match) -> tuple[str, str] | None:
+    try:
+        amount_text = match.group("number").replace(",", "")
+        if match.group("fraction"):
+            amount_text += "." + match.group("fraction")
+        amount_value = Decimal(amount_text)
+    except InvalidOperation:
+        return None
+    sign = match.group("sign")
+    if sign and not _is_range_dash(value, match.start()):
+        amount_value = -amount_value
+    prefix = value[max(0, match.start() - 32):match.start()]
+    suffix = value[match.end():match.end() + 48]
+    if match.group("scale_suffix"):
+        amount_value *= Decimal(1000)
+    scale_match = _NUMERIC_SCALE_RE.match(suffix)
+    if scale_match:
+        scale = scale_match.group("scale").casefold()
+        amount_value *= {
+            "hundred": Decimal(100), "thousand": Decimal(1000),
+            "million": Decimal(1000000), "billion": Decimal(1000000000),
+            "trillion": Decimal(1000000000000), "dozen": Decimal(12),
+            "k": Decimal(1000),
+        }[scale]
+        suffix = suffix[scale_match.end():]
+    amount = _decimal_text(amount_value)
+    unit = "number"
+
+    currency_prefix = _CURRENCY_PREFIX_RE.search(prefix)
+    range_currency_prefix = re.search(
+        r"(?i)(?P<currency>EGP|USD|EUR|GBP|CAD|AUD|[$€£])\s*"
+        r"\d+(?:\.\d+)?\s*[\-–—]\s*$", prefix)
+    currency_suffix = _CURRENCY_SUFFIX_RE.match(suffix)
+    currency_code = (currency_prefix.group("code") if currency_prefix else None)
+    currency_symbol = (currency_prefix.group("symbol") if currency_prefix else None)
+    if currency_code or currency_symbol or range_currency_prefix:
+        if currency_code:
+            unit = "currency:" + currency_code.casefold()
+        elif currency_symbol:
+            unit = "currency:" + {"$": "usd", "€": "eur", "£": "gbp"}[
+                currency_symbol]
+        elif range_currency_prefix:
+            code = range_currency_prefix.group("currency").casefold()
+            unit = "currency:" + {"$": "usd", "€": "eur", "£": "gbp"}.get(
+                code, code)
+    elif currency_suffix:
+        code = currency_suffix.group("code").casefold()
+        unit = "currency:" + {
+            "dollar": "usd", "dollars": "usd", "euro": "eur",
+            "euros": "eur", "pound": "gbp", "pounds": "gbp",
+        }.get(code, code)
+    else:
+        unit_match = _NUMERIC_UNIT_SUFFIX_RE.match(suffix)
+        unit_word = unit_match.group("unit").casefold() if unit_match else ""
+        range_match = _RANGE_SUFFIX_RE.match(suffix)
+        range_unit = (range_match.group("unit") or "").casefold() if range_match else ""
+        unit_word = " ".join((unit_word or range_unit).split())
+        if unit_word in {"percentage point", "percentage points"}:
+            unit = "percentage_points"
+        elif unit_word in {"%", "percent", "percentage"}:
+            unit = "percent"
+        elif unit_word in {"egp", "usd", "eur", "gbp", "cad", "aud", "$", "€", "£"}:
+            unit = "currency:" + {"$": "usd", "€": "eur", "£": "gbp"}.get(
+                unit_word, unit_word)
+        elif unit_word:
+            unit = {
+                "gram": "g", "grams": "g", "kilogram": "kg",
+                "kilograms": "kg", "milligram": "mg", "milligrams": "mg",
+                "milliliter": "ml", "milliliters": "ml",
+                "millilitre": "ml", "millilitres": "ml",
+                "liter": "l", "liters": "l", "litre": "l", "litres": "l",
+            }.get(unit_word, _canonical_unit_word(unit_word))
+        else:
+            # Unknown adjacent unit words still carry meaning. Preserve them
+            # instead of collapsing quantities such as bags and cups to the
+            # same untyped number. Common sentence connectors are excluded.
+            arbitrary_unit = _ARBITRARY_UNIT_RE.match(suffix)
+            if arbitrary_unit:
+                candidate = arbitrary_unit.group("unit").casefold()
+                if candidate not in _NON_UNIT_WORDS:
+                    unit = _canonical_unit_word(candidate)
+    return amount, unit
+
+
+def _canonical_unit_word(value: str) -> str:
+    value = _COUNT_UNITS.get(value, value)
+    if value.endswith("ies") and len(value) > 4:
+        return value[:-3] + "y"
+    if value.endswith("s") and not value.endswith("ss") and len(value) > 3:
+        return value[:-1]
+    return value
+
+
+def _numeric_fact_keys(text: str) -> set[tuple[str, str]]:
+    """Return complete numeric tokens while preserving adjacent units.
+
+    Only the documented comma grouping and metric mass equivalences are
+    normalized. Percentages, prices, quantities, and results remain distinct
+    from bare or differently-unitized values.
+    """
+    value = _normalize_safe_quantities(text)
+    return {key for match in _NUMERIC_TOKEN_RE.finditer(value)
+            if (key := _numeric_fact_key(value, match)) is not None}
 
 
 def _normalized_claim(text: str) -> str:
@@ -816,6 +972,15 @@ def _validate_persisted_facts(markdown: str, source_texts: list[str], *, label: 
 def _validate_evidence_claims(markdown: str, allowed_ids, *, label: str,
                               project_id: str = "") -> None:
     evidence = _section_body(markdown, "Retrieved evidence")
+    # Bind a canonical citation immediately after sentence punctuation to the
+    # preceding statement before splitting. This makes `claim [id].` and
+    # `claim. [id]` equivalent without allowing the citation to cross another
+    # statement.
+    evidence = re.sub(
+        r"(?P<punct>[.!?])(?P<space>[ \t]+)"
+        r"(?P<citation>\[[^\]\r\n]+:[^\]\r\n]+\])",
+        lambda match: f" {match.group('citation')}{match.group('punct')}",
+        evidence)
     for fragment in _claim_fragments(evidence):
         if _normalized_claim(fragment) == "no project evidence available":
             continue
@@ -846,50 +1011,92 @@ _NEGATION_PREFIX = re.compile(
 _NEGATION_SUFFIX = re.compile(
     r"^\W*(?:(?:is|are|was|were|has|have|had)\W+)?"
     r"(?:not\b|unknown\b|unconfirmed\b|unverified\b)", re.IGNORECASE)
+_FUTURE_METRIC_RECOMMENDATION_RE = re.compile(
+    r"(?i)^\s*(?:suggestion|recommendation)\s*:\s*track\s+"
+    r"(?:engagement|saves?|conversion\s+rate|click(?:-through)?\s+rate|"
+    r"ctr|roas|roi|impressions?|clicks?)"
+    r"(?:\s*,\s*(?:(?:and)\s+)?"
+    r"(?:engagement|saves?|conversion\s+rate|click(?:-through)?\s+rate|"
+    r"ctr|roas|roi|impressions?|clicks?))*\s+after\s+launch\.?\s*$")
+
+
+def _markdown_sections(text: str) -> list[tuple[str, str]]:
+    """Split markdown into heading-local bodies without carrying context forward."""
+    sections: list[tuple[str, list[str]]] = []
+    heading = ""
+    body: list[str] = []
+    for line in str(text or "").splitlines():
+        match = re.match(r"^\s*#{1,6}\s*(.*?)\s*$", line)
+        if match:
+            sections.append((heading, body))
+            heading = match.group(1).casefold()
+            body = []
+        else:
+            body.append(line)
+    sections.append((heading, body))
+    return [(name, "\n".join(lines)) for name, lines in sections]
+
+
+def _locally_negated(statement: str, match: re.Match) -> bool:
+    before = statement[max(0, match.start() - 64):match.start()]
+    after = statement[match.end():match.end() + 48]
+    return bool(_NEGATION_PREFIX.search(before) or _NEGATION_SUFFIX.search(after))
 
 
 def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label: str,
                                source_ids=None, project_id: str = "") -> None:
     """Reject unsupported numeric and high-risk terms against scoped sources."""
     # Remove citation identifiers first so chunk numbers are not treated as claims.
-    text = _normalize_safe_quantities(
-        re.sub(r"\[[^\]\r\n]+:[^\]\r\n]+\]", "", markdown))
-    source = _normalized_claim(" ".join(source_texts))
-    for match in re.finditer(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text):
-        value = _normalized_claim(match.group(0))
-        if value and value not in source:
-            line_start = text.rfind("\n", 0, match.start()) + 1
-            line_end = text.find("\n", match.end())
-            if line_end < 0:
-                line_end = len(text)
-            diagnostic = _validation_diagnostic(
-                label=label, rule="numeric_source_match",
-                claim=text[line_start:line_end], source_ids=source_ids,
-                classification="unsupported", project_id=project_id)
-            raise DeliverableValidationError(
-                _validation_error_message(label, diagnostic),
-                diagnostic=diagnostic)
+    clean_text = re.sub(r"\[[^\]\r\n]+:[^\]\r\n]+\]", "", markdown)
+    source_text = " ".join(source_texts)
+    source_facts = _numeric_fact_keys(source_text)
+    normalized_source = _normalized_claim(source_text)
+    for section_heading, body in _markdown_sections(clean_text):
+        fragments = _claim_fragments(body)
+        if section_heading and section_heading not in {
+                "persisted user facts", "retrieved evidence",
+                "ai suggestions", "unknown or unsupported information"}:
+            # User-authored subsection headings can contain factual claims too.
+            fragments.insert(0, section_heading)
+        for fragment in fragments:
+            statement = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", fragment).strip()
+            if not statement:
+                continue
+            # This narrow rule permits an unquantified, explicitly labeled
+            # future tracking recommendation. Suggestions containing outcomes,
+            # figures, or any other factual claim still pass through validation.
+            if (section_heading.startswith("ai suggestions")
+                    and _FUTURE_METRIC_RECOMMENDATION_RE.fullmatch(statement)):
+                continue
 
-    for match in _HIGH_RISK_TERMS.finditer(text):
-        start = max(0, match.start() - 64)
-        end = min(len(text), match.end() + 48)
-        before = text[start:match.start()]
-        after = text[match.end():end]
-        if _NEGATION_PREFIX.search(before) or _NEGATION_SUFFIX.search(after):
-            continue
-        line_start = text.rfind("\n", 0, match.start()) + 1
-        line_end = text.find("\n", match.end())
-        if line_end < 0:
-            line_end = len(text)
-        statement = _normalized_claim(text[line_start:line_end])
-        if not statement or statement not in source:
-            diagnostic = _validation_diagnostic(
-                label=label, rule="high_risk_source_match",
-                claim=text[line_start:line_end], source_ids=source_ids,
-                classification="unsupported", project_id=project_id)
-            raise DeliverableValidationError(
-                _validation_error_message(label, diagnostic),
-                diagnostic=diagnostic)
+            normalized_statement = _normalize_safe_quantities(statement)
+            has_numeric_claim = bool(_NUMERIC_TOKEN_RE.search(normalized_statement))
+            for numeric_match in _NUMERIC_TOKEN_RE.finditer(normalized_statement):
+                fact = _numeric_fact_key(normalized_statement, numeric_match)
+                if fact not in source_facts:
+                    diagnostic = _validation_diagnostic(
+                        label=label, rule="numeric_source_match", claim=statement,
+                        source_ids=source_ids, classification="unsupported",
+                        project_id=project_id)
+                    raise DeliverableValidationError(
+                        _validation_error_message(label, diagnostic),
+                        diagnostic=diagnostic)
+
+            statement_terms = list(_HIGH_RISK_TERMS.finditer(statement))
+            for term_match in statement_terms:
+                # Negation applies only inside this statement. A sentence or a
+                # later Unknown section cannot mask a separate positive claim.
+                if not has_numeric_claim and _locally_negated(statement, term_match):
+                    continue
+                normalized_statement = _normalized_claim(statement)
+                if not normalized_statement or normalized_statement not in normalized_source:
+                    diagnostic = _validation_diagnostic(
+                        label=label, rule="high_risk_source_match", claim=statement,
+                        source_ids=source_ids, classification="unsupported",
+                        project_id=project_id)
+                    raise DeliverableValidationError(
+                        _validation_error_message(label, diagnostic),
+                        diagnostic=diagnostic)
 
 
 _ESTABLISHMENT_TERMS = (

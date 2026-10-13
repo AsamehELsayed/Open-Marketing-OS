@@ -6,6 +6,7 @@ import pytest
 
 from app.services.campaign_production import (
     DeliverableValidationError,
+    _numeric_fact_keys,
     validate_generated_items,
 )
 
@@ -263,6 +264,55 @@ def test_properly_cited_scoped_evidence_location_is_accepted():
     assert rows[0]["type"] == "strategy_brief"
 
 
+@pytest.mark.parametrize("evidence", [
+    "Beans are roasted in Maadi [doc-a:chunk-1].",
+    "Beans are roasted in Maadi. [doc-a:chunk-1]",
+])
+def test_retrieved_evidence_accepts_immediate_citation_before_or_after_punctuation(
+        evidence):
+    source_id = "doc-a:chunk-1"
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": source_id,
+                      "text": "Beans are roasted in Maadi."}],
+    }
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        allowed_ids=[source_id], evidence=evidence)
+
+    assert rows[0]["evidence_ids"] == [source_id]
+
+
+def test_trailing_citation_cannot_support_the_next_evidence_statement():
+    source_id = "doc-a:chunk-1"
+    context = {
+        "project_id": "northstar-test-project",
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": source_id,
+                      "text": "Beans are roasted in Maadi."}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            allowed_ids=[source_id],
+            evidence=("Beans are roasted in Maadi. [doc-a:chunk-1] "
+                      "The café is located in Giza."))
+
+    assert caught.value.diagnostic["rule"] == "evidence_citation_integrity"
+
+
+def test_unbracketed_canonical_source_token_remains_rejected():
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.",
+            evidence="Beans are roasted in Maadi. doc-a:chunk-1")
+
+    assert caught.value.diagnostic["rule"] == "scoped_citation_integrity"
+
+
 def test_matching_location_text_with_other_project_citation_is_rejected():
     source_id = "doc-a:chunk-1"
     supported = "Northstar cafe is located in Cairo, Egypt."
@@ -414,6 +464,238 @@ def test_metric_mass_equivalence_is_accepted():
     )
 
     assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize("source", [
+    "The prior conversion rate was 24–40.",
+    "The prior conversion rate was 24–40%.",
+])
+def test_four_percent_baseline_does_not_match_a_larger_source_range(source):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            suggestions="Suggestion: Use a 4% baseline conversion rate.")
+
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+
+def test_unsupported_achieved_conversion_rate_stays_rejected_after_unknown_heading():
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID,
+                      "text": "Prior conversion rates ranged from 24–40%."}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            suggestions="The campaign achieved a 4% conversion rate.",
+            unknowns="Results are unknown.")
+
+    assert caught.value.diagnostic["rule"] in {
+        "numeric_source_match", "high_risk_source_match"}
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("The source mentions 104 clicks.", "Suggestion: Run 4 clicks."),
+    ("The rate was 14.5%.", "Suggestion: Expect a 4.5% rate."),
+    ("The price was $4.", "Suggestion: Use a 4% conversion rate."),
+    ("The campaign had 40 customers.", "Suggestion: Reach 4 customers."),
+])
+def test_numeric_tokens_keep_full_value_and_semantic_units(source, claim):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", context=context,
+                  suggestions=claim)
+
+    assert caught.value.diagnostic["rule"] in {
+        "numeric_source_match", "high_risk_source_match"}
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("The prior change was 4 percentage points.",
+     "Suggestion: Use a 4% baseline."),
+    ("The prior rate was 4%.",
+     "Suggestion: Use 4 percentage points as the baseline."),
+])
+def test_percentage_points_do_not_match_percent(source, claim):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", context=context,
+                  suggestions=claim)
+
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("4 percentage points", "4%"),
+    ("4%", "4 percentage points"),
+])
+def test_percentage_point_and_percent_fact_keys_are_distinct(source, claim):
+    assert _numeric_fact_keys(source).isdisjoint(_numeric_fact_keys(claim))
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("4%", "4 percent"),
+    ("4 percent", "4%"),
+])
+def test_percent_and_percent_word_remain_equivalent(source, claim):
+    assert _numeric_fact_keys(source) == _numeric_fact_keys(claim)
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("Temperature was -4 degrees.", "Suggestion: Use 4 degrees."),
+    ("Temperature was 4 degrees.", "Suggestion: Use -4 degrees."),
+])
+def test_numeric_sign_is_part_of_the_supported_fact(source, claim):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", context=context,
+                  suggestions=claim)
+
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+
+@pytest.mark.parametrize("temperature", ["-4", "4"])
+def test_matching_signed_numeric_fact_remains_supported(temperature):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{
+            "source_id": SOURCE_ID,
+            "text": f"Temperature was {temperature} degrees.",
+        }],
+    }
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        suggestions=f"Suggestion: Use {temperature} degrees.")
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+def test_metric_mass_equivalence_preserves_negative_sign():
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{
+            "source_id": SOURCE_ID,
+            "text": "The temperature change was -0.25 kg equivalent.",
+        }],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            suggestions="Suggestion: Use 250 g.")
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        suggestions="Suggestion: Use -250 g.")
+    assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize("range_text", ["24–40", "24-40"])
+def test_range_separator_is_not_a_negative_sign(range_text):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{
+            "source_id": SOURCE_ID,
+            "text": f"The valid temperature range is {range_text} degrees.",
+        }],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.", context=context,
+            suggestions="Suggestion: Use -40 degrees.")
+
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+    rows = _validate(
+        "No persisted facts supplied.", context=context,
+        suggestions="Suggestion: Use 40 degrees.")
+    assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("The package contains 4 bags.", "Suggestion: Use 4 cups."),
+    ("The package contains 4 thousand bags.", "Suggestion: Use 4 cups."),
+    ("The source reports 4 thousand.", "Suggestion: Use 4."),
+])
+def test_numeric_facts_preserve_arbitrary_units_and_scale(source, claim):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", context=context,
+                  suggestions=claim)
+
+    assert caught.value.diagnostic["rule"] == "numeric_source_match"
+
+
+@pytest.mark.parametrize(("source", "claim"), [
+    ("The package contains 4 bags.", "Suggestion: Use 4 bag."),
+    ("The package contains 4 thousand bags.", "Suggestion: Use 4,000 bags."),
+    ("The package contains 4k cups.", "Suggestion: Use 4 thousand cups."),
+])
+def test_numeric_unit_and_scale_equivalents_remain_supported(source, claim):
+    context = {
+        "profile": {}, "brief_md": "",
+        "evidence": [{"source_id": SOURCE_ID, "text": source}],
+    }
+
+    rows = _validate("No persisted facts supplied.", context=context,
+                     suggestions=claim)
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+def test_unquantified_future_metric_tracking_suggestion_is_allowed():
+    rows = _validate(
+        "No persisted facts supplied.",
+        suggestions=("Suggestion: Track engagement, saves, and conversion rate "
+                     "after launch."))
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize("suggestion", [
+    "Suggestion: The campaign achieved a 4% conversion rate.",
+    "Suggestion: Track engagement and report a 4% conversion rate after launch.",
+])
+def test_suggestion_label_does_not_exempt_performance_claims(suggestion):
+    with pytest.raises(DeliverableValidationError):
+        _validate("No persisted facts supplied.", suggestions=suggestion)
+
+
+def test_negation_in_a_separate_statement_does_not_mask_a_performance_claim():
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate(
+            "No persisted facts supplied.",
+            suggestions=("Conversion rate is unknown. The campaign achieved "
+                         "a 4% conversion rate."))
+
+    assert caught.value.diagnostic["rule"] in {
+        "numeric_source_match", "high_risk_source_match"}
 
 
 @pytest.mark.parametrize("claim", [

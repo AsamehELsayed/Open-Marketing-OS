@@ -1,0 +1,33 @@
+{
+  "max_concurrency": 1,
+  "parallelism_claim": "NO",
+  "stage_dependencies": [
+    {"stage": "technical_planner", "depends_on": []},
+    {"stage": "founder_plan_approval", "depends_on": ["technical_planner"], "required": true, "recorded": false},
+    {"stage": "W1", "depends_on": ["founder_plan_approval"]},
+    {"stage": "independent_QA", "depends_on": ["W1"]},
+    {"stage": "independent_reviewer", "depends_on": ["independent_QA"]},
+    {"stage": "focused_PR", "depends_on": ["independent_reviewer_APPROVE"]},
+    {"stage": "merge", "depends_on": ["focused_PR", "all_required_CI_pass"]}
+  ],
+  "workers": [
+    {
+      "worker_id": "W1",
+      "role": "implementer",
+      "task": "After founder plan approval is recorded, make the smallest validator-only patch and add deterministic campaign validator regressions. Fix complete numeric-token and unit-aware matching, distinguish unquantified future metric recommendations from factual performance outcomes, scope negation and unknown handling to the relevant statement/section, and associate an immediate post-punctuation allowed citation only with its own evidence statement. Preserve DEV-036 sanitized diagnostics, project citation isolation, unsupported café-location and high-risk claim protections, batch atomicity, approved deliverables, and same-turn idempotency. Use deterministic synthetic output only; make zero real model/provider calls. Do not sub-delegate or modify excluded scope.",
+      "depends_on": [],
+      "files_or_scope": [
+        "app/services/campaign_production.py",
+        "app/tests/test_dev032_campaign_ai.py",
+        "app/tests/test_dev033_campaign_validation.py",
+        "development/runs/DEV-037/workers/W1.md"
+      ],
+      "can_run_parallel": false,
+      "command": ["opencode", "run", "--auto"],
+      "stdin_text": "Read development/runs/DEV-037/plan.md and follow packet W1 exactly. Do not modify code until the orchestrator records founder plan approval. Keep changes within the listed files. Add deterministic tests for all acceptance criteria; use only fake/synthetic output and ensure zero real model/provider calls. Run the test command in the plan, inspect the final diff, and write development/runs/DEV-037/workers/W1.md with changed files, tests/results, and limitations. Do not touch Northstar client data, provider routing, installers, the acceptance harness, persistence/schema code, or unrelated validation contracts. Do not initiate a Strategy Brief generation attempt and do not sub-delegate.",
+      "output_artifact": "development/runs/DEV-037/workers/W1.md",
+      "worktree": false,
+      "timeout": 1200
+    }
+  ]
+}
