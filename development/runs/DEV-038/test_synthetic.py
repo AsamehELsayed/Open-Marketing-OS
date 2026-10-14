@@ -1,7 +1,10 @@
 """Fail-closed regressions for DEV-038 source and factual acceptance."""
 import importlib.util
 import re
+import shutil
+import sqlite3
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -67,6 +70,45 @@ def test_export_refuses_mismatched_service_result(monkeypatch):
         with pytest.raises(RuntimeError, match="did not match"):
             runner.export_persisted_markdown(object(), persisted, path)
         assert not path.exists()
+
+
+def test_approved_exact_byte_source_path_still_works(monkeypatch):
+    # Exercise the preserved exact-byte branch without changing production pins.
+    monkeypatch.setattr(runner, "SOURCE_HASH", runner.sha(runner.SOURCE_DB))
+    proof = runner.verify_input_database(derived=Path("missing-derived.db"))
+    assert proof["provenance_mode"] == "exact_bytes"
+
+
+@pytest.mark.parametrize("mutation", ["evidence", "extra_row", "extra_schema"])
+def test_logical_guard_rejects_changed_source(monkeypatch, mutation):
+    # The fixture copies are the only writable databases in these regressions.
+    with tempfile.TemporaryDirectory(dir=SCRIPT.parent / "synthetic-output") as folder:
+        copied = Path(folder) / "source.db"
+        shutil.copyfile(runner.SOURCE_DB, copied)
+        with closing(sqlite3.connect(copied)) as conn:
+            if mutation == "evidence":
+                conn.execute("UPDATE chunks SET text=text||' tampered' WHERE id=(SELECT id FROM chunks WHERE project_id=? LIMIT 1)", (runner.PROJECT_ID,))
+            elif mutation == "extra_row":
+                conn.execute("INSERT INTO chunks (id,project_id,document_id,chunk_id,header,text,token_est) VALUES (?,?,?,?,?,?,?)",
+                             ("dev038-extra", runner.PROJECT_ID, "dev038-extra", "c999", "", "unexpected", 1))
+            else:
+                conn.execute("CREATE TABLE dev038_extra (id TEXT)")
+            conn.commit()
+        monkeypatch.setattr(runner, "SOURCE_HASH", "not-the-copied-hash")
+        with pytest.raises(RuntimeError, match="mismatch"):
+            runner.verify_input_database(source=copied)
+
+
+def test_logical_guard_rejects_tampered_derived_snapshot(monkeypatch):
+    with tempfile.TemporaryDirectory(dir=SCRIPT.parent / "synthetic-output") as folder:
+        copied = Path(folder) / "derived.db"
+        shutil.copyfile(runner.DERIVED_DB, copied)
+        with closing(sqlite3.connect(copied)) as conn:
+            conn.execute("UPDATE campaign_deliverables SET title=title||' tampered' WHERE id=?", (runner.SYNTHETIC_ID,))
+            conn.commit()
+        monkeypatch.setattr(runner, "SOURCE_HASH", "not-the-current-hash")
+        with pytest.raises(RuntimeError, match="snapshot hash mismatch"):
+            runner.verify_input_database(derived=copied)
 
 
 def test_source_guard_rejects_dirty_checkout(monkeypatch):

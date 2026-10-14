@@ -8,6 +8,8 @@ import socket
 import sqlite3
 import subprocess
 import sys
+from collections import Counter
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +28,12 @@ PROJECT_ID = "6c4aaf8b966d43f1ae87b63707b3ed2c"
 CAMPAIGN_ID = "9b9afc7746cb52ccaccac865ffa8025d"
 SOURCE_DB = Path(r"C:\Users\User\Documents\open-marketing-os\development\acceptance\DEV-032-REAL-AI-E2E\free-cloud-20261011-attempt-02\workspace\data\marketing.db")
 SOURCE_HASH = "f54a384efbbe789e0c7f2ca2eafa9563a4796e08fbd952cc7fe7f790f9eac507"
+DERIVED_DB = Path(__file__).resolve().parent / "synthetic-output" / "remediation-03" / "marketing.db"
+DERIVED_HASH = "7ad2a03f8e0b71a5c23ba6171e58fd2bbffd99bc416f782012e7d92f35fa0420"
+SYNTHETIC_ID = "del_46e06655d8664d929e022a85de95ffe7"
+SYNTHETIC_BATCH_KEY = "35cd5bf40fbad25b5c87610aa1f74144"
+SYNTHETIC_REVISION_ID = "48b3a295b8a2462b9e7ff968696e8722"
+SYNTHETIC_CALL_ID = "mc-b992be8154f1"
 RUN = Path(__file__).resolve().parent / "synthetic-output"
 APPROVED_BASE = "7136389aed293c152fb387de2a2f97bc1cd2dd47"
 APPROVED_TREE = "88881ace7c42781e7db3d538d3bc84263d5c62b0"
@@ -34,6 +42,101 @@ REQUEST = "Create one seven-day Instagram strategy brief introducing Northstar C
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _read_only_db(path: Path):
+    if not path.is_file():
+        raise RuntimeError("Approved database input is missing")
+    wal = Path(str(path) + "-wal")
+    if wal.exists() and wal.stat().st_size:
+        raise RuntimeError("Approved database input has uncheckpointed WAL")
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _database_identity(conn) -> tuple:
+    if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+        raise RuntimeError("Input database failed SQLite quick_check")
+    project = conn.execute("SELECT name FROM projects WHERE id=?", (PROJECT_ID,)).fetchone()
+    campaign = conn.execute("SELECT project_id FROM campaigns WHERE id=?", (CAMPAIGN_ID,)).fetchone()
+    if not project or project[0] != "Northstar Coffee" or not campaign or campaign[0] != PROJECT_ID:
+        raise RuntimeError("Northstar project/campaign identity mismatch")
+    return (conn.execute("PRAGMA user_version").fetchone()[0],
+            conn.execute("PRAGMA schema_version").fetchone()[0],
+            conn.execute("PRAGMA application_id").fetchone()[0])
+
+
+def _schema(conn) -> list[tuple]:
+    return [tuple(row) for row in conn.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name,tbl_name,sql")]
+
+
+def _rows(conn, table: str) -> Counter:
+    safe = table.replace('"', '""')
+    return Counter(tuple(row) for row in conn.execute(f'SELECT * FROM "{safe}"'))
+
+
+def _synthetic_rows(derived) -> dict[str, tuple]:
+    """Identify exactly four approved synthetic rows; never filter by broad project scope."""
+    checks = {
+        "campaign_deliverable_batches": ("idempotency_key", SYNTHETIC_BATCH_KEY,
+            lambda r: r["project_id"] == PROJECT_ID and r["campaign_id"] == CAMPAIGN_ID
+            and json.loads(r["deliverable_ids_json"]) == [SYNTHETIC_ID]),
+        "campaign_deliverables": ("id", SYNTHETIC_ID,
+            lambda r: r["project_id"] == PROJECT_ID and r["campaign_id"] == CAMPAIGN_ID
+            and r["type"] == "strategy_brief" and "SYNTHETIC" in r["content_md"]),
+        "campaign_deliverable_revisions": ("revision_id", SYNTHETIC_REVISION_ID,
+            lambda r: r["project_id"] == PROJECT_ID and r["campaign_id"] == CAMPAIGN_ID
+            and r["deliverable_id"] == SYNTHETIC_ID and r["version"] == 1
+            and r["operation"] == "GENERATED"),
+        "model_calls": ("call_id", SYNTHETIC_CALL_ID,
+            lambda r: r["turn_id"] == "dev038-synthetic" and r["project_id"] == PROJECT_ID
+            and r["provider"] == "local" and r["model"] == "synthetic-local"),
+    }
+    extras = {}
+    for table, (key, value, valid) in checks.items():
+        row = derived.execute(f'SELECT * FROM "{table}" WHERE "{key}"=?', (value,)).fetchall()
+        if len(row) != 1 or not valid(row[0]):
+            raise RuntimeError("Approved-derived synthetic row identity mismatch")
+        extras[table] = tuple(row[0])
+    return extras
+
+
+def verify_input_database(source: Path = SOURCE_DB, derived: Path = DERIVED_DB) -> dict:
+    """Accept pinned source bytes or strict approved-derived logical equivalence."""
+    source_hash = sha(source)
+    with closing(_read_only_db(source)) as source_conn:
+        source_identity = _database_identity(source_conn)
+        if source_hash == SOURCE_HASH:
+            if sha(source) != source_hash:
+                raise RuntimeError("Northstar source changed during verification")
+            return {"provenance_mode": "exact_bytes", "source_sha256_before": source_hash,
+                    "schema_identity": source_identity}
+        if sha(derived) != DERIVED_HASH:
+            raise RuntimeError("Approved-derived snapshot hash mismatch")
+        with closing(_read_only_db(derived)) as derived_conn:
+            if _database_identity(derived_conn) != source_identity:
+                raise RuntimeError("Approved-derived schema identity mismatch")
+            if _schema(source_conn) != _schema(derived_conn):
+                raise RuntimeError("Approved-derived schema definitions mismatch")
+            extra_rows = _synthetic_rows(derived_conn)
+            tables = [row[1] for row in _schema(source_conn) if row[0] == "table"]
+            for table in tables:
+                source_rows = _rows(source_conn, table)
+                derived_rows = _rows(derived_conn, table)
+                if table in extra_rows:
+                    if derived_rows[extra_rows[table]] != 1:
+                        raise RuntimeError("Approved-derived synthetic row count mismatch")
+                    derived_rows.subtract([extra_rows[table]])
+                    derived_rows += Counter()
+                if source_rows != derived_rows:
+                    raise RuntimeError(f"Approved-derived row multiset mismatch: {table}")
+    if sha(source) != source_hash or sha(derived) != DERIVED_HASH:
+        raise RuntimeError("Northstar source or approved-derived snapshot changed during verification")
+    return {"provenance_mode": "logical_equivalence", "source_sha256_before": source_hash,
+            "approved_derived_sha256": DERIVED_HASH, "excluded_synthetic_rows": 4,
+            "schema_identity": source_identity, "table_count": len(tables)}
 
 
 def git(*args: str) -> str:
@@ -121,16 +224,14 @@ def export_persisted_markdown(conn, persisted: dict, path: Path) -> None:
 
 def main() -> dict:
     source_state = verify_source()
-    if sha(SOURCE_DB) != SOURCE_HASH:
-        raise RuntimeError("Approved input database hash mismatch")
-    for db in (SOURCE_DB,):
-        if Path(str(db) + "-wal").exists() and Path(str(db) + "-wal").stat().st_size:
-            raise RuntimeError("Input database has uncheckpointed WAL")
+    input_provenance = verify_input_database()
     if RUN.exists():
         raise RuntimeError("Synthetic output exists; use a fresh run directory")
     RUN.mkdir()
     db = RUN / "marketing.db"
     shutil.copyfile(SOURCE_DB, db)
+    if sha(db) != input_provenance["source_sha256_before"] or sha(SOURCE_DB) != input_provenance["source_sha256_before"]:
+        raise RuntimeError("Northstar source changed during isolated copy")
     original_socket = socket.socket
 
     def blocked_socket(*args, **kwargs):
@@ -172,7 +273,11 @@ def main() -> dict:
         assert export.read_bytes() == created["content_md"].encode("utf-8")
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        report = {"status": "PASS", "label": "SYNTHETIC", **source_state, "source_db_sha256_before": SOURCE_HASH,
+        source_hash_after = sha(SOURCE_DB)
+        if source_hash_after != input_provenance["source_sha256_before"]:
+            raise RuntimeError("Northstar source changed during synthetic acceptance")
+        report = {"status": "PASS", "label": "SYNTHETIC", **source_state, **input_provenance,
+            "source_db_sha256_before": input_provenance["source_sha256_before"],
             "source_db_sha256_after": sha(SOURCE_DB), "workspace_db": str(db), "workspace_db_sha256": sha(db),
             "deliverable_id": created["id"], "campaign_id": CAMPAIGN_ID, "project_id": PROJECT_ID,
             "source_id": evidence["source_id"], "export": str(export), "export_sha256": sha(export),
