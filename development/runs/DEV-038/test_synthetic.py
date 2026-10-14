@@ -26,6 +26,18 @@ def test_scripted_strategy_has_substantive_sections_and_distinct_days():
     assert "SYNTHETIC" in content
 
 
+def test_scripted_strategy_passes_real_factual_validator():
+    source_id = "northstar:c000"
+    content = runner.build_synthetic_response(source_id)
+    rows = validate_generated_items(content, types=["strategy_brief"], allowed_ids=[source_id],
+        context={"project_id": "northstar", "profile": {"business_name": "Northstar Coffee"},
+                 "brief_md": "", "evidence_ids": [source_id],
+                 "evidence": [{"source_id": source_id,
+                               "text": "Northstar House Blend is sold in 250 g bags for EGP 380."}]},
+        user_request=runner.REQUEST)
+    assert len(rows) == 1 and rows[0]["type"] == "strategy_brief"
+
+
 def test_source_guard_rejects_dirty_checkout(monkeypatch):
     real_git = runner.git
     monkeypatch.setattr(runner, "git", lambda *args: " M app/deps.py" if args[0] == "status" else real_git(*args))

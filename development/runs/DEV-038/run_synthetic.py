@@ -95,14 +95,14 @@ def build_synthetic_response(evidence_id: str) -> str:
         '**Audience and positioning:** Propose home brewers in Cairo who want a clearer path from bean choice to a satisfying cup. Position the content as a practical, welcoming guide to choosing and preparing coffee at home; this is a proposed message, not an established brand claim.\n\n'
         '**Messaging pillars:** Suggest approachable brewing guidance, product discovery grounded in cited facts, and small rituals that invite audience participation. Keep a visible distinction between product information and creative ideas.\n\n'
         '**Day One — orientation:** Suggest a cover image that asks what a home brewer wants from a cup; invite responses in the caption.\n'
-        '**Day Two — product focus:** Suggest a clean bag photograph with the cited House Blend fact as a source-backed caption, and a question about how followers brew.\n'
+        '**Day Two — product focus:** Suggest a clean bag photograph with the cited House Blend fact as a source-backed caption, and a question about brewing methods.\n'
         '**Day Three — brew setup:** Suggest a short preparation sequence showing a simple at-home setup; frame every step as optional guidance.\n'
         '**Day Four — choice prompt:** Suggest a carousel that helps viewers describe their preferred cup without claiming undocumented tasting notes for any product.\n'
-        '**Day Five — visual ritual:** Suggest a quiet morning brewing scene and a caption prompting followers to share their routine.\n'
+        '**Day Five — visual ritual:** Suggest a quiet morning brewing scene and a caption prompting viewers to share their routine.\n'
         '**Day Six — question format:** Suggest a story question box about home brewing obstacles; use answers to shape later educational content.\n'
         '**Day Seven — recap:** Suggest a carousel of the week’s practical ideas and ask which topic deserves a deeper follow-up.\n\n'
         '**Visual guidance:** Use genuine product photography where available, readable type, consistent warm light, and close crops of hands, beans, and brewing tools. Check that any pictured packaging and labels match actual approved assets before publishing.\n\n'
-        '**Proposed success measures:** Recommendation: track saves and clicks after launch. Also review qualitative replies and question-box themes. Compare content formats only after observations exist; do not treat a target or baseline as an established result.\n\n'
+        '**Proposed success measures:**\nRecommendation: track saves after launch.\nAlso examine qualitative replies and question-box themes. Compare content formats only after observations exist; do not treat a target or baseline as an established result.\n\n'
         '## Unknown or unsupported information\nPerformance baselines and results are unknown. The second product’s exact name, tasting notes, stock, and approved imagery need confirmation before they appear as facts.\n'
     )
 
@@ -140,6 +140,7 @@ def main() -> dict:
         assert context["project_id"] == PROJECT_ID and context["evidence"] and context["profile"] and context["brief_md"]
         evidence = context["evidence"][0]
         assert evidence["source_id"] in context["evidence_ids"]
+        assert "Northstar House Blend is sold in 250 g bags for EGP 380" in evidence["text"]
         content = build_synthetic_response(evidence["source_id"])
         provider = ScriptedProvider(content)
         production._router = lambda: ModelRouter(local_provider=provider, default_local_model="synthetic-local")
