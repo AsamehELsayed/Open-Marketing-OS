@@ -1,6 +1,7 @@
 """Fail-closed regressions for DEV-038 source and factual acceptance."""
 import importlib.util
 import re
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,36 @@ def test_scripted_strategy_passes_real_factual_validator():
                                "text": "Northstar House Blend is sold in 250 g bags for EGP 380."}]},
         user_request=runner.REQUEST)
     assert len(rows) == 1 and rows[0]["type"] == "strategy_brief"
+
+
+def test_export_calls_production_service_with_exact_scope_and_writes_body(monkeypatch):
+    persisted = {"id": "del-one", "project_id": runner.PROJECT_ID,
+                 "campaign_id": runner.CAMPAIGN_ID, "content_md": "# SYNTHETIC\nBody\n"}
+    calls = []
+
+    def scoped_export(conn, project_id, campaign_id, deliverable_id):
+        calls.append((conn, project_id, campaign_id, deliverable_id))
+        return dict(persisted), persisted["content_md"]
+
+    monkeypatch.setattr(runner.campaign_deliverables, "markdown_export", scoped_export)
+    marker = object()
+    with tempfile.TemporaryDirectory(dir=SCRIPT.parent / "synthetic-output") as folder:
+        path = Path(folder) / "export.md"
+        runner.export_persisted_markdown(marker, persisted, path)
+        assert calls == [(marker, runner.PROJECT_ID, runner.CAMPAIGN_ID, "del-one")]
+        assert path.read_bytes() == persisted["content_md"].encode("utf-8")
+
+
+def test_export_refuses_mismatched_service_result(monkeypatch):
+    persisted = {"id": "del-one", "project_id": runner.PROJECT_ID,
+                 "campaign_id": runner.CAMPAIGN_ID, "content_md": "SYNTHETIC"}
+    monkeypatch.setattr(runner.campaign_deliverables, "markdown_export",
+                        lambda *_: ({**persisted, "id": "wrong"}, "SYNTHETIC"))
+    with tempfile.TemporaryDirectory(dir=SCRIPT.parent / "synthetic-output") as folder:
+        path = Path(folder) / "export.md"
+        with pytest.raises(RuntimeError, match="did not match"):
+            runner.export_persisted_markdown(object(), persisted, path)
+        assert not path.exists()
 
 
 def test_source_guard_rejects_dirty_checkout(monkeypatch):

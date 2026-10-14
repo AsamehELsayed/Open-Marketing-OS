@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from app.database.sqlite import connect
 from app.database import sqlite as sqlite_module
 from app.services import campaign_production as production
+from app.services import campaign_deliverables
 from app.services.llm.model_router import ModelRouter
 from app.services.llm import model_router as model_router_module
 from app.routes.business_workspace import diagnose_unsupported_citations  # preload validator before network lock
@@ -107,6 +108,17 @@ def build_synthetic_response(evidence_id: str) -> str:
     )
 
 
+def export_persisted_markdown(conn, persisted: dict, path: Path) -> None:
+    """Use the same scoped export service as the application's Markdown route."""
+    row, body = campaign_deliverables.markdown_export(
+        conn, PROJECT_ID, CAMPAIGN_ID, persisted["id"])
+    if (row["id"] != persisted["id"] or row["project_id"] != PROJECT_ID
+            or row["campaign_id"] != CAMPAIGN_ID
+            or body != persisted["content_md"] or body != row["content_md"]):
+        raise RuntimeError("Scoped Markdown export did not match the persisted deliverable")
+    path.write_bytes(body.encode("utf-8"))
+
+
 def main() -> dict:
     source_state = verify_source()
     if sha(SOURCE_DB) != SOURCE_HASH:
@@ -156,8 +168,8 @@ def main() -> dict:
         assert created["type"] == "strategy_brief" and "SYNTHETIC" in created["content_md"]
         assert fingerprint(conn, other[0]) == other_before
         export = RUN / "northstar-strategy-brief-SYNTHETIC.md"
-        export.write_text(f'# {created["title"]}\n\n{created["content_md"]}\n', encoding="utf-8")
-        assert created["content_md"] in export.read_text(encoding="utf-8")
+        export_persisted_markdown(conn, created, export)
+        assert export.read_bytes() == created["content_md"].encode("utf-8")
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         report = {"status": "PASS", "label": "SYNTHETIC", **source_state, "source_db_sha256_before": SOURCE_HASH,
