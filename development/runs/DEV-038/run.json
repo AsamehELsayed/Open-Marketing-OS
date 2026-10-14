@@ -33,7 +33,7 @@
   "reviewer": {
     "agent": "general",
     "status": "completed",
-    "artifact": "development/runs/DEV-038/review.md"
+    "artifact": "development/runs/DEV-038/review-2.md"
   },
   "required_roles": [
     "planner",
@@ -44,6 +44,6 @@
   "founder_plan_approved": true,
   "plan_approved_at": "2026-10-14T19:26:50Z",
   "created_at": "2026-10-14T19:23:38Z",
-  "updated_at": "2026-10-14T23:25:55Z",
+  "updated_at": "2026-10-14T23:27:04Z",
   "current_stage": "review"
 }
