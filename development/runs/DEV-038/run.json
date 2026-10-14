@@ -2,7 +2,7 @@
   "run_id": "DEV-038",
   "title": "Autonomous Northstar synthetic end-to-end fix and verification",
   "classification": "MEDIUM",
-  "status": "review",
+  "status": "remediation",
   "planner": {
     "agent": "general",
     "status": "completed",
@@ -25,7 +25,11 @@
     "status": "completed",
     "artifact": "development/runs/DEV-038/qa-2.md"
   },
-  "reviewer": null,
+  "reviewer": {
+    "agent": "general",
+    "status": "completed",
+    "artifact": "development/runs/DEV-038/review.md"
+  },
   "required_roles": [
     "planner",
     "implementer",
@@ -35,6 +39,6 @@
   "founder_plan_approved": true,
   "plan_approved_at": "2026-10-14T19:26:50Z",
   "created_at": "2026-10-14T19:23:38Z",
-  "updated_at": "2026-10-14T23:17:17Z",
-  "current_stage": "review"
+  "updated_at": "2026-10-14T23:18:53Z",
+  "current_stage": "remediation"
 }
