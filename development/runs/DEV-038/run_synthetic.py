@@ -30,7 +30,7 @@ TEMPLATE_HASH = "7805082672e4fb69a22bb4e7f4a944951bc3a49e61a071d18ceae77f08940f1
 RUN = Path(__file__).resolve().parent / "synthetic-output"
 APPROVED_BASE = "7136389aed293c152fb387de2a2f97bc1cd2dd47"
 APPROVED_TREE = "88881ace7c42781e7db3d538d3bc84263d5c62b0"
-REQUEST = "Create one seven-day Instagram strategy brief for Northstar Coffee using project-scoped evidence."
+REQUEST = "Create one seven-day Instagram strategy brief introducing Northstar Coffee to home brewers in Cairo using project-scoped evidence."
 
 
 def sha(path: Path) -> str:
@@ -87,6 +87,28 @@ class ScriptedProvider:
         return SimpleNamespace(text=self.content, usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
 
 
+def build_synthetic_response(evidence_id: str) -> str:
+    """A useful scripted brief; recommendations are proposals, not business facts."""
+    return (
+        '## DELIVERABLE type="strategy_brief" title="SYNTHETIC Northstar seven-day Instagram strategy" platform="Instagram"\n\n'
+        '## Persisted user facts\nBusiness name: Northstar Coffee.\n\n'
+        f'## Retrieved evidence\nNorthstar House Blend is sold in 250 g bags for EGP 380 [{evidence_id}].\n\n'
+        '## AI suggestions\n'
+        '**Audience and positioning:** Propose home brewers in Cairo who want a clearer path from bean choice to a satisfying cup. Position the content as a practical, welcoming guide to choosing and preparing coffee at home; this is a proposed message, not an established brand claim.\n\n'
+        '**Messaging pillars:** Suggest approachable brewing guidance, product discovery grounded in cited facts, and small rituals that invite audience participation. Keep a visible distinction between product information and creative ideas.\n\n'
+        '**Day One — orientation:** Suggest a cover image that asks what a home brewer wants from a cup; invite responses in the caption.\n'
+        '**Day Two — product focus:** Suggest a clean bag photograph with the cited House Blend fact as a source-backed caption, and a question about how followers brew.\n'
+        '**Day Three — brew setup:** Suggest a short preparation sequence showing a simple at-home setup; frame every step as optional guidance.\n'
+        '**Day Four — choice prompt:** Suggest a carousel that helps viewers describe their preferred cup without claiming undocumented tasting notes for any product.\n'
+        '**Day Five — visual ritual:** Suggest a quiet morning brewing scene and a caption prompting followers to share their routine.\n'
+        '**Day Six — question format:** Suggest a story question box about home brewing obstacles; use answers to shape later educational content.\n'
+        '**Day Seven — recap:** Suggest a carousel of the week’s practical ideas and ask which topic deserves a deeper follow-up.\n\n'
+        '**Visual guidance:** Use genuine product photography where available, readable type, consistent warm light, and close crops of hands, beans, and brewing tools. Check that any pictured packaging and labels match actual approved assets before publishing.\n\n'
+        '**Proposed success measures:** Recommendation: track saves and clicks after launch. Also review qualitative replies and question-box themes. Compare content formats only after observations exist; do not treat a target or baseline as an established result.\n\n'
+        '## Unknown or unsupported information\nPerformance baselines and results are unknown. The second product’s exact name, tasting notes, stock, and approved imagery need confirmation before they appear as facts.\n'
+    )
+
+
 def main() -> dict:
     source_state = verify_source()
     if sha(SOURCE_DB) != SOURCE_HASH or sha(TEMPLATE_DB) != TEMPLATE_HASH:
@@ -120,13 +142,7 @@ def main() -> dict:
         assert context["project_id"] == PROJECT_ID and context["evidence"] and context["profile"] and context["brief_md"]
         evidence = context["evidence"][0]
         assert evidence["source_id"] in context["evidence_ids"]
-        content = (
-            '## DELIVERABLE type="strategy_brief" title="SYNTHETIC Northstar seven-day Instagram strategy" platform="Instagram"\n\n'
-            '## Persisted user facts\nBusiness name: Northstar Coffee.\n\n'
-            f'## Retrieved evidence\nNorthstar House Blend is sold in 250 g bags for EGP 380 [{evidence["source_id"]}].\n\n'
-            '## AI suggestions\nSYNTHETIC recommendation: Introduce the coffees with one product-focused post per day for seven days. Consider tracking saves and profile visits.\n\n'
-            '## Unknown or unsupported information\nPerformance baselines and results are unknown.\n'
-        )
+        content = build_synthetic_response(evidence["source_id"])
         provider = ScriptedProvider(content)
         production._router = lambda: ModelRouter(local_provider=provider, default_local_model="synthetic-local")
         result = production.generate_batch(conn, project_id=PROJECT_ID, campaign_id=CAMPAIGN_ID,

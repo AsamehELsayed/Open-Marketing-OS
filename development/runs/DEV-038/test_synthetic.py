@@ -1,5 +1,6 @@
 """Fail-closed regressions for DEV-038 source and factual acceptance."""
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,19 @@ SCRIPT = Path(__file__).with_name("run_synthetic.py")
 spec = importlib.util.spec_from_file_location("dev038_synthetic", SCRIPT)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+
+
+def test_scripted_strategy_has_substantive_sections_and_distinct_days():
+    content = runner.build_synthetic_response("northstar:c000")
+    for required in ("Audience and positioning", "Messaging pillars", "Visual guidance",
+                     "Proposed success measures", "Performance baselines and results are unknown"):
+        assert required in content
+    days = re.findall(r"\*\*Day (One|Two|Three|Four|Five|Six|Seven) — ([^:]+):\*\*", content)
+    assert len(days) == 7
+    assert len({day for day, _ in days}) == 7
+    assert len({idea for _, idea in days}) == 7
+    assert "[northstar:c000]" in content
+    assert "SYNTHETIC" in content
 
 
 def test_source_guard_rejects_dirty_checkout(monkeypatch):
