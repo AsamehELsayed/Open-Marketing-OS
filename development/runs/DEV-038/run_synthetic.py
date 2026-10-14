@@ -24,9 +24,7 @@ from app.routes.business_workspace import diagnose_unsupported_citations  # prel
 PROJECT_ID = "6c4aaf8b966d43f1ae87b63707b3ed2c"
 CAMPAIGN_ID = "9b9afc7746cb52ccaccac865ffa8025d"
 SOURCE_DB = Path(r"C:\Users\User\Documents\open-marketing-os\development\acceptance\DEV-032-REAL-AI-E2E\free-cloud-20261011-attempt-02\workspace\data\marketing.db")
-TEMPLATE_DB = Path(r"C:\Users\User\Documents\open-marketing-os\development\acceptance\OPENROUTER-STRICT-ROUTING-FIX-2026-10-11\real-attempt-01\workspace\data\marketing.db")
 SOURCE_HASH = "f54a384efbbe789e0c7f2ca2eafa9563a4796e08fbd952cc7fe7f790f9eac507"
-TEMPLATE_HASH = "7805082672e4fb69a22bb4e7f4a944951bc3a49e61a071d18ceae77f08940f19"
 RUN = Path(__file__).resolve().parent / "synthetic-output"
 APPROVED_BASE = "7136389aed293c152fb387de2a2f97bc1cd2dd47"
 APPROVED_TREE = "88881ace7c42781e7db3d538d3bc84263d5c62b0"
@@ -111,16 +109,16 @@ def build_synthetic_response(evidence_id: str) -> str:
 
 def main() -> dict:
     source_state = verify_source()
-    if sha(SOURCE_DB) != SOURCE_HASH or sha(TEMPLATE_DB) != TEMPLATE_HASH:
+    if sha(SOURCE_DB) != SOURCE_HASH:
         raise RuntimeError("Approved input database hash mismatch")
-    for db in (SOURCE_DB, TEMPLATE_DB):
+    for db in (SOURCE_DB,):
         if Path(str(db) + "-wal").exists() and Path(str(db) + "-wal").stat().st_size:
             raise RuntimeError("Input database has uncheckpointed WAL")
     if RUN.exists():
         raise RuntimeError("Synthetic output exists; use a fresh run directory")
     RUN.mkdir()
     db = RUN / "marketing.db"
-    shutil.copyfile(TEMPLATE_DB, db)
+    shutil.copyfile(SOURCE_DB, db)
     original_socket = socket.socket
 
     def blocked_socket(*args, **kwargs):
