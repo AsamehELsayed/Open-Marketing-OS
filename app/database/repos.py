@@ -8,11 +8,13 @@ from typing import Any
 from app.database.identity import DEFAULT_PROJECT_ID
 
 
-def _insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
+def _insert(conn: sqlite3.Connection, table: str, row: dict[str, Any], *,
+            commit: bool = True) -> None:
     cols = ", ".join(row.keys())
     placeholders = ", ".join("?" for _ in row)
     conn.execute(f"INSERT OR REPLACE INTO {table} ({cols}) VALUES ({placeholders})", list(row.values()))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _insert_idempotent_proposal(conn: sqlite3.Connection, table: str,
@@ -234,12 +236,13 @@ class ExecutionEvents:
     TABLE = "execution_events"
 
     @staticmethod
-    def insert(conn, row):
+    def insert(conn, row, *, commit=True):
         cols = ", ".join(row.keys())
         placeholders = ", ".join("?" for _ in row)
         cur = conn.execute(f"INSERT INTO {ExecutionEvents.TABLE} ({cols}) VALUES ({placeholders})",
                            list(row.values()))
-        conn.commit()
+        if commit:
+            conn.commit()
         return cur.lastrowid
 
     @staticmethod
@@ -524,7 +527,8 @@ class BackgroundJobs:
     TABLE = "background_jobs"
 
     @staticmethod
-    def upsert(conn, row): _insert(conn, BackgroundJobs.TABLE, row)
+    def upsert(conn, row, *, commit=True):
+        _insert(conn, BackgroundJobs.TABLE, row, commit=commit)
 
     @staticmethod
     def get(conn, id, project_id: str | None = None):
