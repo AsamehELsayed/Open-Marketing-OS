@@ -46,6 +46,7 @@ def test_streaming_emits_no_prompts_or_secrets(tmp_path, monkeypatch):
 
 
 def test_job_lifecycle_events_persist_and_isolate(tmp_path):
+    import json
     import time
     from app.database import repos
     from app.database.sqlite import connect
@@ -58,19 +59,29 @@ def test_job_lifecycle_events_persist_and_isolate(tmp_path):
     row = jobsvc.submit(conn, str(tmp_path / "j.db"), str(tmp_path), kind="probe",
                         cmd=["python", "-c", "print(1)"], side_effect="green",
                         project_id="starter", conversation_id="c1")
-    t0 = time.time()
-    while time.time() - t0 < 60:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
         c2 = connect(tmp_path / "j.db")
         j = repos.BackgroundJobs.get(c2, row["id"])
         c2.close()
         if j and j["status"] in ("completed", "failed"):
             break
-        time.sleep(0.5)
+        time.sleep(0.02)
     c3 = connect(tmp_path / "j.db")
+    final_job = repos.BackgroundJobs.get(c3, row["id"])
     evs = repos.ExecutionEvents.for_job(c3, row["id"], "starter")
     types = [e["event_type"] for e in evs]
+    assert final_job["status"] in ("completed", "failed")
+    terminal_type = ("worker_completed" if final_job["status"] == "completed"
+                     else "worker_failed")
     assert "worker_started" in types and "job_status_changed" in types
-    assert ("worker_completed" in types) or ("worker_failed" in types)
+    assert terminal_type in types
+    terminal_status_events = [
+        e for e in evs if e["event_type"] == "job_status_changed"
+        and json.loads(e["metadata_json"]).get("status") == final_job["status"]
+    ]
+    assert terminal_status_events
+    assert types.index(terminal_type) < types.index("job_status_changed", types.index(terminal_type))
     assert repos.ExecutionEvents.for_job(c3, row["id"], "beta") == []
     c3.close()
     conn.close()

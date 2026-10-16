@@ -296,19 +296,42 @@ def _run(db_path: str, root: str, job_id: str) -> None:
             job["updated_at"] = _now()
         except Exception:
             pass
-        repos.BackgroundJobs.upsert(conn, job)
         done_ok = job["status"] == "completed"
-        turnsvc.emit_event(db_path, project_id=job.get("project_id") or DEFAULT_PROJECT_ID,
-                           conversation_id=job.get("conversation_id") or "",
-                           job_id=job_id,
-                           event_type="worker_completed" if done_ok else "worker_failed",
-                           label=_worker_label(job, "completed" if done_ok else "failed"),
-                           metadata={"kind": job.get("kind", ""), "status": job["status"]})
-        turnsvc.emit_event(db_path, project_id=job.get("project_id") or DEFAULT_PROJECT_ID,
-                           conversation_id=job.get("conversation_id") or "",
-                           job_id=job_id, event_type="job_status_changed",
-                           label=f"Background work {job['status']}",
-                           metadata={"kind": job.get("kind", ""), "status": job["status"]})
+        project_id = job.get("project_id") or DEFAULT_PROJECT_ID
+        conversation_id = job.get("conversation_id") or ""
+        terminal_type = "worker_completed" if done_ok else "worker_failed"
+        terminal_phase = "completed" if done_ok else "failed"
+        terminal_events = (
+            {
+                "project_id": project_id,
+                "conversation_id": conversation_id,
+                "job_id": job_id,
+                "event_type": terminal_type,
+                "label": _worker_label(job, terminal_phase),
+                "metadata": {"kind": job.get("kind", ""), "status": job["status"]},
+            },
+            {
+                "project_id": project_id,
+                "conversation_id": conversation_id,
+                "job_id": job_id,
+                "event_type": "job_status_changed",
+                "label": f"Background work {job['status']}",
+                "metadata": {"kind": job.get("kind", ""), "status": job["status"]},
+            },
+        )
+        # A reader must never observe a terminal job row without its matching
+        # terminal event. Persist the row and ordered lifecycle events as one
+        # SQLite transaction so the state transition is an observable unit.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            repos.BackgroundJobs.upsert(conn, job, commit=False)
+            for event in terminal_events:
+                repos.ExecutionEvents.insert(
+                    conn, turnsvc._event_row(**event), commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         _write_result_json(root, job, result)
         store._event(conn, f"job_{job['status']}", job_id,
                      {"exit_code": result["exit_code"], "reason": result["blocked_reason"]})
