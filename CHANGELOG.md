@@ -1,12 +1,29 @@
 # Changelog
 
-Notable changes to Open Marketing OS are recorded here. This beta changelog describes the prepared `v0.1.0-beta.1` release; it does not assert that the release has been published.
+Notable changes to Open Marketing OS are recorded here. This changelog covers the prepared `v0.1.0-beta.2` release and the earlier `v0.1.0-beta.1` release; it does not assert that either release has been published.
 
 Project links: [repository](https://github.com/AsamehELsayed/Open-Marketing-OS) · [releases](https://github.com/AsamehELsayed/Open-Marketing-OS/releases) · [issues](https://github.com/AsamehELsayed/Open-Marketing-OS/issues).
 
 ## [Unreleased]
 
 No entries yet.
+
+## [0.1.0-beta.2] — PRE-RELEASE / BETA
+
+### Changed
+
+- Application identity synchronized to `0.1.0-beta.2`. The backend constant `app.paths.APP_VERSION` remains the single source of truth: the health route, the release manifest, the installer profile IDs (`omos-local-v0.1.0-beta.2`, `omos-openrouter-v0.1.0-beta.2`) and the private frontend package metadata now all agree with it, and the edition-profile defaults module derives its IDs from that constant instead of repeating a literal.
+- The first-run UI no longer pins one release's profile ID. Edition-specific setup copy is selected from a version-tolerant match on the `omos-<edition>-v<release>` ID shape, so a profile stored by an earlier beta still resolves to the correct edition instructions. Unknown or unrecognized values continue to fall back to neutral copy.
+- Edition defaults, credential policy, model catalog, pricing, offers, privacy handling, project isolation, validation and workflow behavior are unchanged from `0.1.0-beta.1`.
+
+### Installation
+
+- Installers remain unsigned. Windows may show an **Unknown Publisher** warning and Microsoft Defender SmartScreen may report an unrecognized publisher. Verify the download with `Get-FileHash -Algorithm SHA256` against `SHA256SUMS.txt` before running it, and do not disable Windows security protections to install.
+
+### Known limitations
+
+- The limitations listed for `0.1.0-beta.1` still apply, including loopback-proxy (not OS-wide) offline validation, the un-reobserved OpenRouter transport telemetry after its final fix, hardware-dependent performance, and beta status rather than production readiness.
+- This is a pre-release beta, not a production-readiness claim.
 
 ## [0.1.0-beta.1] — PRE-RELEASE / BETA
 

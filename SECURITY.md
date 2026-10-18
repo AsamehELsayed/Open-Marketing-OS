@@ -2,7 +2,7 @@
 
 ## Release status
 
-Open Marketing OS `v0.1.0-beta.1` is a **PRE-RELEASE / BETA**. It is not code-signed and is not represented as production-ready. Windows may show an Unknown Publisher warning. Obtain installers only from the public release channel announced by the maintainers and verify their SHA-256 checksums against the accompanying checksum file. Do not disable operating-system security protections.
+Open Marketing OS `v0.1.0-beta.2` is a **PRE-RELEASE / BETA**. It is not code-signed and is not represented as production-ready. Windows may show an Unknown Publisher warning. Obtain installers only from the public release channel announced by the maintainers and verify their SHA-256 checksums against the accompanying checksum file. Do not disable operating-system security protections.
 
 ## Reporting a security issue
 

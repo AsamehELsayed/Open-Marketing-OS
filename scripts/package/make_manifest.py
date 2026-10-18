@@ -1,4 +1,4 @@
-"""Release manifest + SHA256 checksums (DEV-008).
+"""Release manifest + SHA256 checksums (DEV-008, artifact contract repaired in DEV-039).
 
 Writes, into the directory given by ``--out-dir`` (default ``dist/``):
 
@@ -8,6 +8,22 @@ Writes, into the directory given by ``--out-dir`` (default ``dist/``):
 - ``SHA256SUMS.txt`` — the standard ``<sha256>  <filename>`` format that
   ``sha256sum -c`` and ``Get-FileHash`` users expect.
 
+Artifact contract (Beta 2)
+--------------------------
+The canonical version is ``app.paths.APP_VERSION``. One installer is built per
+edition profile by ``scripts/package/build_installer.ps1``:
+
+    OMOS-Local-v<version>.exe       required
+    OMOS-OpenRouter-v<version>.exe  required
+    OpenMarketingOS-Portable.zip    OPTIONAL — listed and hashed only if present
+
+Both edition installers are required: a release that ships one edition is a
+release nobody asked for, and publishing half of it silently is worse than
+failing. The portable archive is a convenience build that the release workflow
+marks ``continue-on-error``, so it is described as optional and simply omitted
+from the manifest and the checksum file when it is absent. It is never a reason
+to refuse a manifest.
+
 What is deliberately *not* in the manifest: secrets, absolute developer paths,
 internal run identifiers, founder gates, or anything else that says more about
 the build machine than the product. A release manifest is a public document and
@@ -15,6 +31,7 @@ is treated as one.
 
 Usage:
     python scripts/package/make_manifest.py --out-dir dist
+    python scripts/package/make_manifest.py --out-dir dist --payload build/release/payload
     python scripts/package/make_manifest.py --out-dir dist --no-verify-present
 """
 from __future__ import annotations
@@ -35,15 +52,138 @@ MIN_WINDOWS = "10.0"
 PLATFORM = "windows"
 ARCHITECTURE = "x64"
 
-#: Human-facing names of the artifacts a user downloads.
-ARTIFACTS = {
-    "installer": "OpenMarketingOS-Quick-Setup.exe",
-    "portable": "OpenMarketingOS-Portable.zip",
+#: Edition profiles accepted by ``scripts/package/build_installer.ps1``
+#: (``-ValidateSet('Local', 'OpenRouter')``). One installer is produced per
+#: edition and both are REQUIRED in a release.
+EDITIONS = ("Local", "OpenRouter")
+
+#: ``scripts/package/build_portable.ps1`` writes this fixed, unversioned name.
+#: It is a convenience archive rather than part of the edition contract, which is
+#: exactly why it is optional here.
+PORTABLE_FILENAME = "OpenMarketingOS-Portable.zip"
+
+#: Manifest keys for the two required installers, in manifest order.
+INSTALLER_KEYS = {
+    "Local": "installer_local",
+    "OpenRouter": "installer_openrouter",
 }
 
 #: A 1 MiB read size keeps hashing a ~150 MB installer fast without loading it
 #: into memory.
 _CHUNK = 1024 * 1024
+
+
+def installer_filename(edition: str, version: str) -> str:
+    """Return the exact installer name for ``edition`` at ``version``.
+
+    ``build_installer.ps1`` names its output ``OMOS-$EditionProfile-v$ReleaseVersion.exe``
+    with ``$ReleaseVersion`` read from ``app.paths.APP_VERSION``. Deriving the name
+    here from the same constant — rather than hard-coding it — is what stops the
+    manifest advertising a file the release does not contain.
+    """
+    if edition not in EDITIONS:
+        raise ValueError(
+            f"unknown edition {edition!r}; expected one of {', '.join(EDITIONS)}"
+        )
+    return f"OMOS-{edition}-v{version}.exe"
+
+
+def required_installers(version: str) -> list[str]:
+    """Both edition installers, which a real release must contain."""
+    return [installer_filename(edition, version) for edition in EDITIONS]
+
+
+def _display_path(path: Path) -> str:
+    """Repo-relative path when possible, absolute otherwise.
+
+    The manifest can legitimately be written to an out-dir outside the
+    repository (that is how it is tested); printing a relative path is a
+    convenience, never a reason to fail a release build.
+    """
+    try:
+        return path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def powershell_verify_command(filename: str) -> str:
+    """The exact, safe PowerShell one-liner a user runs to verify a download."""
+    return f"Get-FileHash -Algorithm SHA256 -LiteralPath .\\{filename}"
+
+
+def edition_entries(version: str) -> dict[str, dict]:
+    """Per-edition description published in the manifest.
+
+    The edition profile descriptor installed by Inno Setup (``edition-profile.json``)
+    is the authority for these defaults; this is the public summary of it, and it
+    must not claim anything the profile does not do.
+    """
+    return {
+        "local": {
+            "installer": installer_filename("Local", version),
+            "available": True,
+            "requires_cloud_ai": False,
+            "providers": [],
+            "notes": (
+                "Account-manager inference can run on this machine through the "
+                "OMOS-managed llama.cpp runtime. The pinned model weights are not "
+                "bundled and are not downloaded silently: the user starts an "
+                "explicit, checksum-verified download in Settings. Website and "
+                "Instagram research still contact external services."
+            ),
+        },
+        "openrouter": {
+            "installer": installer_filename("OpenRouter", version),
+            "available": True,
+            "requires_cloud_ai": True,
+            "providers": ["openrouter", "openai"],
+            "notes": (
+                "Bring your own provider API key. Stored in a Windows "
+                "DPAPI-encrypted credential vault on your machine."
+            ),
+        },
+    }
+
+
+def verification_block(version: str, shipped: list[str]) -> dict[str, object]:
+    """Public, copy-pasteable verification instructions.
+
+    Every filename quoted here is one this manifest actually hashed, so the
+    instructions cannot drift away from the artifacts that shipped.
+    """
+    steps = [
+        "Do NOT download 'Source code (zip/tar.gz)' — that is the repository "
+        "source, not the Windows app.",
+        "Do not disable Windows SmartScreen or any other security control. This "
+        "release is not code-signed, so an 'Unknown publisher' warning is the "
+        "expected behaviour, not evidence of a bad download.",
+    ]
+    for filename in shipped:
+        steps.append(
+            f"In PowerShell, hash the file you downloaded: "
+            f"`{powershell_verify_command(filename)}`"
+        )
+    steps.append(
+        "Compare the hash PowerShell prints with the line for that same filename "
+        "in SHA256SUMS.txt. The manifest records the expected hash under "
+        "'artifacts' if you would rather not read the text file."
+    )
+    steps.append(
+        "If the hashes differ, delete the download and fetch it again from the "
+        "official release page. Do not run a file whose hash does not match."
+    )
+    return {
+        "checksums_file": "SHA256SUMS.txt",
+        "checksum_algorithm": "sha256",
+        "checksum_line_format": "<sha256>  <filename>",
+        "powershell_command_template": powershell_verify_command("<filename>"),
+        "powershell_example": powershell_verify_command(
+            required_installers(version)[0]
+        ),
+        "code_signed": False,
+        "unknown_publisher_expected": True,
+        "instructions": steps,
+    }
 
 
 def sha256_of(path: Path) -> str:
@@ -122,9 +262,15 @@ def scan_for_forbidden_content(
             continue
         if name in {".git", "pytest.ini", "conftest.py"}:
             problems.append(f"developer-only file in payload: {path.relative_to(payload)}")
-    for marker in ("keys", "secrets", "credentials"):
-        if (payload / marker).exists():
-            problems.append(f"unexpected '{marker}' directory inside the install payload")
+        if path.is_file() and path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
+            problems.append(f"database file in payload: {path.relative_to(payload)}")
+    credential_markers = {"keys", "secrets", "credentials"}
+    for path in payload.rglob("*"):
+        if path.is_dir() and path.name.lower() in credential_markers:
+            problems.append(
+                f"unexpected '{path.name.lower()}' directory inside the install payload: "
+                f"{path.relative_to(payload)}"
+            )
     if reject_model_weights and any(
         path.is_file() and path.suffix.lower() == ".gguf"
         for path in payload.rglob("*")
@@ -172,9 +318,26 @@ def dev029_local_profile(payload: Path) -> dict:
     }
 
 
-def network_behavior(*, local_available: bool = False) -> dict[str, object]:
-    """Describe the inference paths actually shipped in the manifest."""
-    if local_available:
+def network_behavior(
+    *, local_available: bool = False, both_editions: bool = False
+) -> dict[str, object]:
+    """Describe the inference paths actually shipped in the manifest.
+
+    Beta 2 ships both editions in one release, so a standard release passes
+    ``both_editions=True``: the honest answer is "it depends which installer you
+    ran". The single-path wordings are still needed for a run that builds only
+    one of them.
+    """
+    if both_editions:
+        inference = (
+            "Depends on the edition you installed. OMOS-Local can run "
+            "account-manager inference on this machine through the verified Local "
+            "llama.cpp model; OMOS-OpenRouter sends inference to the AI provider "
+            "you configured (OpenRouter or OpenAI), not to this machine. "
+            "Web and Instagram research contact external services in both "
+            "editions."
+        )
+    elif local_available:
         inference = (
             "Can run on this machine through the verified Local llama.cpp model, "
             "or through configured OpenRouter/OpenAI cloud providers, depending "
@@ -208,9 +371,14 @@ def main(argv: list[str] | None = None) -> int:
         else Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Read the canonical version first: the installer filenames are derived from
+    # it, so every name below comes from app.paths.APP_VERSION rather than a
+    # second hard-coded copy of the release version.
+    version = app_version()
+
     forbidden = scan_for_forbidden_content(
         REPO_ROOT / args.payload,
-        reject_model_weights=bool(args.dev_run_id),
+        reject_model_weights=True,
     )
     if forbidden:
         print("Refusing to write a manifest. Payload problems:", file=sys.stderr)
@@ -222,7 +390,15 @@ def main(argv: list[str] | None = None) -> int:
     checksums: list[tuple[str, str]] = []
     missing: list[str] = []
 
-    for key, filename in ARTIFACTS.items():
+    # One payload build feeds both installers, so the manifest is discovered
+    # purely from what is actually on disk in --out-dir.
+    planned: list[tuple[str, str]] = [
+        (INSTALLER_KEYS[edition], installer_filename(edition, version))
+        for edition in EDITIONS
+    ]
+    planned.append(("portable", PORTABLE_FILENAME))
+
+    for key, filename in planned:
         path = out_dir / filename
         if not path.is_file():
             missing.append(filename)
@@ -235,7 +411,13 @@ def main(argv: list[str] | None = None) -> int:
         }
         checksums.append((digest, filename))
 
-    required_artifacts = [ARTIFACTS["installer"]] if args.dev_run_id else list(ARTIFACTS.values())
+    # Both edition installers are required. The DEV-029 pre-production run is the
+    # one exception: it builds the Local installer alone, by design.
+    required_artifacts = (
+        [installer_filename("Local", version)]
+        if args.dev_run_id
+        else required_installers(version)
+    )
     missing_required = [name for name in required_artifacts if not (out_dir / name).is_file()]
     if missing_required and not args.no_verify_present:
         print(
@@ -247,10 +429,10 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    version = app_version()
     meta = build_metadata()
     built_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
 
+    shipped_names = [info["filename"] for info in artifacts.values()]
     manifest = {
         "product": "Open Marketing OS",
         "version": version,
@@ -263,36 +445,22 @@ def main(argv: list[str] | None = None) -> int:
         "platform": PLATFORM,
         "architecture": ARCHITECTURE,
         "minimum_windows_version": MIN_WINDOWS,
-        "editions": {
-            "quick": {
-                "available": True,
-                "requires_cloud_ai": True,
-                "providers": ["openrouter", "openai"],
-                "notes": (
-                    "Bring your own provider API key. Stored in a Windows "
-                    "DPAPI-encrypted credential vault on your machine."
-                ),
-            },
-            "local": {
-                "available": False,
-                "notes": (
-                    "Local on-device AI is not part of this beta. No model is "
-                    "downloaded and nothing is bundled with the installer."
-                ),
-            },
-        },
+        "editions": edition_entries(version),
         "artifacts": artifacts,
+        "required_artifacts": required_artifacts,
+        "optional_artifacts": [PORTABLE_FILENAME],
         "portable_shipped": "portable" in artifacts,
         "code_signed": False,
         "code_signing_note": (
-            "This beta is not code-signed. Windows SmartScreen may show an "
-            "'Unknown publisher' warning. Verify downloads with SHA256SUMS.txt."
+            "This beta is not code-signed. Windows SmartScreen will show an "
+            "'Unknown publisher' warning for every installer; that warning is "
+            "expected and is not a sign of a bad download. Do not disable "
+            "SmartScreen. Verify the download against SHA256SUMS.txt instead."
         ),
-        "network_behavior": network_behavior(local_available=bool(args.dev_run_id)),
-        "verification": {
-            "checksums_file": "SHA256SUMS.txt",
-            "checksum_algorithm": "sha256",
-        },
+        "network_behavior": network_behavior(
+            local_available=True, both_editions=not args.dev_run_id
+        ),
+        "verification": verification_block(version, shipped_names),
     }
 
     if args.dev_run_id:
@@ -314,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest["build_classification"] = "PRE-PRODUCTION"
         manifest["release_channel"] = "pre-production"
         manifest["editions"]["local"] = {
+            "installer": installer_filename("Local", version),
             "available": True,
             "model_bundled": False,
             "model_id": model["model_id"],
@@ -345,13 +514,19 @@ def main(argv: list[str] | None = None) -> int:
     lines = [f"{digest}  {name}" for digest, name in sorted(checksums, key=lambda x: x[1])]
     sums_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print(f"Wrote {manifest_path.relative_to(REPO_ROOT)}")
-    print(f"Wrote {sums_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {_display_path(manifest_path)}")
+    print(f"Wrote {_display_path(sums_path)}")
     for key, info in artifacts.items():
-        print(f"  {key:9s} {info['filename']:38s} "
+        print(f"  {key:20s} {info['filename']:38s} "
               f"{info['size_bytes'] / 1_048_576:8.1f} MB  {info['sha256'][:16]}...")
     if missing:
-        print("  (missing: " + ", ".join(missing) + ")")
+        optional_missing = [name for name in missing if name not in required_artifacts]
+        hard_missing = [name for name in missing if name in required_artifacts]
+        if optional_missing:
+            print("  (optional artifact absent, not listed or hashed: "
+                  + ", ".join(optional_missing) + ")")
+        if hard_missing:
+            print("  (required artifact absent: " + ", ".join(hard_missing) + ")")
     return 0
 
 

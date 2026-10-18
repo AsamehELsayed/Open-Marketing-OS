@@ -8,11 +8,14 @@
 # This workflow needs NO founder API keys. Packaging builds the frozen backend
 # and the React bundle; the user's provider key is only used at runtime.
 #
-# Artifact contract (consumed by users and by docs):
-#   dist/OpenMarketingOS-Quick-Setup.exe   Inno Setup installer  (required)
-#   dist/OpenMarketingOS-Portable.zip      no-install archive    (optional)
-#   dist/SHA256SUMS.txt                    checksums             (required)
-#   dist/release-manifest.json             build provenance      (required)
+# Artifact contract (consumed by users and by docs). <version> is
+# app.paths.APP_VERSION, read from the checked-out tree below — it is never
+# written here, so this file cannot drift from the shipped app:
+#   dist/OMOS-Local-v<version>.exe        Inno Setup installer  (required)
+#   dist/OMOS-OpenRouter-v<version>.exe   Inno Setup installer  (required)
+#   dist/OpenMarketingOS-Portable.zip     no-install archive    (optional)
+#   dist/SHA256SUMS.txt                   checksums             (required)
+#   dist/release-manifest.json            build provenance      (required)
 
 name: Release
 
@@ -23,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to build a release from (e.g. v1.1.0-beta.1). Leave empty to use the ref that was dispatched.'
+        description: 'Existing v-prefixed tag to build a release from. Leave empty to use the ref that was dispatched.'
         required: false
         type: string
 
@@ -83,6 +86,30 @@ jobs:
 
           Write-Host "Verified release tag: $actual"
           "RELEASE_TAG=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Every filename below is derived from this one constant. Reading it here,
+      # rather than writing a literal version into the workflow, is what keeps the
+      # upload list, the release notes and the manifest in agreement with the
+      # payload that was actually built.
+      - name: Read the canonical release version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = 'app/paths.py'
+          if (-not (Test-Path -LiteralPath $paths)) {
+            throw "Cannot read the canonical version: $paths is missing."
+          }
+          $match = [regex]::Match((Get-Content -LiteralPath $paths -Raw), 'APP_VERSION\s*=\s*"([^"]+)"')
+          if (-not $match.Success) {
+            throw 'Could not read the canonical APP_VERSION from app/paths.py.'
+          }
+          $version = $match.Groups[1].Value
+          $expectedTag = "v$version"
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Release tag '$($env:RELEASE_TAG)' must match canonical application version '$expectedTag'."
+          }
+          Write-Host "Canonical release version: $version"
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -144,10 +171,18 @@ jobs:
           if (-not (Test-Path -LiteralPath $script)) {
             throw "Required packaging script not found: $script. A release cannot be built without it."
           }
-          & pwsh -NoProfile -File $script
+          # Isolated run root: build_installer.ps1 refuses to read a payload from
+          # the shared build/ or dist/ directories, and dist/ is what this
+          # workflow uploads.
+          & pwsh -NoProfile -File $script -RunRoot 'build/release'
           if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
 
-      - name: Build the Inno Setup installer
+      # One frozen payload feeds BOTH installers. The payload is edition
+      # independent; Inno Setup installs the per-edition edition-profile.json
+      # that carries the edition identity, and only the Local installer adds the
+      # managed llama.cpp runtime. Building the payload twice would double CI
+      # time and produce two byte-identical payloads.
+      - name: Build the Inno Setup installers (one per edition)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -156,18 +191,31 @@ jobs:
           if (-not (Test-Path -LiteralPath $script)) {
             throw "Required packaging script not found: $script. A release cannot be built without it."
           }
-          & pwsh -NoProfile -File $script
-          if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
-
-          $installer = 'dist/OpenMarketingOS-Quick-Setup.exe'
-          if (-not (Test-Path -LiteralPath $installer)) {
-            throw "Expected installer not produced: $installer"
+          $runRoot = 'build/release'
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_VERSION)) {
+            throw 'RELEASE_VERSION is not set; the version step must run before the installers are built.'
           }
-          Write-Host "Installer built: $installer"
+          foreach ($edition in @('Local', 'OpenRouter')) {
+            & pwsh -NoProfile -File $script -EditionProfile $edition -RunRoot $runRoot
+            if ($LASTEXITCODE -ne 0) {
+              throw "build_installer.ps1 failed for the $edition edition with exit code $LASTEXITCODE"
+            }
+            $name = "OMOS-$edition-v$($env:RELEASE_VERSION).exe"
+            $built = Join-Path $runRoot "output/$name"
+            if (-not (Test-Path -LiteralPath $built)) {
+              throw "Expected installer not produced for the $edition edition: $built"
+            }
+            # Stage under the published name so dist/ holds exactly the files the
+            # release uploads.
+            Copy-Item -LiteralPath $built -Destination (Join-Path 'dist' $name) -Force
+            Write-Host "Installer built: $built -> dist/$name"
+          }
 
       # OPTIONAL artifact: the portable zip is a convenience build. If this step
-      # fails the release still ships (installer + checksums + manifest) and the
-      # upload step below skips the missing file instead of failing.
+      # fails the release still ships (both edition installers + checksums +
+      # manifest) and the upload step below skips the missing file instead of
+      # failing.
       - name: Build the portable zip (optional)
         continue-on-error: true
         shell: pwsh
@@ -178,6 +226,17 @@ jobs:
           if (-not (Test-Path -LiteralPath $script)) {
             throw "Packaging script not found: $script. Skipping the OPTIONAL portable zip."
           }
+          # build_portable.ps1 takes no run root and reads the shared
+          # build\payload directory, while this release builds into the isolated
+          # build\release\payload. Stage the same bytes where that script expects
+          # them so the optional archive really is the release payload.
+          if (Test-Path -LiteralPath 'build/payload') {
+            Remove-Item -LiteralPath 'build/payload' -Recurse -Force
+          }
+          if (-not (Test-Path -LiteralPath 'build/release/payload/OpenMarketingOS.exe')) {
+            throw 'The frozen release payload is missing; skipping the OPTIONAL portable zip.'
+          }
+          Copy-Item -LiteralPath 'build/release/payload' -Destination 'build/payload' -Recurse -Force
           & pwsh -NoProfile -File $script
           if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
 
@@ -190,41 +249,92 @@ jobs:
           if (-not (Test-Path -LiteralPath $script)) {
             throw "Required packaging script not found: $script. Release provenance cannot be generated without it."
           }
-          python $script
+          # --payload must point at the frozen payload this release actually
+          # built; the manifest refuses to describe leftovers inside it.
+          python $script --out-dir dist --payload 'build/release/payload'
           if ($LASTEXITCODE -ne 0) { throw "$script failed with exit code $LASTEXITCODE" }
 
-          foreach ($required in @('dist/SHA256SUMS.txt', 'dist/release-manifest.json')) {
-            if (-not (Test-Path -LiteralPath $required)) {
-              throw "Expected release artifact not produced: $required"
+          $required = @(
+            "dist/OMOS-Local-v$($env:RELEASE_VERSION).exe"
+            "dist/OMOS-OpenRouter-v$($env:RELEASE_VERSION).exe"
+            'dist/SHA256SUMS.txt'
+            'dist/release-manifest.json'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Expected release artifact not produced: $path"
             }
+          }
+
+          # The manifest is the public provenance document. If it does not carry
+          # both editions, the release would ship a provenance file that
+          # contradicts its own assets.
+          $manifest = Get-Content -LiteralPath 'dist/release-manifest.json' -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $env:RELEASE_VERSION) {
+            throw "Manifest version '$($manifest.version)' does not match app.paths.APP_VERSION '$($env:RELEASE_VERSION)'."
+          }
+          if ($manifest.artifacts.PSObject.Properties.Name -notcontains 'installer_local' -or
+              $manifest.artifacts.PSObject.Properties.Name -notcontains 'installer_openrouter') {
+            throw "Manifest artifacts do not cover both editions: $($manifest.artifacts.PSObject.Properties.Name -join ', ')"
           }
 
       - name: Write release notes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $notes = @'
-          # Open Marketing OS Beta 1
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_VERSION)) {
+            throw 'RELEASE_VERSION is not set; the version step must run before the release notes are written.'
+          }
 
-          Your open-source AI marketing team, now as a Windows app.
+          # A literal here-string keeps the markdown backticks intact (PowerShell
+          # treats a backtick as an escape character inside an expandable one), so
+          # the two installer filenames are substituted afterwards.
+          $notes = @'
+          # Open Marketing OS Beta 2
+
+          Your open-source AI marketing team, now as a Windows app — in two editions.
 
           ## Download
 
           **Normal users — do NOT download "Source code (zip/tar.gz)".** That is for developers.
 
-          ### OMOS Quick (recommended)
-          Fast setup. Uses your own OpenRouter or OpenAI account.
+          Pick ONE installer. Both install to the same folder; installing the second
+          one over the first replaces it.
 
-          `OpenMarketingOS-Quick-Setup.exe`
+          ### Local edition — `{{LOCAL_INSTALLER}}`
+          Runs account-manager inference on your own PC through the managed
+          llama.cpp runtime. No provider key is needed. The model is **not** in the
+          installer: OMOS downloads nothing until you choose **Download Model** in
+          Settings, then verifies the pinned files before activating them. Budget
+          about 4.36 GiB and some disk space for the model.
 
-          ### OMOS Portable
-          No installer. Extract and run `OpenMarketingOS.exe`.
+          ### OpenRouter edition — `{{OPENROUTER_INSTALLER}}`
+          Uses your own OpenRouter or OpenAI account (the edition previously called
+          "Quick"). Bring your own API key; it is stored in a Windows
+          DPAPI-encrypted vault on your machine.
 
-          `OpenMarketingOS-Portable.zip`
+          ### OMOS Portable (optional)
+          No installer. Extract `OpenMarketingOS-Portable.zip` and run
+          `OpenMarketingOS.exe`. This archive is a convenience build and is only
+          published when it built successfully, so it may be absent from a release.
 
-          Verify your download with `SHA256SUMS.txt`.
+          ## Verify your download (important)
+
+          These installers are **not code-signed**, so Windows SmartScreen will show
+          an **"Unknown publisher"** warning. That is expected. Do NOT disable
+          SmartScreen or add an exclusion. Verify the file instead:
+
+          ```powershell
+          Get-FileHash -Algorithm SHA256 -LiteralPath .\{{LOCAL_INSTALLER}}
+          Get-FileHash -Algorithm SHA256 -LiteralPath .\{{OPENROUTER_INSTALLER}}
+          ```
+
+          Compare what PowerShell prints with the line for the same filename in
+          `SHA256SUMS.txt` (both are attached to this release). If a hash does not
+          match, delete the download and fetch it again — do not run it.
 
           ## Highlights
+          - Two Windows editions: Local and OpenRouter
           - AI marketing account manager with real tool use
           - Project memory and project-scoped retrieval
           - Website research and Instagram research
@@ -237,17 +347,21 @@ jobs:
           ## Where your data goes
           Your projects, files and chats stay on your computer. **AI requests are sent to
           the AI provider you connect** (OpenRouter or OpenAI) — the app is local, the AI
-          inference is not. Web and Instagram research also contact external services.
-          See the Privacy section of the README.
+          inference is not, unless you installed the Local edition and let account-manager
+          inference run on this machine. Web and Instagram research always contact
+          external services. See the Privacy section of the README.
 
           ## Requirements
-          Windows 10 or 11, 64-bit. 4 GB RAM. Internet access for AI providers and web research.
+          Windows 10 or 11, 64-bit. 4 GB RAM. The Local edition additionally needs
+          enough free disk for the model (~4.36 GiB) and an internet connection for
+          its first-run downloads. OpenRouter edition: internet access for AI
+          providers and web research.
 
           ## Beta notice
           This is a public beta. Please report bugs via GitHub Issues and read SECURITY.md before
-          reporting anything security-sensitive. The installer is not code-signed yet, so Windows
-          SmartScreen may show an "Unknown publisher" warning. Verify your download against
-          SHA256SUMS.txt.
+          reporting anything security-sensitive. No model weights are bundled in any
+          installer, and the installers are not code-signed: Windows SmartScreen may show
+          an "Unknown publisher" warning. Verify your download against SHA256SUMS.txt.
           '@
 
           # Defensive: strip any leading whitespace and drop trailing blank
@@ -257,6 +371,12 @@ jobs:
             $lines = $lines[0..($lines.Count - 2)]
           }
           $body = $lines -join "`n"
+          $body = $body.Replace('{{LOCAL_INSTALLER}}', "OMOS-Local-v$($env:RELEASE_VERSION).exe")
+          $body = $body.Replace('{{OPENROUTER_INSTALLER}}', "OMOS-OpenRouter-v$($env:RELEASE_VERSION).exe")
+
+          if ($body -match '\{\{') {
+            throw "Release notes still contain an unresolved placeholder: $body"
+          }
 
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
           Set-Content -LiteralPath 'dist/release-notes.md' -Value $body -Encoding utf8NoBOM
@@ -267,7 +387,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Open Marketing OS Beta 1
+          name: Open Marketing OS Beta 2
           prerelease: true
           draft: false
           # We supply our own user-oriented body; GitHub's auto-notes would
@@ -275,10 +395,12 @@ jobs:
           generate_release_notes: false
           body_path: dist/release-notes.md
           # The portable zip is optional, so a missing file must not fail the
-          # upload. The installer, checksums, and manifest are asserted above.
+          # upload. Both edition installers, the checksums and the manifest are
+          # asserted above.
           fail_on_unmatched_files: false
           files: |
-            dist/OpenMarketingOS-Quick-Setup.exe
+            dist/OMOS-Local-v${{ env.RELEASE_VERSION }}.exe
+            dist/OMOS-OpenRouter-v${{ env.RELEASE_VERSION }}.exe
             dist/OpenMarketingOS-Portable.zip
             dist/SHA256SUMS.txt
             dist/release-manifest.json

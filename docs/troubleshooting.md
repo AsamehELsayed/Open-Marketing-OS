@@ -13,6 +13,7 @@ for detail.
 | What you see | Likely cause | Fix |
 | --- | --- | --- |
 | SmartScreen: "Unknown publisher" | Beta is not code-signed | [Verify the download](#smartscreen-unknown-publisher) |
+| Not sure which installer to use | Two editions ship | [Which installer did I install?](#which-installer-did-i-install) |
 | Nothing happens when I launch it | Install or runtime problem | [The app will not start](#the-app-will-not-start) |
 | "Port already in use" / startup failure | The local backend could not bind | [Startup fails with a port error](#startup-fails-with-a-port-error) |
 | The browser never opened | Browser launch was blocked | [The browser did not open](#the-browser-did-not-open) |
@@ -29,20 +30,47 @@ for detail.
 
 ---
 
+## Which installer did I install?
+
+A release contains **two** installers. Both install OMOS to the same folder, so
+only one of them is installed at a time — and **Settings → About** tells you
+which edition you are running.
+
+| File | Edition | What it needs |
+| --- | --- | --- |
+| `OMOS-Local-v<version>.exe` | **Local** | Nothing to connect. Account-manager inference runs on your PC through the managed llama.cpp runtime after you download and verify the model in Settings. No provider key. |
+| `OMOS-OpenRouter-v<version>.exe` | **OpenRouter** | Your own OpenRouter or OpenAI API key. |
+| `OpenMarketingOS-Portable.zip` | Portable (optional) | No installer. This archive is a convenience build and may be absent from a release; if it is there, extract it and run `OpenMarketingOS.exe`. |
+
+Replace `<version>` with the version number in the file name. The installed
+version appears in **Settings → About**.
+
 ## SmartScreen: "Unknown publisher"
 
 **Cause.** OMOS is not code-signed yet. Windows SmartScreen does not recognize
 the publisher and warns you before it will run the file. This is expected for a
 beta, and it is not a sign that anything is wrong with your copy.
 
-**Fix.** Do **not** disable SmartScreen. Verify what you downloaded instead:
+**Fix.** Do **not** disable SmartScreen, and do not add an exclusion for the
+downloaded file. Verify what you downloaded instead:
 
 1. Find the `SHA256SUMS.txt` file published alongside the release download.
-2. In PowerShell, run `Get-FileHash .\OpenMarketingOS-Quick-Setup.exe -Algorithm SHA256`.
-3. Compare the hash it prints to the one in `SHA256SUMS.txt`.
+2. In PowerShell, hash the file you actually downloaded — use the line for the
+   edition you chose:
+
+   ```powershell
+   Get-ChildItem -File -Path '.\OMOS-Local-v*.exe' | Get-FileHash -Algorithm SHA256
+   Get-ChildItem -File -Path '.\OMOS-OpenRouter-v*.exe' | Get-FileHash -Algorithm SHA256
+   ```
+
+   Run the command for the edition you downloaded, from the folder containing
+   the installer.
+3. Compare the hash PowerShell prints with the line for that same file name in
+   `SHA256SUMS.txt`.
 
 If they match, your download is the one that was published. If they do not
-match, delete the file and download it again.
+match, delete the file and download it again. `release-manifest.json` records
+the same expected hashes if you would rather not read the text file.
 
 ## The app will not start
 
@@ -54,10 +82,13 @@ quarantined a file, or a required runtime is missing.
 1. Close and reopen it once — a first launch after install can be slow.
 2. If your security software shows a quarantine notice, review it. OMOS is not
    code-signed, which is what triggers these prompts.
-3. If you are on the portable build (`OpenMarketingOS-Portable.zip`), confirm
+3. If you used the portable archive (`OpenMarketingOS-Portable.zip`), confirm
    you extracted the whole archive before running it. Running the `.exe` from
    inside the zip will not work.
-4. Check [Find the logs](#find-the-logs) for a clue.
+4. On the Local edition, the first launch after setup needs the model download
+   to have finished and verified in **Settings → Local Model**; until then the
+   app starts but cannot answer.
+5. Check [Find the logs](#find-the-logs) for a clue.
 
 ## Startup fails with a port error
 
@@ -88,11 +119,16 @@ Any modern browser works.
 
 ## The first-run wizard loops back to setup
 
-**Cause.** In almost every case, there is no working cloud credential. OMOS Quick
-needs an AI provider to talk to, and it will keep returning you to setup until
-one is connected and working.
+**Cause.** In almost every case, the AI route this edition needs is not ready
+yet.
 
-**Fix.**
+- On the **OpenRouter** edition there is no working cloud credential. It needs an
+  AI provider to talk to, and it keeps returning you to setup until one is
+  connected and working.
+- On the **Local** edition the pinned model has not finished downloading, or has
+  not passed checksum verification and activation.
+
+**Fix (OpenRouter edition).**
 
 1. In **Settings → AI**, connect your provider — **OpenRouter** (recommended) or
    **OpenAI**.
@@ -101,8 +137,16 @@ one is connected and working.
 3. If the test fails, fix the problem first (see the 401 and timeout sections
    below), then return to the wizard.
 
-This is expected: there is no local-model edition in this beta, so the app cannot
-run without a cloud provider.
+**Fix (Local edition).**
+
+1. In **Settings → Local Model**, select **Download Model** and let it finish.
+   The download does not start on its own.
+2. Wait for the files to verify and the model to become active. Do not interrupt
+   OMOS while activation is running.
+3. Return to the wizard.
+
+If you are not sure which edition you installed, see
+[Which installer did I install?](#which-installer-did-i-install).
 
 ## The AI provider is not connected
 
@@ -230,8 +274,10 @@ post a file containing credentials.
 
 Open an **Issue** on the repository. Include:
 
-- the OMOS version (Settings → About),
+- the OMOS version **and edition** (Settings → About),
 - your Windows version,
+- the exact installer file name you downloaded, for example
+  `OMOS-Local-v<version>.exe`,
 - what you did, what you expected, and what happened instead,
 - the relevant log excerpt.
 

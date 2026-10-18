@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.paths import APP_VERSION
+
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGING = ROOT / "packaging"
 EXPECTED_FIELDS = {
@@ -15,6 +17,10 @@ EXPECTED_FIELDS = {
     "credential_policy",
     "settings_policy",
 }
+# The descriptor identity is stamped from the canonical release version; the
+# version itself is pinned in `app/tests/test_dev039_version_consistency.py`.
+LOCAL_PROFILE_ID = f"omos-local-v{APP_VERSION}"
+OPENROUTER_PROFILE_ID = f"omos-openrouter-v{APP_VERSION}"
 
 
 def _profile(name: str) -> dict:
@@ -27,9 +33,9 @@ def test_profiles_define_exact_first_run_contract_without_secret_material():
 
     assert set(local) == EXPECTED_FIELDS
     assert set(cloud) == EXPECTED_FIELDS
-    assert local["profile_id"] == "omos-local-v0.1.0-beta.1"
+    assert local["profile_id"] == LOCAL_PROFILE_ID
     assert local["edition"] == "Local"
-    assert local["release_version"] == "0.1.0-beta.1"
+    assert local["release_version"] == APP_VERSION
     assert local["initial_settings"] == {
         "ai_mode": "AUTO",
         "manager_provider": "auto",
@@ -38,9 +44,9 @@ def test_profiles_define_exact_first_run_contract_without_secret_material():
         "cloud_escalation": "off",
         "openrouter_default_model": "",
     }
-    assert cloud["profile_id"] == "omos-openrouter-v0.1.0-beta.1"
+    assert cloud["profile_id"] == OPENROUTER_PROFILE_ID
     assert cloud["edition"] == "OpenRouter"
-    assert cloud["release_version"] == "0.1.0-beta.1"
+    assert cloud["release_version"] == APP_VERSION
     assert cloud["initial_settings"] == {
         "ai_mode": "AUTO",
         "manager_provider": "auto",
@@ -79,6 +85,9 @@ def test_installer_script_requires_isolated_profile_and_uses_exact_release_names
     assert "$ReleaseVersion = $VersionMatch.Groups[1].Value" in script
     assert "'/DReleaseVersion=\"' + $ReleaseVersion + '\"'" in script
     assert "0.1.0-beta.1" not in script
+    # DEV-039: the build script must read the version from app\paths.py instead
+    # of pinning any release literal, so a new beta needs no script edit.
+    assert APP_VERSION not in script
     assert "credential_bundled -ne $false" in script
     assert "model_bundled -ne $false" in script
     assert "-Filter '*.gguf'" in script

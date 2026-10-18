@@ -3,6 +3,10 @@
 The installer profile is a package identity hint, not a user preference. A
 profile can initialize routing defaults once when no database existed before
 startup. Existing user settings, projects, and credentials are never rewritten.
+
+Profile IDs and the release version are stamped from `app.paths.APP_VERSION`, the
+same canonical constant the installer build and the health route read, so a new
+release never needs this module edited by hand to stay consistent.
 """
 from __future__ import annotations
 
@@ -10,12 +14,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.paths import APP_VERSION
 from app.services.config_service import ConfigService
 
 
-_RELEASE_VERSION = "0.1.0-beta.1"
+_RELEASE_VERSION = APP_VERSION
+"""Canonical release version, never written out literally in this module."""
+
+_LOCAL_PROFILE_ID = f"omos-local-v{_RELEASE_VERSION}"
+_OPENROUTER_PROFILE_ID = f"omos-openrouter-v{_RELEASE_VERSION}"
+
 _PROFILE_SETTINGS: dict[str, dict[str, Any]] = {
-    "omos-local-v0.1.0-beta.1": {
+    _LOCAL_PROFILE_ID: {
         "ai_mode": "AUTO",
         "manager_provider": "auto",
         "active_model": "Qwen2.5-7B-Instruct",
@@ -23,7 +33,7 @@ _PROFILE_SETTINGS: dict[str, dict[str, Any]] = {
         "cloud_escalation": "off",
         "openrouter_default_model": "",
     },
-    "omos-openrouter-v0.1.0-beta.1": {
+    _OPENROUTER_PROFILE_ID: {
         # AUTO selects the configured cloud provider once Local is disabled.
         "manager_provider": "auto",
         "ai_mode": "AUTO",
@@ -34,8 +44,8 @@ _PROFILE_SETTINGS: dict[str, dict[str, Any]] = {
     },
 }
 _PROFILE_CREDENTIALS = {
-    "omos-local-v0.1.0-beta.1": {"provider": "user-selected", "credential_bundled": False},
-    "omos-openrouter-v0.1.0-beta.1": {
+    _LOCAL_PROFILE_ID: {"provider": "user-selected", "credential_bundled": False},
+    _OPENROUTER_PROFILE_ID: {
         "provider": "openrouter",
         "credential_bundled": False,
     },
