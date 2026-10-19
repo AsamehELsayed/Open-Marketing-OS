@@ -102,12 +102,17 @@ def cmd_log_exec(a) -> None:
         "input_artifact": a.input,
         "output_artifact": a.output,
     }
+    if getattr(a, "worker_id", None):
+        rec["worker_id"] = a.worker_id
     with open(run_dir(a.id) / "executions.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")
     if a.role == "planner":
         run["planner"] = {"agent": a.agent, "status": a.status, "artifact": a.output}
     elif a.role == "implementer":
-        run["workers"].append({"agent": a.agent, "status": a.status, "artifact": a.output})
+        worker = {"agent": a.agent, "status": a.status, "artifact": a.output}
+        if getattr(a, "worker_id", None):
+            worker["worker_id"] = a.worker_id
+        run["workers"].append(worker)
     elif a.role == "qa":
         run["qa"] = {"agent": a.agent, "status": a.status, "artifact": a.output}
     elif a.role == "reviewer":
@@ -314,6 +319,7 @@ def main() -> None:
     l = sub.add_parser("log-exec")
     l.add_argument("--id", required=True)
     l.add_argument("--role", required=True)
+    l.add_argument("--worker-id")
     l.add_argument("--agent", required=True)
     l.add_argument("--task", required=True)
     l.add_argument("--started", required=True)
