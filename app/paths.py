@@ -36,11 +36,14 @@ from pathlib import Path
 
 APP_NAME = "OpenMarketingOS"
 APP_TITLE = "Open Marketing OS"
-APP_VERSION = "0.1.0-beta.1"
+APP_VERSION = "0.1.0-beta.2"
 """Single authoritative version string.
 
 `app/routes/health.py` and the release manifest both read this so the version
-reported by the running app can never drift from the packaged artifact.
+reported by the running app can never drift from the packaged artifact. It is
+also the only place the release version is written by hand: the installer
+descriptors, the launcher payload manifest and the frontend package metadata
+are all expected to agree with this constant.
 """
 
 # Environment overrides. The launcher sets all three; they are also honoured in

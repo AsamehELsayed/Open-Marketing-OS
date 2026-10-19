@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
+from app.paths import APP_VERSION
 from app.services.edition_profile import apply_first_run_profile
+
+# Profile IDs are stamped from the canonical release version, so this module
+# asserts the first-run *behaviour* for whichever release is current. The
+# canonical version itself is pinned by
+# `app/tests/test_dev039_version_consistency.py`.
+LOCAL_PROFILE_ID = f"omos-local-v{APP_VERSION}"
+OPENROUTER_PROFILE_ID = f"omos-openrouter-v{APP_VERSION}"
 
 
 @pytest.mark.parametrize(
@@ -10,7 +18,7 @@ from app.services.edition_profile import apply_first_run_profile
     [
         (
             "local",
-            "omos-local-v0.1.0-beta.1",
+            LOCAL_PROFILE_ID,
             {
                 "ai_mode": "AUTO",
                 "manager_provider": "auto",
@@ -18,12 +26,12 @@ from app.services.edition_profile import apply_first_run_profile
                 "local_model_enabled": "on",
                 "cloud_escalation": "off",
                 "openrouter_default_model": "",
-                "edition_profile": "omos-local-v0.1.0-beta.1",
+                "edition_profile": LOCAL_PROFILE_ID,
             },
         ),
         (
             "openrouter",
-            "omos-openrouter-v0.1.0-beta.1",
+            OPENROUTER_PROFILE_ID,
             {
                 "ai_mode": "AUTO",
                 "manager_provider": "auto",
@@ -31,7 +39,7 @@ from app.services.edition_profile import apply_first_run_profile
                 "local_model_enabled": "off",
                 "cloud_escalation": "on",
                 "openrouter_default_model": "openrouter/auto",
-                "edition_profile": "omos-openrouter-v0.1.0-beta.1",
+                "edition_profile": OPENROUTER_PROFILE_ID,
             },
         ),
     ],
@@ -94,10 +102,7 @@ def test_descriptor_with_unapproved_routing_defaults_is_rejected(tmp_path, monke
         apply_first_run_profile(path, database_preexisted=False)
 
 
-@pytest.mark.parametrize(
-    "profile_id",
-    ["omos-local-v0.1.0-beta.1", "omos-openrouter-v0.1.0-beta.1"],
-)
+@pytest.mark.parametrize("profile_id", [LOCAL_PROFILE_ID, OPENROUTER_PROFILE_ID])
 def test_ai_config_exposes_installed_edition_profile(monkeypatch, profile_id):
     from app.services.config_service import ConfigService
 

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "profile_id": "omos-openrouter-v0.1.0-beta.1",
+  "profile_id": "omos-openrouter-v0.1.0-beta.2",
   "edition": "OpenRouter",
-  "release_version": "0.1.0-beta.1",
+  "release_version": "0.1.0-beta.2",
   "initial_settings": {
     "ai_mode": "AUTO",
     "manager_provider": "auto",

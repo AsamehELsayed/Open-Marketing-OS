@@ -12,12 +12,38 @@ const compiled = ts.transpileModule(helperSource, {
 const helperUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
 const { getAiSettingsProfileCopy, getEditionKind, getStartHereProfileCopy } = await import(helperUrl);
 
-const localId = "omos-local-v0.1.0-beta.1";
-const openrouterId = "omos-openrouter-v0.1.0-beta.1";
+const localId = "omos-local-v0.1.0-beta.2";
+const openrouterId = "omos-openrouter-v0.1.0-beta.2";
 
 assert.equal(getEditionKind(localId), "local");
 assert.equal(getEditionKind(openrouterId), "openrouter");
 assert.equal(getEditionKind("unknown-profile"), "generic");
+
+// DEV-039: the matcher is version-tolerant so a stored profile from any release
+// still resolves to its edition copy, while a malformed or foreign value falls
+// back to the neutral generic copy.
+for (const version of ["0.1.0-beta.1", "0.1.0-beta.2", "0.1.0-beta.9", "1.0.0", "2.1.0-rc.1"]) {
+  assert.equal(getEditionKind(`omos-local-v${version}`), "local");
+  assert.equal(getEditionKind(`omos-openrouter-v${version}`), "openrouter");
+}
+for (const invalid of [
+  "omos-local",
+  "omos-local-v0.1",
+  "omos-local-v0.1.0.1",
+  "omos-enterprise-v0.1.0-beta.2",
+  "omos-local-v0.1.0-beta.2-extra!",
+  "",
+  null,
+  undefined,
+  42,
+]) {
+  assert.equal(getEditionKind(invalid), "generic");
+}
+
+// The retired hardcoded Beta 1 profile IDs must not reappear as literals.
+const helper = fs.readFileSync(path.join(root, "src/editionProfileCopy.ts"), "utf8");
+assert.doesNotMatch(helper, /omos-(local|openrouter)-v\d/);
+assert.doesNotMatch(helper, /0\.1\.0-beta/);
 
 const localFirstRun = getStartHereProfileCopy(localId);
 assert.equal(localFirstRun.settingsSection, "local");

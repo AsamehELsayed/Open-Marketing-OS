@@ -1,12 +1,22 @@
 export type EditionKind = "local" | "openrouter" | "generic";
 
-const LOCAL_PROFILE_ID = "omos-local-v0.1.0-beta.1";
-const OPENROUTER_PROFILE_ID = "omos-openrouter-v0.1.0-beta.1";
+/**
+ * The API reports `edition_profile` as `omos-<edition>-v<release>`, where the
+ * release segment is stamped from the backend's canonical version. Pinning a
+ * full literal here would strand every user whose stored profile came from an
+ * earlier beta, so the edition slug is matched exactly and only the release
+ * segment is matched structurally: dotted numeric components with an optional
+ * pre-release and/or build suffix. Anything else — an unknown edition, a
+ * truncated ID, a non-string, or `null` — stays `generic` and shows the neutral
+ * copy instead of another edition's setup instructions.
+ */
+const PROFILE_ID_PATTERN =
+  /^omos-(local|openrouter)-v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 export function getEditionKind(profileId: unknown): EditionKind {
-  if (profileId === LOCAL_PROFILE_ID) return "local";
-  if (profileId === OPENROUTER_PROFILE_ID) return "openrouter";
-  return "generic";
+  if (typeof profileId !== "string") return "generic";
+  const match = PROFILE_ID_PATTERN.exec(profileId);
+  return match ? (match[1] as EditionKind) : "generic";
 }
 
 export function getStartHereProfileCopy(profileId: unknown) {
