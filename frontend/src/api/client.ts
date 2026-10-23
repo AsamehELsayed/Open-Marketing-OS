@@ -434,7 +434,11 @@ export interface CampaignWorkPackage {
   evidence: {
     user_provided: Record<string, string>;
     own_documents: { label: string; excerpt: string }[];
-    web_sources: { url: string }[];
+    web_sources: {
+      url: string; title: string; snippet: string; retrieved_at: string;
+      found_by: string; scope: "campaign" | "project";
+      verification: "search_lead" | "inspected"; verification_label: string;
+    }[];
     ai_suggested: string[];
     research: { state: "available" | "unavailable"; message: string };
   };

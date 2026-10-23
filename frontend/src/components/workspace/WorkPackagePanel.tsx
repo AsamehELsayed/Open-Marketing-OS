@@ -75,7 +75,10 @@ export default function WorkPackagePanel({ projectId, campaignId }: { projectId:
 
   const ev = pkg.evidence;
   const a = pkg.approval;
-  const provided = Object.entries(ev.user_provided);
+  // Goal, audience, channels and duration are already shown in the campaign
+  // overview; list only the remaining facts the owner supplied.
+  const shownElsewhere = new Set(["goal", "audience", "channels", "duration"]);
+  const provided = Object.entries(ev.user_provided).filter(([k]) => !shownElsewhere.has(k));
   return (
     <section aria-label="Campaign work package" className="mb-6 space-y-4">
       <div className="rounded border border-linedefault bg-surface px-4 py-3">
@@ -95,10 +98,7 @@ export default function WorkPackagePanel({ projectId, campaignId }: { projectId:
       </div>
 
       <dl className="divide-y divide-linesubtle rounded border border-linedefault bg-surface px-4 py-2">
-        <Row label="Target audience" value={pkg.target_audience} />
         <Row label="Offer" value={pkg.offer} />
-        <Row label="Channels" value={pkg.channels.join(", ")} />
-        <Row label="Duration" value={pkg.duration} />
       </dl>
 
       <div className="rounded border border-linedefault bg-surface px-4 py-3">
@@ -129,8 +129,20 @@ export default function WorkPackagePanel({ projectId, campaignId }: { projectId:
         {provided.length ? <ul className="list-disc pl-5 text-bodysm text-ink">{provided.map(([k, v]) => <li key={k}><span className="text-inksecondary">{k}:</span> {v}</li>)}</ul> : <p className="text-bodysm text-inkmuted">Nothing yet.</p>}
         <h3 className="mt-3 text-bodysm font-medium text-ink">From your own documents</h3>
         {ev.own_documents.length ? <ul className="list-disc pl-5 text-bodysm text-ink">{ev.own_documents.map((d) => <li key={d.label}>{d.label}</li>)}</ul> : <p className="text-bodysm text-inkmuted">None used.</p>}
-        <h3 className="mt-3 text-bodysm font-medium text-ink">Checked online</h3>
-        {ev.web_sources.length ? <ul className="list-disc pl-5 text-bodysm text-ink">{ev.web_sources.map((s) => <li key={s.url}>{s.url}</li>)}</ul> : <p className="text-bodysm text-inkmuted">No online sources were checked.</p>}
+        <h3 className="mt-3 text-bodysm font-medium text-ink">Found online</h3>
+        {ev.web_sources.length ? (
+          <ul className="list-disc pl-5 text-bodysm text-ink">
+            {ev.web_sources.map((s) => (
+              <li key={s.url}>
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="underline">{s.title || s.url}</a>
+                <span className="block break-all text-meta text-inkmuted">{s.url}</span>
+                <span className={`block text-meta ${s.verification === "inspected" ? "text-ink" : "text-warn"}`}>
+                  {s.verification_label}{s.scope === "project" ? " · from earlier project research" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="text-bodysm text-inkmuted">No online sources were found.</p>}
         <h3 className="mt-3 text-bodysm font-medium text-ink">Suggested by AI (ideas to check, not facts)</h3>
         {ev.ai_suggested.length ? <ul className="list-disc pl-5 text-bodysm text-ink">{ev.ai_suggested.map((t) => <li key={t}>{t}</li>)}</ul> : <p className="text-bodysm text-inkmuted">None.</p>}
       </div>

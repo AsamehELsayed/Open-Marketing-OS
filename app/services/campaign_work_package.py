@@ -10,7 +10,8 @@ established market facts.
 Evidence classes (never merged):
   user_provided   - what the owner told us (profile, goal)
   own_documents   - passages retrieved from the owner's uploaded knowledge
-  web_sources     - http(s) sources recorded by a real research run
+  web_sources     - sources stored by real research runs (research_evidence);
+                    each is a search lead or an inspected page, never merged
   ai_suggested    - deliverables written by the AI, with their review status
   missing         - things the owner still needs to supply
 """
@@ -20,6 +21,7 @@ import json
 
 from app.database import repos
 from app.services import campaign_deliverables as deliverables
+from app.services import research_evidence
 from app.services.business_workspace import get_profile
 
 _PROFILE_PROMPTS = (
@@ -88,7 +90,6 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
     rows = deliverables.list_deliverables(conn, project_id, campaign_id)
     items, own_docs, web_sources = [], [], []
     seen_docs: set[str] = set()
-    seen_web: set[str] = set()
     for row in rows:
         revs = repos.CampaignDeliverables.history(
             conn, project_id, campaign_id, row["id"])
@@ -105,11 +106,6 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
                     seen_docs.add(label)
                     own_docs.append({"label": label,
                                      "excerpt": _text(ev.get("text"), 300)})
-            for src in prov.get("web_sources") or []:
-                url = _text(src.get("url") if isinstance(src, dict) else src, 500)
-                if url.lower().startswith(("http://", "https://")) and url not in seen_web:
-                    seen_web.add(url)
-                    web_sources.append({"url": url})
         items.append({
             "id": row["id"], "type": row["type"],
             "type_label": _TYPE_LABELS.get(row["type"], row["type"]),
@@ -118,6 +114,17 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
             "status_label": _STATUS_LABELS.get(row["status"], row["status"]),
             "version": row["current_version"],
             "versions_kept": len(revs), "written_by_ai": ai_written,
+        })
+
+    for src in research_evidence.list_sources(conn, project_id, campaign_id):
+        web_sources.append({
+            "url": src["url"], "title": src["title"], "snippet": src["snippet"][:300],
+            "retrieved_at": src["retrieved_at"], "found_by": src["provider"],
+            "scope": src["scope"],
+            "verification": src["verification"],
+            "verification_label": ("Page opened and read by OMOS"
+                                   if src["verification"] == "inspected"
+                                   else "Search result only - page not checked"),
         })
 
     counts = {"total": len(items),

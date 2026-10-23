@@ -464,3 +464,26 @@ CREATE TABLE IF NOT EXISTS mcp_tools_allowlist (
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_scope ON mcp_servers(scope);
 CREATE INDEX IF NOT EXISTS idx_mcp_allowlist_project ON mcp_tools_allowlist(project_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_allowlist_server ON mcp_tools_allowlist(server_id);
+
+-- DEV-043: web sources found by research. campaign_id '' = project-level.
+-- verification: 'search_lead' = a search engine returned it, page not read;
+-- 'inspected' = OMOS fetched the page itself. Never downgraded.
+CREATE TABLE IF NOT EXISTS research_sources (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  snippet TEXT NOT NULL DEFAULT '',
+  query TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT 'web_search',
+  turn_id TEXT NOT NULL DEFAULT '',
+  retrieved_at TEXT NOT NULL,
+  verification TEXT NOT NULL DEFAULT 'search_lead'
+    CHECK (verification IN ('search_lead', 'inspected')),
+  inspected_at TEXT,
+  http_status INTEGER,
+  UNIQUE (project_id, campaign_id, url)
+);
+CREATE INDEX IF NOT EXISTS idx_research_sources_scope
+  ON research_sources(project_id, campaign_id, retrieved_at);

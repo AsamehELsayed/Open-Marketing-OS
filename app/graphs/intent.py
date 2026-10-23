@@ -642,6 +642,38 @@ def classify_task_class(text: str) -> str:
 
 
 # -------------------------------------------------------------- integrated api
+_WEB_ONLINE_CUE = r"(?:online|on\s+the\s+(?:web|internet)|from\s+the\s+(?:web|internet))"
+# Lookup phrase tied to an online cue. Bare get/find/research + "online" is NOT
+# enough ("get more customers online", "find my best channel online").
+_WEB_LOOKUP_RES = (
+    re.compile(r"\b(?:look(?:ing)?\s+up|lookup|google|search\s+for)\b[^.!?\n]*?"
+               + _WEB_ONLINE_CUE + r"\b"),
+    re.compile(r"\bsearch\s+(?:the\s+)?(?:web|internet|online)\b"),
+    re.compile(r"\bweb\s+search\b"),
+    re.compile(r"\bfind\b[^.!?\n]*?\b(?:recent|latest|current|trending)\b"
+               r"[^.!?\n]*?\bon\s+the\s+(?:web|internet)\b"),
+)
+_WEB_AUDIT_VERB_RE = re.compile(
+    r"\b(?:analy[sz]e|audit|crawl|fetch|browse|open|scrape)\b")
+
+
+def detect_web_lookup_intent(text: str) -> bool:
+    """Explicit "look up / search / find ... online" request.
+
+    True only when a lookup verb AND an explicit online cue are present, no
+    URL/domain is given, and no site-audit verb is used. Marketing words in
+    the topic ("bakery marketing ideas") must not hijack it into a website
+    audit or a tool capability.
+    """
+    raw = text or ""
+    lowered = raw.lower().strip()
+    if not lowered or lowered.startswith("/"):
+        return False
+    if _extract_website_url(raw) or _WEB_AUDIT_VERB_RE.search(lowered):
+        return False
+    return any(r.search(lowered) for r in _WEB_LOOKUP_RES)
+
+
 def classify_intent(text: str) -> dict:
     """Route precedence (see module doc). Carries the matched intent forward —
     route must never lose the capability extraction it was based on.
@@ -662,6 +694,11 @@ def classify_intent(text: str) -> dict:
                 "domains": compound["domains"],
                 "confidence": compound["confidence"],
                 "reason": compound["reason"]}
+    if detect_web_lookup_intent(text):
+        return {"route": "external_research",
+                "intent_class": "MARKETING_REASONING",
+                "confidence": 0.9,
+                "reason": "explicit online lookup request"}
     cap = detect_capability_intent(text)
     if cap is not None:
         return {"route": "tool_capability",

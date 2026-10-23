@@ -357,3 +357,207 @@ def test_external_research_with_results_lists_real_sources_unverified(monkeypatc
     assert "https://rival.test/p" in out["final_answer"]
     assert "not checked these pages" in out["final_answer"]
     assert "PARTIALLY VERIFIED" not in out["final_answer"]
+
+
+# ------------------------------------------------- research evidence persistence
+
+def _ev_conn(tmp_path):
+    return connect(tmp_path / "ev.db")
+
+
+def test_clean_url_rejects_fixture_and_private_hosts():
+    from app.services import research_evidence as ev
+    assert ev.clean_url("https://www.bbc.co.uk/news/x") == "https://www.bbc.co.uk/news/x"
+    for bad in ("https://example.com/a", "http://shop.test/", "ftp://a.com/x",
+                "http://localhost:8888/", "http://127.0.0.1/", "http://10.0.0.5/",
+                "javascript:alert(1)", "", "https://intranet/", "https://a.example.org/"):
+        assert ev.clean_url(bad) == "", bad
+
+
+def test_leads_persist_scoped_and_never_downgrade(tmp_path):
+    from app.services import research_evidence as ev
+    path = tmp_path / "ev.db"
+    conn = connect(path)
+    rows = [{"url": "https://rival.io/p", "title": "Rival", "snippet": "from 10"},
+            {"url": "https://example.com/fake", "title": "Fake"}]
+    assert ev.record_leads(conn, "a", "", rows, query="q", turn_id="t1") == 1
+    assert ev.record_leads(conn, "a", "a-c", rows, query="q", turn_id="t2") == 1
+    assert ev.record_leads(conn, "b", "b-c", rows) == 1
+    got = ev.list_sources(conn, "a", "a-c")
+    assert [g["verification"] for g in got] == ["search_lead"]
+    assert ev.mark_inspected(conn, "a", "https://rival.io/p", title="Rival Inc", http_status=200)
+    ev.record_leads(conn, "a", "a-c", [{"url": "https://rival.io/p", "title": "Changed"}])
+    conn.close()
+    conn = connect(path)  # restart
+    got = ev.list_sources(conn, "a", "a-c")
+    assert len(got) == 1 and got[0]["verification"] == "inspected"
+    assert got[0]["title"] == "Rival Inc" and got[0]["inspected_at"]
+    # another campaign in the same project sees only project-level research
+    assert [g["scope"] for g in ev.list_sources(conn, "a", "other-c")] == ["project"]
+    assert ev.list_sources(conn, "zzz", "a-c") == []
+
+
+def test_website_fetch_marks_source_inspected(tmp_path):
+    from app.services import research_evidence as ev
+    conn = _ev_conn(tmp_path)
+    ev.record_leads(conn, "a", "", [{"url": "https://rival.io/p", "title": "R"}])
+    page = {"status": "fetched", "url": "https://rival.io/p", "title": "Rival",
+            "http_status": 200, "links": []}
+    out = web_tools.t_website_fetch(conn, project_id="a", root="", args={"url": "https://rival.io/p"},
+                                    transport=lambda u, t=10: dict(page))
+    assert out["ok"]
+    assert ev.list_sources(conn, "a", "x")[0]["verification"] == "inspected"
+    fail = web_tools.t_website_fetch(conn, project_id="a", root="", args={"url": "https://nope.io/"},
+                                     transport=lambda u, t=10: {"status": "error"})
+    assert not fail["ok"]
+    assert all(s["url"] != "https://nope.io/" for s in ev.list_sources(conn, "a", "x"))
+
+
+def test_chat_research_reaches_work_package(tmp_path, monkeypatch):
+    monkeypatch.delenv("WEB_SEARCH_URL", raising=False)
+    from app.graphs.account_manager_graph import build_account_manager_graph
+    path = tmp_path / "chat.db"
+    seed = connect(path)
+    seed.close()
+    graph = build_account_manager_graph(
+        search_fn=lambda q, n: [{"url": "https://rival.io/p", "title": "Rival",
+                                 "snippet": "from 10"}],
+        conn_factory=lambda: connect(path))
+    out = graph.invoke({"user_request": "look up the latest news about flour prices online",
+                        "project_id": "a"},
+                       config={"configurable": {"thread_id": "t-persist"}})
+    assert out["route"] == "external_research"
+    conn = connect(path)
+    from app.services import research_evidence as ev
+    got = ev.list_sources(conn, "a", "any-campaign")
+    assert got and got[0]["url"] == "https://rival.io/p"
+    assert got[0]["verification"] == "search_lead"
+    assert ev.list_sources(conn, "b", "any-campaign") == []
+
+
+def test_work_package_lists_sources_with_honest_labels(tmp_path, monkeypatch):
+    from app.services import research_evidence as ev
+    c = _client(tmp_path, monkeypatch)
+    _mk(c, "a", "Post one")
+    conn = connect(tmp_path / "wp.db")
+    ev.record_leads(conn, "a", "a-c", [{"url": "https://rival.io/p", "title": "Rival"}])
+    ev.record_leads(conn, "b", "b-c", [{"url": "https://other.io/", "title": "Other"}])
+    wp = c.get("/api/projects/a/campaigns/a-c/work-package").json()["data"]
+    srcs = wp["evidence"]["web_sources"]
+    assert [s["url"] for s in srcs] == ["https://rival.io/p"]
+    assert srcs[0]["verification"] == "search_lead"
+    assert "not checked" in srcs[0]["verification_label"]
+    ev.mark_inspected(conn, "a", "https://rival.io/p", title="Rival", http_status=200)
+    srcs = c.get("/api/projects/a/campaigns/a-c/work-package").json()["data"]["evidence"]["web_sources"]
+    assert srcs[0]["verification"] == "inspected"
+
+
+def test_searxng_setup_is_safe():
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "config" / "searxng"
+    compose = (root / "docker-compose.yml").read_text("utf-8")
+    settings = (root / "settings.yml").read_text("utf-8")
+    assert "secret_key" not in settings
+    assert "latest" not in re.findall(r"image:\s*(\S+)", compose)[0]
+    assert re.search(r"image:\s*\S+@sha256:[0-9a-f]{64}", compose)
+    assert '"127.0.0.1:8888:8080"' in compose
+    assert "SEARXNG_SECRET=${SEARXNG_SECRET:?" in compose
+
+
+def test_searxng_setup_script_generates_private_secret(tmp_path):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "setup_searxng", Path(__file__).resolve().parents[2] / "scripts" / "setup_searxng.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    env = tmp_path / "x" / ".env"
+    assert mod.main([], env_path=env) == 0
+    first = env.read_text("utf-8")
+    assert len(first.strip().split("=")[1]) == 64
+    mod.main([], env_path=env)
+    assert env.read_text("utf-8") == first
+    mod.main(["--rotate"], env_path=env)
+    assert env.read_text("utf-8") != first
+
+
+def test_web_search_tool_persists_leads_per_project(tmp_path):
+    from app.services import research_evidence as ev
+    conn = _ev_conn(tmp_path)
+    out = web_tools.t_web_search(
+        conn, project_id="a", root="", args={"query": "bakery ideas"},
+        transport=lambda q, n: [{"url": "https://rival.io/p", "title": "R", "snippet": "s"},
+                                {"url": "https://example.com/fake", "title": "F"}])
+    assert out["ok"] and len(out["results"]) == 2
+    assert [s["url"] for s in ev.list_sources(conn, "a", "c")] == ["https://rival.io/p"]
+    assert ev.list_sources(conn, "b", "c") == []
+
+
+@pytest.mark.parametrize("phrase", [
+    "look up the latest bakery marketing ideas online",
+    "find recent bakery marketing trends on the web",
+    "look up the latest news about flour prices online",
+])
+def test_explicit_online_lookup_routes_to_external_research(phrase):
+    g = _graph(search_fn=lambda q, n: [
+        {"url": "https://rival.io/p", "title": "R", "snippet": "s"}])
+    out = _run(g, phrase, "t-lookup-" + phrase[:12])
+    assert out["route"] == "external_research", out["route"]
+    assert "Which website" not in out["final_answer"]
+    assert "rival.io" in out["final_answer"]
+
+
+def test_explicit_online_lookup_without_provider_never_asks_for_url(monkeypatch):
+    monkeypatch.delenv("WEB_SEARCH_URL", raising=False)
+    out = _run(_graph(), "look up the latest bakery marketing ideas online",
+               "t-lookup-nop")
+    assert out["route"] == "external_research"
+    assert "Which website" not in out["final_answer"]
+
+
+def test_website_audit_with_url_keeps_routing():
+    from app.graphs.intent import classify_intent, detect_web_lookup_intent
+    assert not detect_web_lookup_intent("audit https://shop.io website")
+    assert classify_intent("audit https://shop.io website")["route"] \
+        == "tool_capability"
+
+
+def test_research_results_survive_model_failure(monkeypatch):
+    monkeypatch.delenv("WEB_SEARCH_URL", raising=False)
+    from app.graphs.account_manager_graph import build_account_manager_graph
+
+    def broken(**kw):
+        raise RuntimeError("no provider")
+
+    g = build_account_manager_graph(
+        search_fn=lambda q, n: [{"url": "https://rival.io/p", "title": "Rival", "snippet": "s"}],
+        complete_fn=broken)
+    out = g.invoke({"user_request": "look up the latest news about flour prices online",
+                    "project_id": "starter"}, config={"configurable": {"thread_id": "t-mf"}})
+    assert "https://rival.io/p" in out["final_answer"]
+    assert "couldn't generate" not in out["final_answer"]
+    assert "not checked these pages" in out["final_answer"]
+
+
+def test_clean_url_rejects_obfuscated_hosts_and_credentials():
+    from app.services import research_evidence as ev
+    for bad in ("http://127.1/", "http://0x7f.0.0.1/", "http://user:pw@a.com/",
+                "https://a.com/\x00x", "https://a.com/a b"):
+        assert ev.clean_url(bad) == "", bad
+    assert ev.clean_url("https://8.8.8.8/x") == "https://8.8.8.8/x"
+
+
+@pytest.mark.parametrize("phrase", [
+    "get more customers online",
+    "find my best channel online",
+    "Create a campaign to get online orders for my bakery",
+    "help me find leads online and write a campaign",
+    "research online reputation strategy",
+    "I want to get my online store ready",
+    "Write a plan to find customers on the internet",
+])
+def test_broad_online_phrases_do_not_route_to_external_research(phrase):
+    from app.graphs.intent import classify_intent, detect_web_lookup_intent
+    assert not detect_web_lookup_intent(phrase)
+    assert classify_intent(phrase).get("route") != "external_research"

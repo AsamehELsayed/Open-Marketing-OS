@@ -1,9 +1,9 @@
 # Minimal SearXNG settings for OMOS. JSON output must be enabled or OMOS
-# will report research as unavailable. Replace secret_key before use:
-#   python -c "import secrets; print(secrets.token_hex(32))"
+# will report research as unavailable. The secret key is NOT stored here:
+# docker-compose passes SEARXNG_SECRET (from the git-ignored .env created by
+# scripts/setup_searxng.py), which SearXNG uses instead of any file value.
 use_default_settings: true
 server:
-  secret_key: "CHANGE-ME-GENERATE-YOUR-OWN"
   limiter: false
   image_proxy: false
 search:

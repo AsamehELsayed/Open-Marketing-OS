@@ -153,6 +153,8 @@ def test_every_project_id_column_default_is_generic(tmp_path: Path):
         # scoped to their owning project at creation.
         "campaign_deliverables", "campaign_deliverable_batches",
         "campaign_deliverable_revisions",
+        # Research evidence is explicitly scoped to its owning project.
+        "research_sources",
     })
     conn = connect(tmp_path / "synthetic_gate_tmp.db")
     try:

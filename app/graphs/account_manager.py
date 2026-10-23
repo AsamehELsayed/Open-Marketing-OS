@@ -130,6 +130,8 @@ def classify_to_route(text: str, *, deep: bool = False,
         return "conversation_meta"
     if prior.get("route") == "compound_marketing_task":
         return "compound_marketing_task"
+    if prior.get("route") == "external_research":
+        return "external_research"
     if prior.get("route") == "tool_capability":
         return "tool_capability"
     if any(c in lowered for c in _JOB_CUES):

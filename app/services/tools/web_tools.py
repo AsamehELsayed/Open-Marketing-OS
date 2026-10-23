@@ -102,8 +102,20 @@ def t_web_search(conn, *, project_id, root, args, transport=None):
     trimmed = [{"url": r.get("url", ""), "title": r.get("title", "")[:200],
                 "snippet": r.get("snippet", "")[:600]} for r in results[:count]]
     status = STATUS if trimmed else "NOT ACCESSIBLE"
+    _record_leads(conn, project_id, trimmed, query)
     return {"ok": True, "results": trimmed, "status": status,
             "confidence": "MEDIUM" if trimmed else "LOW", "query": query}
+
+
+def _record_leads(conn, project_id, results, query) -> None:
+    """Keep real search results as unverified project leads. Best effort."""
+    if conn is None or not results or not str(project_id or "").strip():
+        return
+    try:
+        from app.services import research_evidence as ev
+        ev.record_leads(conn, str(project_id), "", results, query=query)
+    except Exception:
+        pass
 
 
 def make_web_handler(transport=None):
@@ -334,7 +346,23 @@ def t_website_fetch(conn, *, project_id, root, args, transport=None):
         return {"ok": False, "status": "NOT ACCESSIBLE", "page": None,
                 "url": url, "query": "",
                 "error": page.get("error") or "The website could not be fetched."}
+    _record_inspected(conn, project_id, [page])
     return {"ok": True, "status": STATUS, "page": page, "url": url, "query": ""}
+
+
+def _record_inspected(conn, project_id, pages) -> None:
+    """Pages OMOS really fetched become 'inspected' evidence. Best effort."""
+    if conn is None:
+        return
+    try:
+        from app.services import research_evidence as ev
+        for p in pages:
+            if p.get("status") == "fetched":
+                ev.mark_inspected(conn, str(project_id), p.get("final_url") or p.get("url") or "",
+                                  title=str(p.get("title") or ""),
+                                  http_status=p.get("http_status"))
+    except Exception:
+        pass
 
 
 def t_website_crawl(conn, *, project_id, root, args, transport=None):
@@ -419,6 +447,7 @@ def t_website_marketing_audit(conn, *, project_id, root, args, transport=None):
                 "url": url, "pages": pages, "audit": None, "query": "",
                 "error": "The website could not be fetched."}
     checklist, fetched = _audit_pages(pages, url)
+    _record_inspected(conn, project_id, fetched)
     home = fetched[0]
     verdict = []
     if checklist["has_title"]:

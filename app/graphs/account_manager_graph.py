@@ -542,6 +542,13 @@ def _produce_deliverables(conn, *, state: dict, campaign_id: str, intent: dict,
     return out
 
 
+_SOCIAL_UNAVAILABLE_ANSWER = (
+    "I can't look at social accounts or posts from here, so I haven't checked "
+    "anything and won't guess at follower counts, handles or what competitors "
+    "posted. Tell me what you know (your account names, what has worked), or "
+    "paste examples, and I'll work from that.")
+
+
 def _reseal_campaign_metadata(conn, project_id: str, turn_id: str) -> None:
     """DEV-032 W2: lift intake facts off this turn's campaign before replaying.
 
@@ -1528,6 +1535,10 @@ def build_account_manager_graph(
         prior = classify_intent(text)
         if prior.get("route"):
             route = prior["route"]
+            if route == "external_research":
+                return {"route": route, "model_route": route,
+                        "write_intents": write_intents,
+                        "write_constraints": write_constraints}
             if route == "compound_marketing_task":
                 return {
                     "intent": prior,
@@ -1634,6 +1645,29 @@ def build_account_manager_graph(
         their creator and never closed here; default serving conns close."""
         c = (conn_factory or _default_conn)()
         return c, conn_factory is None
+
+    def _persist_research_leads(state, results, *, campaign_id: str) -> None:
+        """Keep real search results as unverified leads. Never breaks the turn."""
+        pid = str(state.get("project_id") or "")
+        if not pid or not results:
+            return
+        try:
+            from app.services import research_evidence as ev
+            conn, owned = _conn_for_nodes()
+        except Exception:
+            return
+        try:
+            ev.record_leads(conn, pid, campaign_id, results,
+                            query=str(state.get("user_request") or ""),
+                            turn_id=str(state.get("turn_id") or ""))
+        except Exception:
+            pass
+        finally:
+            if owned:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def conversation_meta(state: LangGraphState) -> dict:
         """Current-thread summary — transcript only, never project RAG.
@@ -1931,6 +1965,7 @@ def build_account_manager_graph(
             {"path": r["url"], "chunk_id": "web", "title": r["title"],
              "text": r["snippet"], "source": "web_search"}
             for r in found["results"]]
+        _persist_research_leads(state, found["results"], campaign_id="")
         return out
 
     def social_research(state: LangGraphState) -> dict:
@@ -1938,6 +1973,7 @@ def build_account_manager_graph(
         # a placeholder handle as if it were an observation.
         out = _branch_answer("social_research", state)
         out["social_results"] = []
+        out["final_answer"] = _SOCIAL_UNAVAILABLE_ANSWER
         return out
 
     def campaign_operation(state: LangGraphState) -> dict:
@@ -2470,6 +2506,12 @@ def build_account_manager_graph(
                     if recorded:
                         results["campaign_intake"] = {
                             "ok": True, "status": "recorded", **recorded}
+                    leads = [{"url": r.get("path"), "title": r.get("title"),
+                              "snippet": r.get("text")}
+                             for r in state.get("web_results") or []
+                             if isinstance(r, dict) and r.get("source") == "web_search"]
+                    if campaign_id and leads:
+                        _persist_research_leads(state, leads, campaign_id=campaign_id)
             deliverable = intents.get("deliverable")
             if isinstance(deliverable, dict):
                 results["deliverables"] = _produce_deliverables(
@@ -2708,6 +2750,11 @@ def build_account_manager_graph(
             return {"final_answer": ("Deep-research summary (from web search results; "
                                      f"open the sources to verify):\n{body}{src}"),
                     "context_sources_used": ["user_turn", "external_research"]}
+        if route == "social_research" and not list(state.get("social_results") or []):
+            return {"final_answer": _SOCIAL_UNAVAILABLE_ANSWER,
+                    "model_usage": {"generation_source": "deterministic",
+                                    "generation_status": "completed"},
+                    "context_sources_used": ["user_turn"]}
         if route == "external_research" and not list(state.get("web_results") or []):
             return {"final_answer": (state.get("final_answer")
                                     or _research_unavailable_answer("")),
@@ -2799,6 +2846,15 @@ def build_account_manager_graph(
                         "context_sources_used": list(sources),
                         **({"citation_evidence": citation_evidence}
                            if citation_evidence else {})}
+            if route == "external_research" and state.get("web_results") and (
+                    state.get("final_answer") or ""):
+                # Real search results exist: show them (as unverified leads)
+                # instead of a generic failure; no summary was generated.
+                return {"final_answer": str(state["final_answer"]) + (
+                            "\n\n(No AI model was available to summarise these.)"),
+                        "model_usage": {"generation_source": "deterministic",
+                                        "generation_status": "completed"},
+                        "context_sources_used": list(sources)}
             # A branch template can describe the route, but it is never
             # presented as a generated answer when completion fails or is absent.
             return {
