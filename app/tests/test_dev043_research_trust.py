@@ -344,3 +344,16 @@ def test_truncated_flag_and_address_fallback():
     got = safe_fetch.safe_get("http://shop.test/", resolver=two,
                               opener=lambda parts, ip, t: Flaky(resp, [], ip))
     assert got["body"] == b"ok" and tried == ["2606:4700::1111", "93.184.216.34"]
+
+
+def test_external_research_with_results_lists_real_sources_unverified(monkeypatch):
+    monkeypatch.delenv("WEB_SEARCH_URL", raising=False)
+
+    def search(query, count):
+        return [{"url": "https://rival.test/p", "title": "Rival", "snippet": "from 10"}]
+
+    out = _run(_graph(search), "look up the latest news about flour prices online", "t-ext-real")
+    assert out["route"] == "external_research"
+    assert "https://rival.test/p" in out["final_answer"]
+    assert "not checked these pages" in out["final_answer"]
+    assert "PARTIALLY VERIFIED" not in out["final_answer"]

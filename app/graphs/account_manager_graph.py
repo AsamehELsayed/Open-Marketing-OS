@@ -1920,6 +1920,13 @@ def build_account_manager_graph(
             return {"web_results": [],
                     "final_answer": _research_unavailable_answer(found["reason"])}
         out = _branch_answer("external_research", state)
+        # Truthful fallback used when no model rewrites it: list exactly what
+        # the search returned and say it is unverified.
+        lines = [f"- {r['title'] or r['url']}: {r['snippet']} ({r['url']})".strip()
+                 for r in found["results"]]
+        out["final_answer"] = (
+            "Here is what a web search returned. I have not checked these "
+            "pages myself, so treat them as leads to verify:\n" + "\n".join(lines))
         out["web_results"] = [
             {"path": r["url"], "chunk_id": "web", "title": r["title"],
              "text": r["snippet"], "source": "web_search"}
@@ -2698,7 +2705,8 @@ def build_account_manager_graph(
                 if seen_cites
                 else ""
             )
-            return {"final_answer": f"Deep-research summary:\n{body}{src}",
+            return {"final_answer": ("Deep-research summary (from web search results; "
+                                     f"open the sources to verify):\n{body}{src}"),
                     "context_sources_used": ["user_turn", "external_research"]}
         if route == "external_research" and not list(state.get("web_results") or []):
             return {"final_answer": (state.get("final_answer")

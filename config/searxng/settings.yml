@@ -1,0 +1,12 @@
+# Minimal SearXNG settings for OMOS. JSON output must be enabled or OMOS
+# will report research as unavailable. Replace secret_key before use:
+#   python -c "import secrets; print(secrets.token_hex(32))"
+use_default_settings: true
+server:
+  secret_key: "CHANGE-ME-GENERATE-YOUR-OWN"
+  limiter: false
+  image_proxy: false
+search:
+  formats:
+    - html
+    - json
