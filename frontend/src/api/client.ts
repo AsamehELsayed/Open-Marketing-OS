@@ -418,6 +418,29 @@ async function downloadAttachment(
 }
 
 /** Save a downloaded blob through the browser's own download flow. */
+export interface CampaignWorkPackage {
+  campaign: { id: string; title: string; status: string };
+  goal: string;
+  target_audience: string;
+  offer: string;
+  channels: string[];
+  duration: string;
+  deliverables: {
+    id: string; type: string; type_label: string; title: string;
+    platform: string | null; status: string; status_label: string;
+    version: number; versions_kept: number; written_by_ai: boolean;
+  }[];
+  approval: { total: number; approved: number; in_review: number; draft: number; ready_to_export: boolean };
+  evidence: {
+    user_provided: Record<string, string>;
+    own_documents: { label: string; excerpt: string }[];
+    web_sources: { url: string }[];
+    ai_suggested: string[];
+    research: { state: "available" | "unavailable"; message: string };
+  };
+  needs_owner_input: { field: string; question: string }[];
+}
+
 export function saveDownloadedFile({ blob, filename }: { blob: Blob; filename: string }): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -918,6 +941,12 @@ export const api = {
     downloadAttachment(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/export.md`, "deliverable.md", [".md"]),
   downloadCampaignDeliverablesPackage: (project_id: string, campaign_id: string) =>
     downloadAttachment(`${campaignDeliverablesPath(project_id, campaign_id)}/exports/package.zip`, "campaign-deliverables.zip", [".zip"]),
+  getCampaignWorkPackage: (project_id: string, campaign_id: string) =>
+    request<CampaignWorkPackage>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/work-package`),
+  saveProjectGoal: (project_id: string, goal: string) =>
+    request<{ goal: string }>(`/api/projects/${encodeURIComponent(project_id)}/goal`, { method: "PUT", body: JSON.stringify({ goal }) }),
+  downloadApprovedCampaignPackage: (project_id: string, campaign_id: string) =>
+    downloadAttachment(`${campaignDeliverablesPath(project_id, campaign_id)}/exports/package.zip?approved_only=true`, "campaign-approved-package.zip", [".zip"]),
   getResultsSummary: (project_id?: string) =>
     request<Record<string, unknown>>(
       project_id

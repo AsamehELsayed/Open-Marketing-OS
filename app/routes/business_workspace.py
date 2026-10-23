@@ -151,6 +151,34 @@ def write_profile(project_id: str, payload: Payload):
         return ok(row)
 
 
+class GoalPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    goal: str
+
+
+@router.get("/projects/{project_id}/goal")
+def read_goal(project_id: str):
+    with deps.get_db() as conn:
+        project = repos.Projects.get(conn, project_id)
+        if project is None: raise HTTPException(404, "unknown project")
+        return ok({"goal": project.get("goal", "")})
+
+
+@router.put("/projects/{project_id}/goal")
+def write_goal(project_id: str, payload: GoalPayload):
+    """The owner's plain-language marketing goal, stored on the project."""
+    goal = payload.goal.strip()
+    if not goal or len(goal) > 500:
+        raise HTTPException(422, "goal must be 1-500 characters")
+    with deps.get_db() as conn:
+        if repos.Projects.get(conn, project_id) is None:
+            raise HTTPException(404, "unknown project")
+        conn.execute("UPDATE projects SET goal=?, updated_at=? WHERE id=?",
+                     (goal, service.now(), project_id))
+        conn.commit()
+        return ok({"goal": goal})
+
+
 @router.get("/projects/{project_id}/business-brief")
 def read_brief(project_id: str):
     with deps.get_db() as conn:

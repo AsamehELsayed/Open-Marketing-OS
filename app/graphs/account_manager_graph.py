@@ -1408,10 +1408,36 @@ def run_compound_marketing_task(
     }
 
 
+
+def _research_unavailable_answer(reason: str = "") -> str:
+    """Truthful, owner-readable state when no verified source was found."""
+    why = {
+        "no_search_provider": "Web research is not set up on this computer yet, "
+                              "so I can't look anything up.",
+        "search_failed": "The web search didn't respond, so I couldn't look "
+                         "anything up.",
+        "no_results": "The web search returned nothing for this question.",
+    }.get(reason, "I couldn't find verified sources for this question.")
+    return (f"{why} I have not made up any research.\n\n"
+            "What you can do: add what you already know about your market "
+            "(competitors, prices, customer questions) to your business "
+            "profile, or connect a web search in Settings and ask again. "
+            "Until then, anything I suggest is an idea to check, not a "
+            "researched fact.")
+
+
+def _worker_reason(rows) -> str:
+    for r in rows or []:
+        err = str((r or {}).get("error") or "")
+        if err.startswith("research_unavailable:"):
+            return err.split(":", 1)[1]
+    return ""
+
+
 def build_account_manager_graph(
     *, checkpointer=None, store=None, known_projects: set | None = None,
     project_lookup=None, thread_id: str = "", complete_fn=None,
-    conn_factory=None, employee_fn=None,
+    conn_factory=None, employee_fn=None, search_fn=None,
 ):
     """Compile the v1 Account Manager graph. Requires langgraph installed.
 
@@ -1422,6 +1448,11 @@ def build_account_manager_graph(
     conn_factory: callable returning a sqlite connection for intent nodes
     (tool capability execution / conversation-meta transcript). Defaults to
     the serving DB path; tests inject an in-memory/tmp factory.
+
+    search_fn: ``search_fn(query, count) -> list[{url,title,snippet}]`` for
+    external/deep research. Defaults to the operator-configured search
+    endpoint; when none is configured research reports itself unavailable
+    instead of producing evidence.
     """
     _ = thread_id
     from langgraph.checkpoint.memory import InMemorySaver
@@ -1882,13 +1913,24 @@ def build_account_manager_graph(
         }
 
     def external_research(state: LangGraphState) -> dict:
+        from app.services.tools.web_tools import research_search
+        found = research_search(str(state.get("user_request") or ""), 5,
+                                transport=search_fn)
+        if not found["available"]:
+            return {"web_results": [],
+                    "final_answer": _research_unavailable_answer(found["reason"])}
         out = _branch_answer("external_research", state)
-        out["web_results"] = [{"path": "https://example.com/web", "chunk_id": "?"}]
+        out["web_results"] = [
+            {"path": r["url"], "chunk_id": "web", "title": r["title"],
+             "text": r["snippet"], "source": "web_search"}
+            for r in found["results"]]
         return out
 
     def social_research(state: LangGraphState) -> dict:
+        # No social provider result is available in this branch; never emit
+        # a placeholder handle as if it were an observation.
         out = _branch_answer("social_research", state)
-        out["social_results"] = [{"path": "@handle", "chunk_id": "?"}]
+        out["social_results"] = []
         return out
 
     def campaign_operation(state: LangGraphState) -> dict:
@@ -1925,16 +1967,18 @@ def build_account_manager_graph(
     def deep_worker(state: dict) -> dict:
         tid = state.get("task_id", "q0")
         q = state.get("query", "")
-        return {
-            "worker_results": [
-                {
-                    "task_id": tid,
-                    "chunk": f"evidence for {q}",
-                    "sources": [f"https://example.com/{tid}"],
-                    "ok": True,
-                }
-            ]
-        }
+        from app.services.tools.web_tools import research_search
+        found = research_search(str(q), 3, transport=search_fn)
+        if not found["available"]:
+            return {"worker_results": [{
+                "task_id": tid, "chunk": "", "sources": [], "ok": False,
+                "error": "research_unavailable:" + found["reason"]}]}
+        rows = found["results"]
+        chunk = next((r["snippet"] for r in rows if r["snippet"]),
+                     rows[0]["title"] or "")
+        return {"worker_results": [{
+            "task_id": tid, "chunk": chunk[:300],
+            "sources": [r["url"] for r in rows], "ok": True}]}
 
     def deep_fuse(state: LangGraphState) -> dict:
         # Fan-in barrier: all Send branches completed before this runs
@@ -2644,6 +2688,10 @@ def build_account_manager_graph(
                 for s in (r or {}).get("sources") or []:
                     if s not in seen_cites:
                         seen_cites.append(s)
+            if not ok_rows:
+                return {"final_answer": _research_unavailable_answer(
+                            _worker_reason(state.get("worker_results"))),
+                        "context_sources_used": ["user_turn"]}
             body = "\n".join(f"- {c}"[:300] for c in chunks[:4]) or "no usable evidence."
             src = (
                 ("\nSources:\n" + "\n".join(f"- {c}" for c in seen_cites[:5]))
@@ -2652,6 +2700,12 @@ def build_account_manager_graph(
             )
             return {"final_answer": f"Deep-research summary:\n{body}{src}",
                     "context_sources_used": ["user_turn", "external_research"]}
+        if route == "external_research" and not list(state.get("web_results") or []):
+            return {"final_answer": (state.get("final_answer")
+                                    or _research_unavailable_answer("")),
+                    "model_usage": {"generation_source": "deterministic",
+                                    "generation_status": "completed"},
+                    "context_sources_used": ["user_turn"]}
         if route == "compound_marketing_task" or bool(state.get("task_plan")):
             answer = synthesize_compound_answer(state, tree=_synthesize_tree)
             return {

@@ -68,8 +68,10 @@ def build_deep_research_graph(*, checkpointer=None, worker_fn=None):
             time.sleep(0.05)  # widen the overlap window for real branches
             q = (task or {}).get("query", "")
             return {
-                "chunk": f"evidence for {q}",
-                "sources": [f"https://example.com/{(task or {}).get('id', 'q0')}"],
+                # SYNTHETIC TEST FIXTURE: never reachable from product traffic
+                # (nothing in app/ builds this graph without a worker_fn).
+                "chunk": f"[synthetic fixture] evidence for {q}",
+                "sources": [f"https://synthetic-fixture.invalid/{(task or {}).get('id', 'q0')}"],
             }
         finally:
             with tracker["lock"]:
