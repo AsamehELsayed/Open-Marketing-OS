@@ -71,7 +71,7 @@ ENV_ALLOWLIST = {
         "OPENAI_SERVER_WEBSEARCH", "OPENROUTER_CATALOG_TTL_S",
         "OPENAI_MAX_TOOL_ITERS", "OPENAI_TURN_TIMEOUT_S",
         "OPENAI_PER_CALL_TIMEOUT_S", "OPENAI_MAX_CONTEXT_TOKENS",
-        "OMOS_MODEL_CACHE",
+        "OMOS_MODEL_CACHE", "WEB_SEARCH_URL",
         "VISION_LOCAL_WEIGHTS", "IG_BROWSER_PROFILE", "META_IG_API_VERSION",
         "APIFY_IG_PROFILE_ACTOR", "APIFY_IG_POST_ACTOR",
     }),
@@ -111,6 +111,8 @@ DYNAMIC_ENV_ALLOWLIST = {
     "app/services/llm/config.py": "ADVANCED_SELF_HOST",
     "app/services/llm/local_runtime_manager.py": "ADVANCED_SELF_HOST",
     "app/services/rag/embeddings.py": "ADVANCED_SELF_HOST",
+    # DEV-043: optional self-hosted search endpoint (e.g. local SearXNG).
+    "app/services/tools/web_tools.py": "ADVANCED_SELF_HOST",
     # DEV-007R-HOTFIX-3: dev-only RAG debug trace env reads (graphs layer).
     "app/graphs/account_manager_graph.py": "CI_TEST",
     # DEV-008: OMOS_SKILLS_DIR is a library-location override, not a product

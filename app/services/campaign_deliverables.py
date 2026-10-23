@@ -419,3 +419,38 @@ def package_export(conn, project_id: str, campaign_id: str) -> bytes:
                 row["content_md"],
             )
     return output.getvalue()
+
+
+def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
+    """ZIP of the last APPROVED text of each deliverable, plus a summary.
+
+    A deliverable that was approved and is now being revised exports its
+    approved revision, not the unfinished draft. Deliverables that were never
+    approved are left out and listed in the summary so nothing unreviewed is
+    shipped by accident.
+    """
+    rows = list_deliverables(conn, project_id, campaign_id)
+    output = io.BytesIO()
+    lines = ["# Campaign package summary", "",
+             "Only approved content is included in this package.", ""]
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for row in rows:
+            revs = [r for r in repos.CampaignDeliverables.history(
+                conn, project_id, campaign_id, row["id"])
+                if r["status"] == "APPROVED"]
+            if not revs:
+                lines.append(f"- NOT INCLUDED (not approved yet): {row['title']}")
+                continue
+            rev = revs[-1]
+            slug = re.sub(r"[^A-Za-z0-9_-]+", "-", rev["title"]).strip("-_")[:80]
+            slug = slug or rev["type"]
+            archive.writestr(f"{rev['type']}/{slug}-{row['id'][:8]}.md",
+                             rev["content_md"])
+            note = ""
+            if rev["version"] != row["current_version"]:
+                note = (" (a newer edit is still being reviewed; "
+                        "this is the last approved text)")
+            lines.append(f"- Included: {rev['title']} - approved version "
+                         f"{rev['version']}{note}")
+        archive.writestr("00-package-summary.md", "\n".join(lines) + "\n")
+    return output.getvalue()

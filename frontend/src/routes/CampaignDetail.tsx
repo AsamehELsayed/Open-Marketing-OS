@@ -8,6 +8,7 @@ import Tabs from "../components/chrome/Tabs";
 import { useProject } from "../components/shell/project-context";
 import DeliverableEditor from "../components/workspace/DeliverableEditor";
 import { campaignBriefing } from "../components/workspace/deliverables";
+import WorkPackagePanel from "../components/workspace/WorkPackagePanel";
 import {
   excerptOf,
   listOf,
@@ -166,6 +167,7 @@ export default function CampaignDetail() {
       <div className="px-6 py-4">
         {tab === "overview" && (
           <div className="max-w-3xl">
+            <WorkPackagePanel projectId={campaignProjectId ?? ""} campaignId={str(campaign.id) || (id ?? "")} />
             <dl className="divide-y divide-linesubtle rounded border border-linedefault bg-surface px-4 py-2">
               <Field label="Objective" value={briefing.objective} />
               <Field label="Target audience" value={briefing.audience} />

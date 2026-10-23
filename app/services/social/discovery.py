@@ -50,8 +50,8 @@ def _fetch_html(website: str, fetcher=None) -> str:
 
     *fetcher* is an offline-injectable callable ``fetcher(website)`` used by
     tests; it may return a raw HTML string or an object with a ``.text``
-    attribute. When ``fetcher`` is None, httpx is used (<=20s, redirects
-    followed); any failure yields "" (discovery degrades to no candidates).
+    attribute. When ``fetcher`` is None, the SSRF-safe fetcher is used (public hosts only,
+    redirects re-validated); any failure yields "" (discovery degrades to no candidates).
     """
     if fetcher is not None:
         try:
@@ -65,18 +65,11 @@ def _fetch_html(website: str, fetcher=None) -> str:
         text = getattr(result, "text", "")
         return text if isinstance(text, str) else ""
     try:
-        import httpx
-    except ImportError:
-        return ""
-    try:
-        with httpx.Client(timeout=_FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
-            response = client.get(
-                website,
-                headers={"User-Agent": "open-marketing-os-discovery/1.0"},
-            )
-            if response.status_code >= 400:
-                return ""
-            return response.text or ""
+        from app.services.tools.safe_fetch import safe_get
+        got = safe_get(website, timeout_s=_FETCH_TIMEOUT_SECONDS)
+        if got["status"] >= 400:
+            return ""
+        return got["body"].decode(got["charset"], errors="replace")
     except Exception:
         return ""
 

@@ -6,6 +6,7 @@ uses urllib with a short timeout. No API key required for the stub path —
 results are honest about accessibility (no invented metrics).
 """
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -25,10 +26,63 @@ _WEBSITE_BUDGET_S = 15.0
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
+def search_configured() -> bool:
+    return bool(os.environ.get("WEB_SEARCH_URL", "").strip())
+
+
 def _default_transport(query: str, count: int) -> list[dict]:
-    # Honest stub: no external network in default suite. Deployments may set
-    # WEB_SEARCH_URL to a real search endpoint returning JSON.
-    return []
+    """Query the operator-configured search endpoint (WEB_SEARCH_URL).
+
+    The endpoint receives ``?q=<query>&format=json`` and must answer JSON
+    ``{"results": [{"url", "title", "snippet"|"content"}]}`` (SearXNG-style).
+    With no endpoint configured this returns [] and the caller reports an
+    honest "unavailable" state; nothing is ever fabricated. The endpoint is
+    operator configuration (it may be a local SearXNG), so it is not subject
+    to the public-address rule that guards fetched pages.
+    """
+    base = os.environ.get("WEB_SEARCH_URL", "").strip()
+    if not base:
+        return []
+    parts = urllib.parse.urlsplit(base)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        raise ValueError("WEB_SEARCH_URL must be an http(s) url")
+    sep = "&" if parts.query else "?"
+    url = f"{base}{sep}" + urllib.parse.urlencode(
+        {"q": query, "format": "json"})
+    req = urllib.request.Request(
+        url, headers={"User-Agent": _WEBSITE_UA, "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=_WEBSITE_FETCH_TIMEOUT_S) as resp:
+        data = json.loads(resp.read(2_000_000).decode("utf-8", errors="replace"))
+    rows = []
+    for r in (data.get("results") or [])[:count]:
+        u = str((r or {}).get("url") or "")
+        if urllib.parse.urlsplit(u).scheme.lower() not in ("http", "https"):
+            continue
+        rows.append({"url": u, "title": str(r.get("title") or ""),
+                     "snippet": str(r.get("snippet") or r.get("content") or "")})
+    return rows
+
+
+def research_search(query: str, count: int = 3, transport=None) -> dict:
+    """Shared research entry point for graph workers.
+
+    Returns {"available": bool, "results": [...], "reason": str}. Never
+    raises and never invents results: unavailable means no verified source.
+    """
+    transport = transport or _default_transport
+    if transport is _default_transport and not search_configured():
+        return {"available": False, "results": [],
+                "reason": "no_search_provider"}
+    try:
+        rows = transport(query, count) or []
+    except Exception:
+        return {"available": False, "results": [], "reason": "search_failed"}
+    rows = [r for r in rows if str((r or {}).get("url") or "").strip()]
+    if not rows:
+        return {"available": False, "results": [], "reason": "no_results"}
+    return {"available": True, "reason": "", "results": [
+        {"url": r["url"], "title": str(r.get("title", ""))[:200],
+         "snippet": str(r.get("snippet", ""))[:600]} for r in rows[:count]]}
 
 
 def t_web_search(conn, *, project_id, root, args, transport=None):
@@ -154,16 +208,15 @@ class _PageParser(HTMLParser):
 
 
 def _default_website_transport(url: str, timeout_s: int = 10) -> dict:
-    """Real urllib fetch. Never raises: errors come back as status=error."""
+    """SSRF-hardened fetch (see safe_fetch). Never raises: errors come back as
+    status=error with a generic message (no internal detail leaks)."""
+    from .safe_fetch import safe_get
     started = time.monotonic()
     try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": _WEBSITE_UA,
-                          "Accept": "text/html,application/xhtml+xml"})
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            charset = resp.headers.get_content_charset() or "utf-8"
-            body = resp.read(1_000_000).decode(charset, errors="replace")
-            http_status = int(resp.status)
+        got = safe_get(url, timeout_s=timeout_s)
+        body = got["body"].decode(got["charset"], errors="replace")
+        http_status = int(got["status"])
+        final_url = got["final_url"]
     except Exception:
         latency = int((time.monotonic() - started) * 1000)
         return {"status": "error", "error": "The website could not be fetched.",
@@ -175,7 +228,7 @@ def _default_website_transport(url: str, timeout_s: int = 10) -> dict:
         parser.close()
     except Exception:
         pass
-    return _parse_result(url, url, http_status, parser, latency)
+    return _parse_result(url, final_url, http_status, parser, latency)
 
 
 def _parse_result(url: str, final_url: str, http_status: int,

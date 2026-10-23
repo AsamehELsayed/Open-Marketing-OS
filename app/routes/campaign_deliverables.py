@@ -145,10 +145,11 @@ def export_markdown(project_id: str, campaign_id: str, deliverable_id: str):
 
 
 @router.get("/projects/{project_id}/campaigns/{campaign_id}/deliverables/exports/package.zip")
-def export_package(project_id: str, campaign_id: str):
+def export_package(project_id: str, campaign_id: str, approved_only: bool = False):
     with deps.get_db() as conn:
         try:
-            package = service.package_export(conn, project_id, campaign_id)
+            package = (service.approved_package_export if approved_only
+                       else service.package_export)(conn, project_id, campaign_id)
         except service.DeliverableNotFound as exc:
             _translate_error(exc)
     return Response(
@@ -156,3 +157,14 @@ def export_package(project_id: str, campaign_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="campaign-deliverables.zip"'},
     )
+
+
+@router.get("/projects/{project_id}/campaigns/{campaign_id}/work-package")
+def campaign_work_package(project_id: str, campaign_id: str):
+    """Owner-readable goal/audience/deliverables/approval/evidence summary."""
+    from app.services import campaign_work_package as work_package
+    with deps.get_db() as conn:
+        try:
+            return _ok(work_package.build(conn, project_id, campaign_id))
+        except service.DeliverableNotFound as exc:
+            _translate_error(exc)
