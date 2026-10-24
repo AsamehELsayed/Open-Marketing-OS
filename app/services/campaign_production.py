@@ -209,6 +209,28 @@ def creates_deliverables(text: str) -> bool:
             and any(verb in lowered for verb in _CREATE_VERBS))
 
 
+_GO_AHEAD_RE = re.compile(
+    r"^\s*(?:(?:yes|yep|yeah|ok(?:ay)?|sure|great|perfect|thanks|thank you)"
+    r"[\s,.!-]*)?(?:(?:(?:that|this|it|the plan)\s+)?(?:looks|sounds)\s+good[\s,.!-]*)?"
+    r"(?:please\s+|go\s+ahead\s+(?:and\s+)?|proceed\s+(?:and\s+)?|"
+    r"you\s+can\s+|let'?s\s+)*(?:"
+    # A bare pronoun object ("do it", "make it") is not a clear go-ahead.
+    r"(?:generate|write|draft|create|produce)\s+"
+    r"(?:it|them|that|this|everything|all\s+of\s+(?:it|them))|"
+    r"(?:generate|write|draft|create|produce|make|do)\s+"
+    r"(?:everything|"
+    r"the\s+(?:plan|content|campaign|deliverables?|posts?|emails?|copy|assets?)"
+    r"(?:\s+(?:now|please))?))\s*[.!]*\s*$|"
+    r"^\s*(?:yes|yep|ok(?:ay)?|sure)?[\s,.!-]*go\s+ahead\s*[.!]*\s*$",
+    re.IGNORECASE)
+
+
+def is_generation_go_ahead(text: str) -> bool:
+    """True for a short confirmation like "yes, go ahead and write it"."""
+    value = str(text or "")
+    return len(value) <= 120 and bool(_GO_AHEAD_RE.match(value))
+
+
 def looks_like_revision(text: str) -> bool:
     """True when the turn asks to change content that already exists."""
     value = str(text or "")
@@ -219,39 +241,46 @@ def looks_like_revision(text: str) -> bool:
 
 
 def requested_channels(text: str) -> list[str]:
-    lowered = f" {str(text or '').lower()} "
-    return [term for term in _CHANNEL_TERMS if _mentions(lowered, term)]
+    from app.services import campaign_request
+
+    return campaign_request.extract_channels(text)
 
 
 def requested_duration(text: str) -> str:
-    match = re.search(r"(?<!\w)(\d{1,3})\s*[- ]?(day|days|week|weeks|month|months)"
-                      r"(?!\w)", str(text or "").lower())
-    return f"{match.group(1)} {match.group(2)}" if match else ""
+    from app.services import campaign_request
+
+    return campaign_request.extract_duration(text)
 
 
 def _requested_audience(text: str) -> str:
     """Only an explicitly named audience counts.
 
-    A loose "for ..." fallback was removed: it captured approval phrases and
-    unrelated clauses, and a wrong audience is worse than an absent one.
+    A loose "for ..." fallback would capture approval phrases and unrelated
+    clauses, and a wrong audience is worse than an absent one. The extractor
+    accepts "targeting X" / "audience: X" and "for X" only when X ends in a
+    recognised group noun (families, parents, students, ...).
     """
-    match = re.search(
-        r"(?i)\b(?:audience|target(?:ing)?|aimed at)\s*(?:is|of|at)?\s*[:\-]?\s*"
-        r"(?:our\s+|the\s+)?([^,.;!?\r\n]{2,120})", str(text or ""))
-    if not match:
-        return ""
-    candidate = match.group(1).strip(" .:-")
-    return candidate[:400] if candidate else ""
+    from app.services import campaign_request
+
+    return campaign_request.extract_audience(text)
 
 
 def campaign_intake(text: str, *, objective: str = "", turn_id: str = "") -> dict:
-    """Extended campaign metadata taken only from what the user actually said.
+    """Campaign facts taken only from what the user actually said.
 
     No invented budget, metric, price, date, or audience. Absent facts stay
     absent rather than being filled with plausible defaults.
     """
-    return {
-        "objective": trim_objective(objective),
+    from app.services import campaign_request
+
+    stated = campaign_request.extract(text)
+    # The graph falls back to "website marketing" when the request names no
+    # goal. That is a placeholder, not something the owner said.
+    placeholder = (str(objective or "").strip().lower() == "website marketing"
+                   and "website marketing" not in str(text or "").lower())
+    intake = {
+        "objective": stated.get("objective") or (
+            "" if placeholder else trim_objective(objective)),
         "target_audience": _requested_audience(text),
         "channels": requested_channels(text),
         "duration": requested_duration(text),
@@ -261,6 +290,13 @@ def campaign_intake(text: str, *, objective: str = "", turn_id: str = "") -> dic
             "turn_id": str(turn_id or ""),
         },
     }
+    # Additional facts the owner stated (area, offer, business, product,
+    # constraints, content wanted). Only present when actually said.
+    for key in ("geography", "offer", "business", "product", "constraints",
+                "content_requirements"):
+        if stated.get(key):
+            intake[key] = stated[key]
+    return intake
 
 
 def trim_objective(objective: str) -> str:
@@ -274,6 +310,9 @@ def trim_objective(objective: str) -> str:
     if not value:
         return ""
     value = re.split(r"[,;]", value, maxsplit=1)[0]
+    # A clause that is only an audience is not an objective.
+    if re.match(r"(?i)\s*(?:targeting|target|aimed\s+at|audience)(?!\w)", value):
+        return ""
     value = re.split(r"(?i)\s+(?:targeting|target|audience|for\s+our)\b",
                      value, maxsplit=1)[0]
     for pattern in (
@@ -1664,6 +1703,29 @@ def _existing_ids(conn, *, project_id: str, campaign_id: str) -> set:
 # revision
 # ---------------------------------------------------------------------------
 
+def _owner_request_text(conn, project_id: str, campaign_id: str) -> str:
+    """The owner's own statements for this campaign (stored intake + profile).
+
+    Project-scoped and fail-closed: any problem yields no extra text.
+    """
+    try:
+        row = _campaign_row(conn, project_id, campaign_id)
+        if row is None:
+            return ""
+        _meta, intake = _campaign_metadata(row)
+        if not intake:
+            return ""
+        try:
+            from app.services.business_workspace import get_profile
+            profile = get_profile(conn, project_id)
+        except Exception:
+            profile = None
+        from app.services.campaign_request import plan_request_text
+        return str(plan_request_text(intake, profile if isinstance(profile, dict) else None) or "")
+    except Exception:
+        return ""
+
+
 def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
                        deliverable_id: str, instruction: str,
                        provider: str = "AUTO", model_id: str = "") -> dict:
@@ -1712,7 +1774,8 @@ def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
         items = validate_generated_items(
             text, types=[str(current.get("type", ""))],
             allowed_ids=context["evidence_ids"], single=True,
-            context=context, user_request=instruction)
+            context=context,
+            user_request=f"{instruction}\n{_owner_request_text(conn, pid, cid)}")
     except DeliverableValidationError as exc:
         error, diagnostic = _validation_error_payload(
             exc, context=context, project_id=pid)

@@ -70,6 +70,8 @@ export default function DeliverableEditor({
   const [history, setHistory] = useState<SpaDeliverableRevision[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiRevising, setAiRevising] = useState(false);
 
   // Keep async continuations aware of selection changes immediately, before
   // React commits the next render.
@@ -100,6 +102,8 @@ export default function DeliverableEditor({
     setHistory([]);
     setHistoryOpen(false);
     setHistoryLoading(false);
+    setAiInstruction("");
+    setAiRevising(false);
     if (!scope) return;
     const isCurrent = () =>
       isCurrentWorkspaceSelection(scope.projectId, token, selectedProjectId.current, requestGeneration.current);
@@ -271,6 +275,60 @@ export default function DeliverableEditor({
     }
   }
 
+  async function aiRevise() {
+    const instruction = aiInstruction.trim();
+    if (!scope || !selected || !instruction || aiRevising) return;
+    const pid = scope.projectId;
+    const cid = scope.campaignId;
+    const deliverableId = selected.id;
+    const wasApproved = selected.status === "APPROVED";
+    const epoch = requestGeneration.current;
+    const isCurrent = () =>
+      isCurrentWorkspaceSelection(pid, epoch, selectedProjectId.current, requestGeneration.current);
+    setAiRevising(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await api.aiReviseCampaignDeliverable(pid, cid, deliverableId, instruction);
+      if (!isCurrent() || !scopedNow() || selectedIdRef.current !== deliverableId) return;
+      applySaved(
+        saved,
+        wasApproved
+          ? "Changed as you asked. The earlier approved version is kept, and this one needs your approval again."
+          : "Changed as you asked. The earlier version is kept in the revision history.",
+      );
+      setAiInstruction("");
+    } catch (e) {
+      if (!isCurrent() || selectedIdRef.current !== deliverableId) return;
+      setError(conflictMessage(e, "The change could not be made. Your current version is unchanged."));
+    } finally {
+      if (isCurrent()) setAiRevising(false);
+    }
+  }
+
+  async function exportApproved() {
+    if (!scope || exporting) return;
+    const pid = scope.projectId;
+    const cid = scope.campaignId;
+    const epoch = requestGeneration.current;
+    const isCurrent = () =>
+      isCurrentWorkspaceSelection(pid, epoch, selectedProjectId.current, requestGeneration.current);
+    setExporting("zip");
+    setError("");
+    setNotice("");
+    try {
+      const file = await api.downloadApprovedCampaignPackage(pid, cid);
+      if (!isCurrent() || !scopedNow()) return;
+      saveDownloadedFile(file);
+      setNotice("Approved package downloaded. Items that are not approved are listed as not included.");
+    } catch (e) {
+      if (!isCurrent()) return;
+      setError(e instanceof Error ? e.message : "Approved package export failed.");
+    } finally {
+      if (isCurrent()) setExporting(null);
+    }
+  }
+
   async function openHistory() {
     if (!scope || !selected) return;
     const pid = scope.projectId;
@@ -354,7 +412,7 @@ export default function DeliverableEditor({
 
   const nextStatus = selected ? nextDeliverableStatus(selected.status) : null;
   const showForm = mode !== null;
-  const busy = saving || transitioning !== null || exporting !== null;
+  const busy = saving || transitioning !== null || exporting !== null || aiRevising;
   // `dirty` records that a field was touched; `draftIsDirty` re-checks the
   // actual bytes. Typing and then undoing back to the saved text leaves the
   // button disabled, so no version number is spent on a no-op save.
@@ -393,6 +451,15 @@ export default function DeliverableEditor({
             className="rounded-sm border border-linedefault px-3 py-1.5 text-bodysm text-ink disabled:opacity-50"
           >
             {exporting === "zip" ? "Preparing…" : "Export campaign (.zip)"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportApproved()}
+            disabled={busy || !items.some((item) => item.status === "APPROVED")}
+            title="Download only approved content. Anything not approved is left out and listed in the summary."
+            className="rounded-sm border border-accent/50 px-3 py-1.5 text-bodysm text-accenthover disabled:opacity-50"
+          >
+            Download approved only (.zip)
           </button>
         </div>
       </div>
@@ -584,6 +651,35 @@ export default function DeliverableEditor({
                     Revision history
                   </button>
                 </div>
+
+                <form
+                  className="mt-3 rounded-sm border border-linedefault bg-raised p-3"
+                  onSubmit={(e) => { e.preventDefault(); void aiRevise(); }}
+                >
+                  <label htmlFor="ai-revise-instruction" className="block text-bodysm font-medium text-ink">
+                    Ask for changes
+                  </label>
+                  <p className="text-meta text-inkmuted">
+                    Say what to change in plain words. You get a new version; the old one is kept.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      id="ai-revise-instruction"
+                      maxLength={1000}
+                      value={aiInstruction}
+                      onChange={(e) => setAiInstruction(e.target.value)}
+                      placeholder="For example: make it warmer and shorter"
+                      className="min-w-[14rem] flex-1 rounded-sm border border-linedefault bg-base px-3 py-1.5 text-bodysm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={busy || !aiInstruction.trim()}
+                      className="rounded-sm bg-accent px-3 py-1.5 text-bodysm font-semibold text-white disabled:opacity-50"
+                    >
+                      {aiRevising ? "Revising…" : "Revise with AI"}
+                    </button>
+                  </div>
+                </form>
 
                 <p className="mt-2 text-meta text-inkmuted">
                   {selected.status === "APPROVED"

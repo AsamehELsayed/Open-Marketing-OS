@@ -167,7 +167,7 @@ export default function CampaignDetail() {
       <div className="px-6 py-4">
         {tab === "overview" && (
           <div className="max-w-3xl">
-            <WorkPackagePanel projectId={campaignProjectId ?? ""} campaignId={str(campaign.id) || (id ?? "")} />
+            <WorkPackagePanel projectId={campaignProjectId ?? ""} campaignId={str(campaign.id) || (id ?? "")} onReview={() => setTab("content")} />
             <dl className="divide-y divide-linesubtle rounded border border-linedefault bg-surface px-4 py-2">
               <Field label="Objective" value={briefing.objective} />
               <Field label="Target audience" value={briefing.audience} />

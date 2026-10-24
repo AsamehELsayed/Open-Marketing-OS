@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt
 
 from app import deps
 from app.services import campaign_deliverables as service
+from app.services import campaign_flow as flow
 
 
 router = APIRouter(prefix="/api", tags=["campaign-deliverables"])
@@ -168,3 +169,69 @@ def campaign_work_package(project_id: str, campaign_id: str):
             return _ok(work_package.build(conn, project_id, campaign_id))
         except service.DeliverableNotFound as exc:
             _translate_error(exc)
+
+
+# --- chat-to-campaign: answer questions, generate, ask for changes -----------
+
+
+class AnswersPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answers: dict[str, str | list[str]]
+
+
+class AiRevisePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instruction: str
+
+
+def _flow_error(exc: "flow.FlowError"):
+    raise HTTPException(status_code=exc.status, detail={
+        "code": exc.code, "message": str(exc), **exc.extra})
+
+
+@router.put("/projects/{project_id}/campaigns/{campaign_id}/intake")
+def save_campaign_answers(project_id: str, campaign_id: str, payload: AnswersPayload):
+    """Record details the owner filled in (audience, channels, offer, ...)."""
+    with deps.get_db() as conn:
+        try:
+            flow.save_answers(conn, project_id, campaign_id, payload.answers)
+            from app.services import campaign_work_package as work_package
+            return _ok(work_package.build(conn, project_id, campaign_id))
+        except service.DeliverableNotFound as exc:
+            _translate_error(exc)
+        except flow.FlowError as exc:
+            _flow_error(exc)
+
+
+@router.post("/projects/{project_id}/campaigns/{campaign_id}/generate")
+def generate_campaign_content(project_id: str, campaign_id: str):
+    """Write the proposed deliverables through the normal production path."""
+    with deps.get_db() as conn:
+        try:
+            result = flow.generate_from_plan(
+                conn, project_id=project_id, campaign_id=campaign_id)
+            return _ok({"created": result.get("created", []),
+                        "titles": result.get("titles", []),
+                        "provider": result.get("provider", ""),
+                        "model": result.get("model", "")})
+        except service.DeliverableNotFound as exc:
+            _translate_error(exc)
+        except flow.FlowError as exc:
+            _flow_error(exc)
+
+
+@router.post("/projects/{project_id}/campaigns/{campaign_id}/deliverables/{deliverable_id}/ai-revise")
+def ai_revise_deliverable(project_id: str, campaign_id: str, deliverable_id: str,
+                          payload: AiRevisePayload):
+    """Revise one deliverable from a plain-language request, as a new version."""
+    with deps.get_db() as conn:
+        try:
+            result = flow.ai_revise(
+                conn, project_id=project_id, campaign_id=campaign_id,
+                deliverable_id=deliverable_id, instruction=payload.instruction)
+            rows = result.get("deliverables") or []
+            return _ok(rows[0] if rows else {})
+        except service.DeliverableNotFound as exc:
+            _translate_error(exc)
+        except flow.FlowError as exc:
+            _flow_error(exc)

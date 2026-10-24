@@ -6,7 +6,21 @@ Project links: [repository](https://github.com/AsamehELsayed/Open-Marketing-OS) 
 
 ## [Unreleased]
 
-No entries yet.
+### Added
+
+- Chat-to-campaign: a plain-language request ("Create a 30-day Instagram and email campaign targeting local families.") is turned into stated facts only (duration, channels, audience, area, offer, constraints, content wanted), a list of what is missing, and a reviewable plan. Nothing unsaid is inferred; each fact is labelled as told by the owner or taken from the business profile.
+- The campaign page walks the owner through understand, answer missing questions, write, review, ask for changes, approve and download. Content is written only after the owner says go (button or "go ahead" in chat) and only once per campaign.
+- "Ask for changes" revises one deliverable in plain words as a new version; "Download approved only" exports approved content and lists everything left out.
+- Research evidence on the campaign page separates pages OMOS opened and read from unchecked search leads, and earlier whole-business research from research done for the campaign.
+
+### Fixed
+
+- Revising a generated deliverable failed fact validation because the owner's original request was no longer a valid source; revisions now accept the owner's own stored statements for that campaign (still project-scoped, still rejecting unsupported claims).
+
+### Known limitations
+
+- Email copy is stored as the existing `ad_copy` kind with the platform "Email"; a dedicated email kind needs a schema migration.
+- Acceptance tests use an offline deterministic provider. They prove the workflow and honesty rules, not the quality of real AI output.
 
 ## [0.1.0-beta.2] — PRE-RELEASE / BETA
 

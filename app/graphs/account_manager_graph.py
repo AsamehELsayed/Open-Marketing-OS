@@ -152,6 +152,19 @@ def _explicit_write_intents(text: str, *, turn_id: str = "") -> dict:
                                                      turn_id=turn_id)
         except Exception:
             campaign_intake = {}
+        if (campaign_intake and (campaign_intake.get("objective")
+                or campaign_intake.get("channels") or campaign_intake.get("duration"))):
+            # No stated goal: name the campaign from what was stated rather
+            # than from a clause of the sentence ("targeting local families").
+            try:
+                from app.services import campaign_request as _cr
+
+                label = (str(campaign_intake.get("objective") or "")
+                         or _cr.title_from_intake(campaign_intake))
+                if label:
+                    campaign_payload["title"] = f"Campaign: {label}"[:160]
+            except Exception:
+                pass
     return {
         "campaign": campaign_payload,
         "campaign_intake": campaign_intake or None,
@@ -322,6 +335,9 @@ def _deliverable_write_intents(value: str, *, allow_revision: bool = True) -> di
         return {}
 
     intents: dict = {}
+    if allow_revision and production.is_generation_go_ahead(text):
+        # "Yes, go ahead": write the plan already proposed for a campaign.
+        return {"generate": {"types": [], "from_plan": True, "named": False}}
     if allow_revision and production.looks_like_revision(text):
         intents["revision"] = {
             "instruction": text[:2000],
@@ -333,7 +349,8 @@ def _deliverable_write_intents(value: str, *, allow_revision: bool = True) -> di
     # ordinary question that happens to mention a channel stays prose.
     if not production.creates_deliverables(text):
         return {}
-    intents["generate"] = {"types": production.resolved_types(text)}
+    intents["generate"] = {"types": production.resolved_types(text),
+                           "named": bool(production.requested_types(text))}
     return intents
 
 
@@ -414,6 +431,62 @@ def _revision_campaign_details(conn, project_id: str,
             } for item in deliverables],
         })
     return details
+
+
+def _campaign_awaiting_content(conn, project_id: str, user_request: str):
+    """(campaign_id, None) or ("", honest result) for a "go ahead" follow-up."""
+    from app.services import campaign_production as production
+
+    rows = _project_campaign_rows(conn, project_id)
+    if not rows:
+        return "", {"ok": False, "status": "failed",
+                    "error": "This project has no campaign yet. Ask me to "
+                             "create one first."}
+    named, _ = _resolve_revision_campaign(conn, project_id, "", user_request)
+    if named:
+        return named, None
+    empty = [row for row in rows if not production.list_deliverables(
+        conn, project_id=project_id, campaign_id=str(row.get("id") or ""))]
+    if len(empty) == 1:
+        return str(empty[0].get("id") or ""), None
+    if not empty:
+        return "", {"ok": False, "status": "failed",
+                    "error": "Content has already been written for every "
+                             "campaign in this project. Ask for a change to a "
+                             "specific item, or create a new campaign."}
+    return "", {"ok": False, "status": "needs_clarification",
+                "error": "More than one campaign is waiting for content. Tell "
+                         "me which campaign to write.",
+                "campaign_candidates": _revision_campaign_details(
+                    conn, project_id, empty, production)}
+
+
+def _generate_planned_content(conn, *, pid: str, campaign_id: str, turn_id: str,
+                              provider: str, model_id: str, announce) -> dict:
+    """Write an existing campaign's proposed plan through the shared flow."""
+    from app.services import campaign_flow as flow
+
+    announce("tool_started", {"tool": "generate_campaign_deliverables",
+                              "tool_id": "generate_campaign_deliverables",
+                              "args": {"campaign_id": campaign_id}})
+    try:
+        out = flow.generate_from_plan(
+            conn, project_id=pid, campaign_id=campaign_id, turn_id=turn_id,
+            provider=provider, model_id=model_id)
+        out = {**out, "from_plan": True}
+    except flow.FlowError as exc:
+        out = {"ok": False,
+               "status": "needs_clarification" if exc.code == "needs_input" else "failed",
+               "error": str(exc)[:900], "campaign_id": campaign_id,
+               "failure_code": exc.code}
+    except Exception as exc:
+        out = {"ok": False, "status": "failed",
+               "error": f"Deliverable generation could not be completed: {exc}"[:300]}
+    announce("tool_completed" if out.get("ok") else "tool_failed",
+             {"tool": "generate_campaign_deliverables",
+              "tool_id": "generate_campaign_deliverables",
+              "ok": bool(out.get("ok")), "status": out.get("status", "")})
+    return out
 
 
 def _produce_deliverables(conn, *, state: dict, campaign_id: str, intent: dict,
@@ -520,9 +593,25 @@ def _produce_deliverables(conn, *, state: dict, campaign_id: str, intent: dict,
     if not isinstance(generate, dict):
         return {"ok": False, "status": "skipped",
                 "error": "No campaign deliverables were requested."}
+    created_this_turn = bool(campaign_id)
+    if not campaign_id and not (campaign or {}):
+        # A follow-up turn ("go ahead and write it"): target an existing
+        # campaign of this project that is still waiting for content.
+        try:
+            target, problem = _campaign_awaiting_content(conn, pid, user_request)
+        except Exception as exc:
+            return {"ok": False, "status": "failed",
+                    "error": f"Campaign targets are unavailable: {exc}"[:300]}
+        if problem:
+            return problem
+        campaign_id = target
     if not campaign_id:
         return {"ok": False, "status": "failed",
                 "error": "The campaign was not created, so no deliverables were generated."}
+    if not created_this_turn and not generate.get("named"):
+        return _generate_planned_content(
+            conn, pid=pid, campaign_id=campaign_id, turn_id=turn_id,
+            provider=provider, model_id=model_id, announce=_announce)
     _announce("tool_started", {"tool": "generate_campaign_deliverables",
                                "tool_id": "generate_campaign_deliverables",
                                "args": {"campaign_id": campaign_id}})
@@ -676,6 +765,25 @@ def _deliverable_report(result) -> str:
     if not described:
         return ""
     return f" Campaign deliverables saved: {described}."
+
+
+def _campaign_understanding_note(writes: dict, *, written: bool) -> str:
+    """What OMOS understood and what it still needs, in plain chat text."""
+    recorded = writes.get("campaign_intake")
+    if not isinstance(recorded, dict):
+        return ""
+    intake = {k: v for k, v in recorded.items() if k not in ("ok", "status")}
+    try:
+        from app.services import campaign_request
+
+        text = campaign_request.summary_markdown(intake)
+    except Exception:
+        return ""
+    tail = ("" if written else
+            "Nothing has been written yet. Open the campaign to review this "
+            "plan, fill in anything missing, and ask me to write the content "
+            "(or reply \"go ahead\").")
+    return text + "\n\n" + (tail + "\n\n" if tail else "")
 
 
 def _external_action_report(result) -> str:
@@ -2640,7 +2748,9 @@ def build_account_manager_graph(
                     )}
                 return {"final_answer": (
                     "Campaign draft created successfully.\n\n"
-                    f"Campaign ID: {campaign_id}\n\n"
+                    + _campaign_understanding_note(
+                        writes, written=isinstance(deliverables, dict))
+                    + f"Campaign ID: {campaign_id}\n\n"
                     f"[Open Campaign](/app/campaigns/{campaign_id})"
                     + deliverable_note
                     + external_note
@@ -2659,6 +2769,17 @@ def build_account_manager_graph(
                 external_note.strip() + " "
                 "Other project tools that do not use this integration remain available."
             )}
+        follow_up = writes.get("deliverables")
+        if (isinstance(follow_up, dict) and follow_up.get("ok")
+                and follow_up.get("from_plan") and follow_up.get("campaign_id")
+                and not isinstance(writes.get("campaign"), dict)):
+            cid = str(follow_up["campaign_id"])
+            titles = "\n".join(f"- {t}" for t in (follow_up.get("titles") or []))
+            return {"final_answer": (
+                "I wrote the content for the plan. Nothing is approved or "
+                "published yet - each item is a draft for you to read, change "
+                "and approve.\n\n" + titles
+                + f"\n\n[Review and approve](/app/campaigns/{cid})")}
         ids = []
         for key, id_key in (("campaign", "campaign_id"), ("task", "task_id"), ("experiment", "experiment_id")):
             item = writes.get(key) or {}

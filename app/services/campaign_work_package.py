@@ -21,6 +21,7 @@ import json
 
 from app.database import repos
 from app.services import campaign_deliverables as deliverables
+from app.services import campaign_request
 from app.services import research_evidence
 from app.services.business_workspace import get_profile
 
@@ -85,7 +86,9 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
     channels = [c.strip()[:80] for c in (intake.get("channels") or [])
                 if isinstance(c, str) and c.strip()][:12]
     duration = _text(intake.get("duration"), 100)
-    offer = _text(profile.get("offer"), 400)
+    offer = _text(intake.get("offer"), 400) or _text(profile.get("offer"), 400)
+    view_profile = profile
+    view = campaign_request.understanding(intake, view_profile)
 
     rows = deliverables.list_deliverables(conn, project_id, campaign_id)
     items, own_docs, web_sources = [], [], []
@@ -121,10 +124,16 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
             "url": src["url"], "title": src["title"], "snippet": src["snippet"][:300],
             "retrieved_at": src["retrieved_at"], "found_by": src["provider"],
             "scope": src["scope"],
+            "scope_label": ("Research done for this campaign"
+                            if src["scope"] == "campaign"
+                            else "Earlier research for the whole business"),
             "verification": src["verification"],
             "verification_label": ("Page opened and read by OMOS"
                                    if src["verification"] == "inspected"
                                    else "Search result only - page not checked"),
+            "use": ("May inform the plan; page was read"
+                    if src["verification"] == "inspected"
+                    else "A lead to check - not treated as a fact"),
         })
 
     counts = {"total": len(items),
@@ -168,4 +177,44 @@ def build(conn, project_id: str, campaign_id: str) -> dict:
             "research": research_status(),
         },
         "needs_owner_input": needs_owner,
+        "understanding": view,
+        "proposal": campaign_request.build_proposal(
+            intake, view_profile, _research_counts(web_sources)),
+        "stage": _stage(view, counts),
+        "download": {
+            "approved": [i["title"] for i in items if i["status"] == "APPROVED"],
+            "not_included": [i["title"] for i in items if i["status"] != "APPROVED"],
+        },
     }
+
+
+def _research_counts(web_sources: list[dict]) -> dict:
+    inspected = sum(1 for s in web_sources if s["verification"] == "inspected")
+    leads = len(web_sources) - inspected
+    if not web_sources:
+        note = "No online research is attached to this campaign."
+    elif leads and not inspected:
+        note = ("Online results are leads only. None has been opened and "
+                "checked, so none is used as a fact.")
+    else:
+        note = (f"{inspected} page(s) were opened and read; {leads} other "
+                "result(s) are unchecked leads.")
+    return {"inspected": inspected, "leads": leads, "note": note}
+
+
+def _stage(view: dict, counts: dict) -> dict:
+    """Where the campaign is, in the owner's words."""
+    if counts["total"] == 0:
+        if view["ready_to_generate"]:
+            return {"id": "proposal", "label": "Review the plan",
+                    "next": "Read the plan below, then ask OMOS to write the content."}
+        return {"id": "needs_input", "label": "A few details are missing",
+                "next": "Answer the questions below so OMOS can write accurate content."}
+    if counts["approved"] == counts["total"]:
+        return {"id": "ready", "label": "Ready to download",
+                "next": "Everything is approved. Download your package."}
+    if counts["approved"]:
+        return {"id": "review", "label": "Partly approved",
+                "next": "Approve the remaining items, or download only what is approved."}
+    return {"id": "review", "label": "Waiting for your review",
+            "next": "Read each item, ask for changes if needed, then approve it."}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import CampaignChatCard from "../workspace/CampaignChatCard";
 import "./chat.css";
 
 /**
@@ -120,6 +121,11 @@ export default function ChatMessage({
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const html = useMemo(() => wrapTables(renderMarkdown(bodyMd)), [bodyMd]);
+  // An assistant reply that links a campaign gets an inline summary card.
+  const campaignId = useMemo(
+    () => (isUser ? "" : /\/app\/campaigns\/([A-Za-z0-9_-]{4,64})/.exec(bodyMd ?? "")?.[1] ?? ""),
+    [bodyMd, isUser],
+  );
   const citationSources = useMemo(() => projectCitations(citations, projectId, conversationId),
     [citations, projectId, conversationId]);
 
@@ -204,6 +210,9 @@ export default function ChatMessage({
           dir="auto"
           dangerouslySetInnerHTML={{ __html: html || (streaming ? "<p>…</p>" : "") }}
         />
+        {!streaming && !failed && campaignId && projectId ? (
+          <CampaignChatCard key={`${projectId}:${campaignId}`} projectId={projectId} campaignId={campaignId} />
+        ) : null}
         {!streaming && citationSources.length > 0 ? (
           <ul aria-label="Evidence citations" data-testid="attachment-provenance" className="mt-2 flex flex-wrap gap-1.5 text-meta text-inksecondary">
             {citationSources.map((source) => (
