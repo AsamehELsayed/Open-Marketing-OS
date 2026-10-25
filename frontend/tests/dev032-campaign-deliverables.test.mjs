@@ -191,6 +191,8 @@ assert.equal(isDeliverableType("ad_copy"), true);
 assert.equal(isDeliverableType("email"), false);
 assert.equal(deliverableTypeLabel("content_calendar"), "Content calendar");
 assert.equal(deliverableTypeLabel("mystery"), "Deliverable");
+assert.equal(deliverableTypeLabel("ad_copy", "Email"), "Email");
+assert.equal(deliverableTypeLabel("ad_copy", "Google Ads"), "Ad copy");
 
 // ---------------------------------------------------------------------------
 // Editor: draft state, dirty detection, and the no-op save guard.

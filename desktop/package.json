@@ -1,0 +1,77 @@
+{
+  "name": "omos-desktop",
+  "version": "0.1.0-beta.2",
+  "private": true,
+  "description": "Open Marketing OS native desktop",
+  "desktopName": "com.openmarketingos.desktop",
+  "author": "Open Marketing OS",
+  "homepage": "https://github.com/AsamehELsayed/Open-Marketing-OS",
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "metadata": "node scripts/metadata.cjs",
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "electron-builder --linux AppImage deb --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.openmarketingos.desktop",
+    "productName": "Open Marketing OS",
+    "asar": true,
+    "directories": {
+      "output": "../dist/electron"
+    },
+    "files": [
+      "*.cjs",
+      "build-manifest.json",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../build/desktop/backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "syncDesktopName": true,
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Office",
+      "maintainer": "Open Marketing OS"
+    }
+  }
+}

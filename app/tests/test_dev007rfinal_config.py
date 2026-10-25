@@ -47,6 +47,12 @@ PRODUCT_ENV_NAMES = (
 )
 
 ENV_ALLOWLIST = {
+    # DEV-040 desktop bootstrap is explicit: the sidecar must reject an
+    # unbootstrapped desktop session, and Linux Secret Service requires the
+    # logged-in session bus. Neither value carries a provider credential.
+    "DESKTOP_SECURITY_BOOTSTRAP": frozenset({
+        "OMOS_DESKTOP_MODE", "DBUS_SESSION_BUS_ADDRESS",
+    }),
     # DEV-008: the frozen Windows launcher exports these so every mutable byte
     # lands under %LOCALAPPDATA%\OpenMarketingOS instead of the read-only
     # install folder. They are process-bootstrap paths in the same family as
@@ -102,6 +108,8 @@ FORBIDDEN_PAYLOAD_TOKENS = (
 )
 
 DYNAMIC_ENV_ALLOWLIST = {
+    "app/main.py": "DESKTOP_SECURITY_BOOTSTRAP",
+    "app/services/credentials/linux_secret_service.py": "DESKTOP_SECURITY_BOOTSTRAP",
     "app/services/credentials/store.py": "DEV_BOOTSTRAP",
     # DEV-008: user-data / workspace / log path resolution for the frozen build.
     "app/paths.py": "DEV_BOOTSTRAP",

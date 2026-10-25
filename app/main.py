@@ -30,8 +30,11 @@ def _from_json(value):
 templates.env.filters["from_json"] = _from_json
 
 
-def create_app() -> FastAPI:
+def create_app(*, desktop_mode: bool = False) -> FastAPI:
     from app import paths
+    import os
+    if os.environ.get("OMOS_DESKTOP_MODE") == "1" and not desktop_mode:
+        raise RuntimeError("Desktop session bootstrap required")
 
     app = FastAPI(title=f"Open Marketing OS v{paths.APP_VERSION}")
 

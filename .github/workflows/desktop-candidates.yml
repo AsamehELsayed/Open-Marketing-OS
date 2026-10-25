@@ -1,0 +1,68 @@
+name: Native desktop candidates (nonpublishing)
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        type: choice
+        options: [openrouter, local]
+        default: openrouter
+permissions:
+  contents: read
+jobs:
+  candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: ubuntu-24.04
+            target: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      OMOS_BUILD_EDITION: ${{ inputs.edition }}
+      OMOS_BUILD_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Linux native libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-0 libnss3 libgtk-3-0 libasound2t64 libfuse2t64 libgomp1
+      - run: python -m pip install -r requirements-lock.txt -r requirements-desktop-linux.txt PyInstaller==6.22.3
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run metadata
+        working-directory: desktop
+      - name: Fetch pinned native runtime (no models)
+        shell: bash
+        run: |
+          runtime=$(python scripts/package/fetch_desktop_runtime.py --directory build/desktop/downloads)
+          echo "OMOS_RUNTIME_ARCHIVE=$runtime" >> "$GITHUB_ENV"
+      - run: python scripts/package/build_desktop.py --runtime-archive "${{ env.OMOS_RUNTIME_ARCHIVE }}"
+      - run: npm test
+        working-directory: desktop
+      - run: npm run dist:${{ matrix.target }}
+        working-directory: desktop
+      - run: python scripts/package/build_desktop.py --hash-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}-x64-${{ inputs.edition }}
+          path: |
+            dist/electron/*.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
+            dist/electron/SHA256SUMS
+            dist/electron/candidate-manifest.json
+            desktop/build-manifest.json
+          if-no-files-found: error

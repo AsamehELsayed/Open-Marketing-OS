@@ -105,6 +105,26 @@ def _negated(text: str, start: int) -> bool:
     tail = " ".join(clause.split()[-4:])
     return bool(_NEGATOR_RE.search(tail))
 
+# "no emojis on Instagram" restricts the content style, it does not rule the
+# channel out. Only these style nouns turn a negator into a content rule.
+_STYLE_RESTRICTION_RE = re.compile(
+    r"(?<![\w'])(?:don't|do\s+not|no|without|avoid|never\s+use|skip)\s+"
+    r"(?:\w+\s+){0,2}?(?:emojis?|emoticons?|hashtags?|slang|jargon|exclamation"
+    r"(?:\s+(?:marks?|points?))?|discounts?|prices?|pricing|humou?r|puns?|"
+    r"links?|clich[eé]s?|stock\s+photos?|text|captions?|promo\w*)(?:\s+\w+)?\s+"
+    r"(?:on|in|for|from|across|with)\s+(?:the\s+|our\s+|my\s+)?$",
+    re.IGNORECASE)
+
+
+def _rules_out_channel(text: str, start: int) -> bool:
+    """A negated channel mention, unless the negator only restricts style."""
+    if not _negated(text, start):
+        return False
+    before = str(text or "")[:start].replace("’", "'")
+    clause = _CLAUSE_SPLIT_RE.split(before)[-1]
+    return not _STYLE_RESTRICTION_RE.search(clause)
+
+
 _BUSINESS_NOUNS = (
     "bakery", "cafe", "café", "coffee shop", "coffee roastery", "roastery",
     "restaurant", "salon", "barbershop", "barber shop", "spa", "studio",
@@ -150,7 +170,7 @@ def extract_channels(text: str) -> list[str]:
     found: list[tuple[int, str]] = []
     for name, pattern in _CHANNEL_PATTERNS:
         for match in re.finditer(r"(?<![\w-])(?:" + pattern + r")(?![\w])", lowered):
-            if _negated(lowered, match.start()):
+            if _rules_out_channel(lowered, match.start()):
                 continue
             found.append((match.start(), name))
             break

@@ -103,3 +103,31 @@ def test_a_fact_only_in_another_projects_intake_is_not_a_source(env, monkeypatch
                  if x["id"] == post["id"])
     assert after["current_version"] == post["current_version"]
     assert REQUEST  # bakery's own request never mentioned the discount
+
+
+def test_concurrent_revision_never_overwrites_a_newer_version(env, monkeypatch):
+    """DEV-045: an edit that lands while the model is writing wins; the slow
+    revision is reported as a conflict instead of silently replacing it."""
+    client, conn, provider = env
+    post = _generated_post(client, conn)
+    original = provider._revise
+    landed = {}
+
+    def revise_with_race(user):
+        if not landed:
+            r = client.put(
+                _url(tail=f"/deliverables/{post['id']}"),
+                json={"expected_version": post["current_version"],
+                      "content_md": post["content_md"] + "\nOWNER EDIT"})
+            landed["status"] = r.status_code
+            landed["body"] = r.text[:400]
+        return original(user)
+
+    monkeypatch.setattr(provider, "_revise", revise_with_race)
+    result = _revise(client, post)
+    assert landed["status"] == 200, landed
+    assert result.status_code == 409, result.text
+    now = next(x for x in client.get(_url(tail="/deliverables")).json()["data"]
+               if x["id"] == post["id"])
+    assert now["current_version"] == post["current_version"] + 1
+    assert "OWNER EDIT" in now["content_md"]

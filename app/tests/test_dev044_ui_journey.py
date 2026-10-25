@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -73,6 +74,18 @@ def _boot(tmp_path, monkeypatch):
     return f"http://127.0.0.1:{port}", db, server, thread, provider
 
 
+
+def _skip_or_fail(reason):
+    """Browser journeys must never be silently skipped where they are required.
+
+    CI and release gates set OMOS_REQUIRE_BROWSER=1, which turns a missing
+    prerequisite into a hard failure instead of a green "skipped".
+    """
+    if os.environ.get("OMOS_REQUIRE_BROWSER") == "1":
+        pytest.fail(f"required browser journey cannot run: {reason}")
+    pytest.skip(reason)
+
+
 def _send(page, text):
     composer = page.locator('textarea[aria-label="Chat message"]')
     composer.wait_for(state="visible", timeout=20_000)
@@ -82,11 +95,11 @@ def _send(page, text):
 
 def test_owner_journey_request_to_approved_export(tmp_path, monkeypatch):
     if not _dist_ready():
-        pytest.skip("frontend/dist missing - run `npm run build` in frontend/")
+        _skip_or_fail("frontend/dist missing - run `npm run build` in frontend/")
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
-        pytest.skip(f"playwright unavailable: {exc}")
+        _skip_or_fail(f"playwright unavailable: {exc}")
 
     base, db, server, thread, provider = _boot(tmp_path, monkeypatch)
     pw = sync_playwright().start()
@@ -94,7 +107,7 @@ def test_owner_journey_request_to_approved_export(tmp_path, monkeypatch):
         try:
             browser = pw.chromium.launch(headless=True)
         except Exception as exc:
-            pytest.skip(f"chromium unavailable: {exc}")
+            _skip_or_fail(f"chromium unavailable: {exc}")
         page = browser.new_page(viewport={"width": 1440, "height": 1000},
                                 accept_downloads=True)
 
@@ -218,11 +231,11 @@ def test_owner_journey_request_to_approved_export(tmp_path, monkeypatch):
 
 def test_go_ahead_in_chat_writes_the_proposed_plan_once(tmp_path, monkeypatch):
     if not _dist_ready():
-        pytest.skip("frontend/dist missing - run `npm run build` in frontend/")
+        _skip_or_fail("frontend/dist missing - run `npm run build` in frontend/")
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
-        pytest.skip(f"playwright unavailable: {exc}")
+        _skip_or_fail(f"playwright unavailable: {exc}")
 
     base, db, server, thread, provider = _boot(tmp_path, monkeypatch)
     pw = sync_playwright().start()
@@ -230,7 +243,7 @@ def test_go_ahead_in_chat_writes_the_proposed_plan_once(tmp_path, monkeypatch):
         try:
             browser = pw.chromium.launch(headless=True)
         except Exception as exc:
-            pytest.skip(f"chromium unavailable: {exc}")
+            _skip_or_fail(f"chromium unavailable: {exc}")
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         with deps.get_db(db) as dbc:
             convo = store.create_conversation(

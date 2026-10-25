@@ -367,3 +367,22 @@ def test_simultaneous_generate_makes_one_provider_call(env):
         t.join()
     assert sorted(outcomes) == ["already_generated", "already_generated", "ok"]
     assert sum(1 for c in provider.calls if c["kind"] == "generation") == 1
+
+
+# DEV-045: a style restriction is not a channel exclusion.
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.mark.parametrize("text,expected", [
+    ("Plan a 30-day campaign, no emojis on Instagram, email to local families",
+     ["instagram", "email"]),
+    ("No hashtags on Instagram or Facebook, just email",
+     ["instagram", "facebook", "email"]),
+    ("avoid discounts in emails and no price talk on Instagram",
+     ["instagram", "email"]),
+    ("I want an email campaign, no Instagram", ["email"]),
+    ("skip Instagram, do email", ["email"]),
+])
+def test_style_restriction_does_not_remove_channel(text, expected):
+    from app.services import campaign_request
+    assert sorted(campaign_request.extract_channels(text)) == sorted(expected)

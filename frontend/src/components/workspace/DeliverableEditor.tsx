@@ -510,7 +510,7 @@ export default function DeliverableEditor({
                     {item.title || "Untitled deliverable"}
                   </span>
                   <span className="mt-1 flex flex-wrap items-center gap-2 text-meta text-inksecondary">
-                    <span>{deliverableTypeLabel(item.type)}</span>
+                    <span>{deliverableTypeLabel(item.type, item.platform)}</span>
                     <span aria-hidden="true">·</span>
                     <span>v{item.current_version}</span>
                     <StatusBadge status={deliverableStatusLabel(item.status)} />
@@ -598,7 +598,7 @@ export default function DeliverableEditor({
                   <div className="min-w-0">
                     <h3 className="text-body font-semibold text-ink">{selected.title || "Untitled deliverable"}</h3>
                     <p className="mt-1 text-meta text-inksecondary">
-                      {deliverableTypeLabel(selected.type)}
+                      {deliverableTypeLabel(selected.type, selected.platform)}
                       {selected.platform ? ` · ${selected.platform}` : ""} · v{selected.current_version}
                       {selected.updated_at ? ` · updated ${selected.updated_at}` : ""}
                     </p>

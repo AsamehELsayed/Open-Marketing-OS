@@ -40,7 +40,7 @@ REQUIRED_ROLES = {
 }
 
 STAGES = ["planning", "implementing", "integrating", "qa", "review",
-          "remediation", "approved", "failed"]
+          "remediation", "approved", "complete", "failed"]
 
 
 def run_dir(run_id: str) -> Path:
@@ -139,30 +139,92 @@ def roles_completed(run_id: str) -> dict:
     for e in execs(run_id):
         if e.get("status") == "completed":
             art = e.get("output_artifact", "")
-            if art and (REPO / art).exists():
+            if art and (REPO / art).is_file():
                 done[e["role"]] = True
     return done
 
 
 def review_verdict(run_id: str) -> str:
-    """Latest review artifact verdict: APPROVE / APPROVE_WITH_CHANGES / BLOCK / NONE."""
-    d = run_dir(run_id)
-    cands = sorted(d.glob("review*.md"),
-                   key=lambda p: (p.stat().st_mtime, p.name))
-    if not cands:
+    """Latest real reviewer execution's artifact verdict."""
+    return execution_verdict(run_id, "reviewer")
+
+
+def execution_verdict(run_id: str, role: str) -> str:
+    """Verdict from the latest completed role execution with an existing artifact."""
+    candidates = []
+    for index, execution in enumerate(execs(run_id)):
+        if execution.get("role") != role or execution.get("status") != "completed":
+            continue
+        artifact = execution.get("output_artifact", "")
+        path = REPO / artifact if artifact else None
+        if path is not None and path.is_file():
+            candidates.append((parse_ts(execution.get("completed_at", "")), index, path))
+    if not candidates:
         return "NONE"
-    text = cands[-1].read_text(encoding="utf-8")
+    # Preserve append order as a deterministic tie-breaker for native timestamps.
+    text = max(candidates, key=lambda item: (item[0] or datetime.min, item[1]))[2].read_text(encoding="utf-8")
+    verdict = "NONE"
     for line in text.splitlines():
-        s = line.strip().upper()
-        if s.startswith("VERDICT:"):
-            v = s.split(":", 1)[1].strip()
+        s = line.strip().strip("*# ").upper()
+        if "VERDICT:" in s:
+            v = s.split("VERDICT:", 1)[1].strip().strip("*# ")
             if v.startswith("APPROVE_WITH_CHANGES"):
-                return "APPROVE_WITH_CHANGES"
-            if v.startswith("APPROVE"):
-                return "APPROVE"
-            if v.startswith("BLOCK"):
-                return "BLOCK"
-    return "NONE"
+                verdict = "APPROVE_WITH_CHANGES"
+            elif v.startswith("APPROVE"):
+                verdict = "APPROVE"
+            elif v.startswith("BLOCK"):
+                verdict = "BLOCK"
+            elif v.startswith("FAIL"):
+                verdict = "FAIL"
+            elif v.startswith("PASS"):
+                verdict = "PASS"
+            else:
+                # A later but unrecognized explicit verdict must fail closed.
+                verdict = "NONE"
+    return verdict
+
+
+def re_review_after_remediation(run_id: str) -> bool:
+    """Require a real reviewer execution after every logged run-local remediation."""
+    d = run_dir(run_id)
+    remediation_files = [path.resolve() for path in d.glob("remediation*.md")]
+    if not remediation_files:
+        return True
+
+    executions = execs(run_id)
+    remediation_times = []
+    for artifact_path in remediation_files:
+        matching = []
+        for execution in executions:
+            if (execution.get("role") not in ("implementer", "integrator")
+                    or execution.get("status") != "completed"):
+                continue
+            artifact = execution.get("output_artifact", "")
+            path = (REPO / artifact).resolve() if artifact else None
+            if path == artifact_path:
+                timestamp = parse_ts(execution.get("completed_at", ""))
+                if timestamp is None or not path.is_file():
+                    return False
+                matching.append(timestamp)
+        if not matching:
+            return False
+        remediation_times.append(max(matching))
+
+    reviewer_executions = [e for e in executions
+                           if e.get("role") == "reviewer"
+                           and e.get("status") == "completed"]
+    if not reviewer_executions:
+        return False
+    reviewer_times = []
+    for execution in reviewer_executions:
+        timestamp = parse_ts(execution.get("completed_at", ""))
+        artifact = execution.get("output_artifact", "")
+        path = (REPO / artifact).resolve() if artifact else None
+        if timestamp is None or path is None or not path.is_file():
+            return False
+        reviewer_times.append(timestamp)
+
+    return max(reviewer_times) > max(remediation_times)
 
 
 def cmd_gate(a) -> None:
@@ -178,34 +240,41 @@ def cmd_gate(a) -> None:
         print(f"GATE BLOCKED for stage '{stage}': {reason}")
         sys.exit(1)
 
+    if stage not in STAGES:
+        block(f"unknown stage: {stage}")
+
     if stage in ("implementing", "integrating", "qa", "review",
-                 "remediation", "approved"):
+                 "remediation", "approved", "complete"):
         if need_plan and not (d / "plan.md").exists():
             block("MEDIUM+ requires development/runs/<id>/plan.md before implementation")
         if need_plan and not run.get("founder_plan_approved"):
             block("MEDIUM+ requires founder plan approval "
                   "(scripts/dev_run.py approve-plan --id <run>) before implementation")
-    if stage in ("review", "remediation", "approved"):
+    if stage in ("review", "remediation", "approved", "complete"):
         if "qa" not in done:
             block("cannot claim TESTED: no completed QA execution with artifact")
-    if stage in ("approved",):
+    if stage in ("approved", "complete"):
+        qa_verdict = execution_verdict(a.id, "qa")
+        if qa_verdict != "PASS":
+            block(f"cannot claim {stage.upper()}: latest QA verdict is {qa_verdict}; PASS required")
         v = review_verdict(a.id)
         if v != "APPROVE":
-            block(f"cannot claim APPROVED: latest review verdict is {v}")
-        if cls in ("MEDIUM", "LARGE", "ARCHITECTURAL") and "reviewer" not in done:
-            block("cannot claim APPROVED: reviewer execution missing")
-    if stage == "approved" and (d / "remediation.md").exists():
-        revs = sorted(d.glob("review*.md"),
-                      key=lambda p: (p.stat().st_mtime, p.name))
-        import os
-        rem_mtime = os.path.getmtime(d / "remediation.md")
-        if not any(os.path.getmtime(r) > rem_mtime for r in revs):
-            block("remediation exists but no re-review ran after it")
+            block(f"cannot claim {stage.upper()}: latest review verdict is {v}")
+        if stage == "complete":
+            missing = [role for role in REQUIRED_ROLES[cls] if role not in done]
+            if missing:
+                block("cannot claim COMPLETE: required completed executions/artifacts missing: "
+                      + ", ".join(missing))
+        if (stage == "complete" or cls in ("MEDIUM", "LARGE", "ARCHITECTURAL")) and "reviewer" not in done:
+            block(f"cannot claim {stage.upper()}: reviewer execution missing")
+    if stage in ("approved", "complete") and any(d.glob("remediation*.md")):
+        if not re_review_after_remediation(a.id):
+            block("remediation exists but no completed reviewer execution ran after every logged output")
     print(f"GATE OPEN for stage '{stage}'")
     save_maybe = dict(run)
     save_maybe["current_stage"] = stage
-    if stage == "approved":
-        save_maybe["status"] = "approved"
+    if stage in ("approved", "complete"):
+        save_maybe["status"] = stage
     save_run(a.id, save_maybe)
 
 
@@ -249,13 +318,13 @@ def cmd_matrix(a) -> None:
 
 
 def parse_ts(s: str):
-    from datetime import datetime
-    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
-        try:
-            return datetime.strptime(s, fmt)
-        except (ValueError, TypeError):
-            continue
-    return None
+    try:
+        parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    except (AttributeError, ValueError, TypeError):
+        return None
 
 
 def cmd_parallelism(a) -> None:
@@ -299,9 +368,11 @@ def cmd_approve_plan(a) -> None:
 
 
 def cmd_set_stage(a) -> None:
-    run = load_run(a.id)
     if a.stage not in STAGES:
         sys.exit(f"unknown stage: {a.stage}")
+    if a.stage in ("approved", "complete"):
+        return cmd_gate(a)
+    run = load_run(a.id)
     run["current_stage"] = a.stage
     run["status"] = a.stage
     save_run(a.id, run)

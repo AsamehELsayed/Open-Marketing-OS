@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import ctypes
-import json
+import signal
 import subprocess
 import threading
 import time
@@ -131,6 +131,56 @@ class _WindowsManagedProcess:
             kernel.CloseHandle(handle)
 
 
+class _PosixManagedProcess:
+    """Recovered Linux process bound to start time, uid and a kernel pidfd."""
+    def __init__(self, pid: int, executable: Path, start_time: str):
+        import select
+        self.pid = pid
+        self.returncode = None
+        self._pidfd = os.pidfd_open(pid)
+        self._poller = select.poll()
+        self._poller.register(self._pidfd, select.POLLIN)
+        if self.identity(pid, executable) != start_time:
+            os.close(self._pidfd)
+            self._pidfd = None
+            raise OSError("Managed runtime identity changed")
+
+    @staticmethod
+    def identity(pid: int, executable: Path) -> str | None:
+        try:
+            proc = Path("/proc") / str(pid)
+            if proc.stat().st_uid != os.getuid() or (proc / "exe").resolve() != executable.resolve():
+                return None
+            # comm may contain spaces or parentheses: split after final ')'.
+            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+            return fields[19]  # field 22, starttime since boot
+        except (OSError, IndexError):
+            return None
+
+    def poll(self):
+        if self._poller.poll(0):
+            self.returncode = 0
+        return self.returncode
+
+    def terminate(self):
+        if self.poll() is None:
+            signal.pidfd_send_signal(self._pidfd, signal.SIGTERM)
+
+    def kill(self):
+        if self.poll() is None:
+            signal.pidfd_send_signal(self._pidfd, signal.SIGKILL)
+
+    def wait(self, timeout=None):
+        if not self._poller.poll(-1 if timeout is None else int(timeout * 1000)):
+            raise subprocess.TimeoutExpired("llama-server", timeout)
+        self.returncode = 0
+        return 0
+
+    def __del__(self):
+        if getattr(self, "_pidfd", None) is not None:
+            os.close(self._pidfd)
+
+
 class LocalRuntimeManager:
     """Owns model discovery, explicit download, server start and shutdown.
 
@@ -158,8 +208,14 @@ class LocalRuntimeManager:
         self.downloader = downloader or LocalModelDownloader(
             self.install_root, catalog=self.catalog)
         self.runtime_dir = (self.install_root / "runtime").resolve()
+        from app.paths import bundle_root, is_frozen
+        bundled_runtime = (bundle_root() / "runtime").resolve()
+        self._bundled_runtime = is_frozen() and (bundled_runtime / self.catalog.runtime.executable).is_file()
+        if self._bundled_runtime:
+            self.runtime_dir = bundled_runtime
         self.executable = (self.runtime_dir / self.catalog.runtime.executable).resolve()
-        self._require_contained(self.runtime_dir, self.install_root)
+        if not self._bundled_runtime:
+            self._require_contained(self.runtime_dir, self.install_root)
         self._require_contained(self.executable, self.runtime_dir)
         if not 1 <= int(port) <= 65535:
             raise ValueError("port must be a valid TCP port")
@@ -167,7 +223,7 @@ class LocalRuntimeManager:
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.readiness_timeout_s = max(0.1, float(readiness_timeout_s))
         self._process_factory = process_factory or subprocess.Popen
-        self._process_recover = process_recover or self._recover_windows_process
+        self._process_recover = process_recover or self._recover_owned_process
         self._probe = probe or self._http_probe
         self._monotonic = monotonic
         self._sleep = sleep
@@ -179,22 +235,23 @@ class LocalRuntimeManager:
         self._last_observation: RuntimeObservation | None = None
 
     @staticmethod
-    def _recover_windows_process(pid: int, executable: Path):
+    def _recover_owned_process(pid: int, executable: Path):
         if os.name != "nt":
-            return None
+            return None  # recovery also needs marker start identity below
         process = _WindowsManagedProcess(pid, executable)
         return process if process.poll() is None else None
 
     @property
     def _process_marker(self) -> Path:
-        return self.runtime_dir / "managed-server.json"
+        return (self.install_root / "runtime-state" / "managed-server.json"
+                if self._bundled_runtime else self.runtime_dir / "managed-server.json")
 
     def _write_process_marker(self) -> None:
         pid = getattr(self._process, "pid", None)
         if not isinstance(pid, int) or pid <= 0:
             raise LocalRuntimeError("runtime_pid_unavailable", "Managed runtime process identity is unavailable")
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
         marker = self._process_marker
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = marker.with_name(f"{marker.name}.{pid}.tmp")
         try:
             with tmp.open("x", encoding="utf-8") as stream:
@@ -202,6 +259,8 @@ class LocalRuntimeManager:
                     "pid": pid,
                     "model_id": self.catalog.model.model_id,
                     "runtime_revision": self.catalog.runtime.revision,
+                    "linux_start_time": (_PosixManagedProcess.identity(pid, self.executable)
+                                         if os.name != "nt" else None),
                 }, stream, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -216,6 +275,10 @@ class LocalRuntimeManager:
             if (pid <= 0 or marker.get("model_id") != self.catalog.model.model_id or
                     marker.get("runtime_revision") != self.catalog.runtime.revision):
                 return None
+            if os.name != "nt" and marker.get("linux_start_time"):
+                if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+                    return None
+                return _PosixManagedProcess(pid, self.executable, marker["linux_start_time"])
             return self._process_recover(pid, self.executable)
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             return None
@@ -356,6 +419,9 @@ class LocalRuntimeManager:
             }
             if os.name == "nt":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            # POSIX inherits the sidecar-owned process group, so EOF cleanup in
+            # the sidecar owns runtime descendants too. No setsid escape.
+
             try:
                 self._process = self._process_factory(args, **kwargs)
                 self._write_process_marker()
@@ -444,5 +510,6 @@ class LocalRuntimeManager:
 def get_local_runtime_manager(install_root: str | Path | None = None) -> LocalRuntimeManager:
     """Default factory; install root may be set by packaged app bootstrap."""
     if install_root is None:
-        install_root = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OpenMarketingOS"
+        from app.paths import user_data_root
+        install_root = user_data_root()
     return LocalRuntimeManager(install_root)

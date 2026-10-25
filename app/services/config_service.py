@@ -25,6 +25,15 @@ LABEL_BRIGHTDATA = "integration_brightdata"
 LABEL_META = "integration_meta"
 LABEL_OPENROUTER = "integration_openrouter"
 
+
+def _credential_encryption_label(backend_name: str) -> str:
+    """Describe the active OS vault without implying an unselected fallback."""
+    if backend_name == "dpapi_file":
+        return "Windows DPAPI (user-bound encrypted storage)"
+    if backend_name == "linux_secret_service":
+        return "Linux Secret Service (encrypted session and persistent keyring)"
+    return "Unavailable"
+
 _TEST_OVERRIDES: dict[str, Any] = {}
 
 
@@ -617,7 +626,7 @@ class ConfigService:
             backend = _vault.default_backend()
             return {
                 "vault_backend": backend.name,
-                "encryption": "OS DPAPI / scrypt" if backend.name == "dpapi_file" else backend.name,
+                "encryption": _credential_encryption_label(backend.name),
                 "active_credentials": credentials,
                 "total_stored": len(credentials),
                 "data_privacy": "Configuration, credentials, and knowledge files stay on this device.",
