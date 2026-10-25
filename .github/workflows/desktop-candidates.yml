@@ -20,7 +20,7 @@ jobs:
             target: linux
     runs-on: ${{ matrix.os }}
     env:
-      OMOS_BUILD_EDITION: ${{ inputs.edition }}
+      OMOS_BUILD_EDITION: ${{ inputs.edition || 'openrouter' }}
       OMOS_BUILD_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
       - run: python scripts/package/build_desktop.py --hash-only
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.target }}-x64-${{ inputs.edition }}
+          name: desktop-${{ matrix.target }}-x64-${{ inputs.edition || 'openrouter' }}
           path: |
             dist/electron/*.exe
             dist/electron/*.AppImage
