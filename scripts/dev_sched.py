@@ -1,7 +1,7 @@
 """Concurrent worker scheduler for development runs (stdlib only).
 
 The external development orchestrator uses this to launch independent worker
-PROCESSES concurrently (asyncio subprocesses — e.g. `opencode run` CLI
+PROCESSES concurrently (asyncio subprocesses with explicit approved CLI
 processes in isolated worktrees). Workers never sub-delegate: recursion is
 structurally impossible because a worker process has no handle on the
 orchestrator's scheduler.
@@ -11,11 +11,13 @@ Graph file: development/runs/<run_id>/graph.json
    "workers": [{"worker_id": "W1", "role": "implementer",
                 "task": "...", "depends_on": [],
                 "files_or_scope": ["app/..."], "can_run_parallel": true,
-                "command": ["opencode", "run", "--auto"],
+                "agent": "codex-worker", "command": ["approved-worker", "run"],
                 "stdin_text": "...", "worktree": true, "timeout": 900}]}
-Workers launched without an explicit command default to
-["opencode", "run", "--auto"] (auto-approval under the founder's one plan
-approval; opencode.json denies stay enforced).
+Every worker requires an explicit nonempty argv list. Missing/invalid commands
+fail closed without launching any provider. No implicit model or CLI selection.
+The caller supplies truthful agent metadata; an absent identity is recorded as
+unspecified, never attributed to a provider. Command approval and sandbox policy
+remain the orchestrator's responsibility; this scheduler is not a security sandbox.
 
 Usage:
   python scripts/dev_sched.py init --id DEV-002 --graph <graph.json> [--max 4]
@@ -42,7 +44,17 @@ import dev_run
 REPO = Path(__file__).resolve().parent.parent
 
 
-DEFAULT_WORKER_COMMAND = ["opencode", "run", "--auto"]
+def validate_command(command) -> list:
+    if (not isinstance(command, list) or not command
+            or any(not isinstance(arg, str) or not arg.strip() or "\x00" in arg
+                   for arg in command)):
+        raise ValueError("worker requires an explicit nonempty command argv list")
+    return command
+
+
+def worker_agent(w: dict) -> str:
+    return w.get("agent") or "unspecified-external-worker"
+
 
 
 def now() -> str:
@@ -118,7 +130,7 @@ def remove_worktrees(run_id: str) -> None:
 
 
 def resolve_argv(cmd: list) -> list:
-    """Same Windows-shim resolution as opencode_service._resolve_argv.
+    """Resolve an explicitly supplied executable, including Windows CLI shims.
 
     asyncio (like CreateProcess) cannot execute .CMD/.BAT/.PS1 shims
     directly; route them through COMSPEC / PowerShell with the same argv
@@ -135,8 +147,6 @@ def resolve_argv(cmd: list) -> list:
     if low.endswith(".ps1"):
         return ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
                 "Bypass", "-File", resolved, *cmd[1:]]
-    if os.path.basename(cmd[0]).lower() in ("opencode",) or low.endswith(".exe"):
-        return [resolved, *cmd[1:]]
     return [resolved, *cmd[1:]]
 
 
@@ -144,27 +154,36 @@ async def run_worker(run_id: str, w: dict, sem: asyncio.Semaphore) -> dict:
     """Run ONE worker process. Returns its execution record."""
     wid = w["worker_id"]
     cwd = str(REPO)
+    try:
+        cmd = resolve_argv(validate_command(w.get("command")))
+    except ValueError as exc:
+        rec = {"run_id": run_id, "parent_run_id": "dev-scheduler",
+               "role": w.get("role", "implementer"), "agent": worker_agent(w),
+               "task": w.get("task", wid), "started_at": now(),
+               "completed_at": now(), "status": "failed", "worker_id": wid,
+               "input_artifact": f"development/runs/{run_id}/graph.json",
+               "output_artifact": "", "note": str(exc), "cwd": cwd}
+        append_record(run_id, rec)
+        await sync_run_json(run_id, rec)
+        return rec
     if w.get("worktree"):
         try:
             cwd = str(ensure_worktree(run_id, wid))
         except Exception as e:
             rec = {"run_id": run_id, "parent_run_id": "dev-scheduler",
-                   "role": w.get("role", "implementer"), "agent": "opencode",
+                   "role": w.get("role", "implementer"), "agent": worker_agent(w),
                    "task": w.get("task", wid), "started_at": now(),
                    "completed_at": now(), "status": "failed",
                    "input_artifact": f"development/runs/{run_id}/graph.json",
                    "output_artifact": "",
-                   "note": f"worktree setup failed: {e}"}
+                   "note": f"worktree setup failed: {e}", "worker_id": wid}
             append_record(run_id, rec)
+            await sync_run_json(run_id, rec)
             return rec
-    # --auto: workers run under the founder's one plan approval.
-    # Auto-approves only permissions not explicitly denied, so the deny
-    # rules in opencode.json (rm/del/push/sudo/...) stay load-bearing.
-    cmd = resolve_argv(w.get("command", DEFAULT_WORKER_COMMAND))
     stdin_text = w.get("stdin_text")
     timeout = int(w.get("timeout", 900))
-    started = now()
     async with sem:
+        started = now()
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdin=asyncio.subprocess.PIPE if stdin_text else None,
@@ -183,12 +202,13 @@ async def run_worker(run_id: str, w: dict, sem: asyncio.Semaphore) -> dict:
                     proc.kill()
                 except Exception:
                     pass
+                await proc.communicate()
                 status, note = "failed", f"timeout after {timeout}s"
         except Exception as e:
             status, note = "failed", f"spawn failed: {e}"
     completed = now()
     rec = {"run_id": run_id, "parent_run_id": "dev-scheduler",
-           "role": w.get("role", "implementer"), "agent": w.get("agent", "opencode"),
+           "role": w.get("role", "implementer"), "agent": worker_agent(w),
            "task": w.get("task", wid), "started_at": started,
            "completed_at": completed, "status": status,
            "input_artifact": f"development/runs/{run_id}/graph.json",
@@ -259,7 +279,7 @@ async def run_all_async(run_id: str, cap: int) -> dict:
         w = by_id[wid]
         bad = [d for d in w.get("depends_on", []) if d in failed]
         rec = {"run_id": run_id, "parent_run_id": "dev-scheduler",
-               "role": w.get("role", "implementer"), "agent": w.get("agent", "opencode"),
+               "role": w.get("role", "implementer"), "agent": worker_agent(w),
                "task": w.get("task", wid), "started_at": now(),
                "completed_at": now(), "status": "blocked",
                "input_artifact": f"development/runs/{run_id}/graph.json",

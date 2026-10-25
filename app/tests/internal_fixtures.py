@@ -73,7 +73,6 @@ PRIVATE_WORKSPACE_MODULES = (
     "test_spa_api.py",            # same, via the React API surface
     "test_foundation.py",         # reads the private workspace seed
     "test_dev007_mcp.py",         # module-level migration-fragment path
-    "test_dev_parallel.py",       # needs the dev scheduler + worktree layout
 )
 
 #: DEV-008-PUBLISH-GATE: ``test_remediation.py`` used to be listed here. Its two
