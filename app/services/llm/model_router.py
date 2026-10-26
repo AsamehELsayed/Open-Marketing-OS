@@ -476,6 +476,14 @@ def extract_usage(usage: dict | None) -> dict[str, int | None]:
                     value = candidate
                 break
         out[leg] = value
+    # A provider may report a subset leg larger than its parent (some reasoning
+    # models report reasoning separately from completion tokens). The ModelCall
+    # contract rejects that, which would fail the whole request after the
+    # provider already answered. Unknown is never estimated, so drop the leg.
+    for sub, parent in (("cached_tokens", "input_tokens"),
+                        ("reasoning_tokens", "output_tokens")):
+        if out[sub] is not None and out[parent] is not None and out[sub] > out[parent]:
+            out[sub] = None
     return out
 
 
