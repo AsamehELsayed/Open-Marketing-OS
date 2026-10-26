@@ -161,3 +161,22 @@ def test_failed_database_insert_removes_new_secret_preserves_old(backend):
     assert vault.get_secret_ref('installation', 'provider', conn=conn) == previous
     assert vault.resolve(previous, conn=conn, backend=backend) == 'previous'
     assert len(backend._service.collection.items) == 1
+
+
+def test_provider_added_xdg_attributes_are_ignored_but_foreign_ones_fail_closed(backend):
+    """Regression: gnome-keyring stamps xdg:schema on items, which used to make every
+    stored credential unreadable ("invalid credential namespace")."""
+    backend.put(KEY, b'secret')
+    stored = backend._service.collection.items[0]
+    stored.attributes['xdg:schema'] = 'org.freedesktop.Secret.Generic'
+    # The fake search matches on exact equality, so mimic a real provider's subset match.
+    collection = backend._service.collection
+    collection.search_items = lambda attributes: [i for i in collection.items if all(i.attributes.get(k) == v for k, v in attributes.items())]
+    assert backend.get(KEY) == b'secret'
+    assert backend.contains(KEY)
+    backend.delete(KEY)
+    assert not backend.contains(KEY)
+    backend.put(KEY, b'secret')
+    collection.items[0].attributes['unexpected'] = 'value'
+    with pytest.raises(SecureStorageUnavailable, match='invalid credential namespace'):
+        backend.get(KEY)

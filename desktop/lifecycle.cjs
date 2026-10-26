@@ -3,7 +3,7 @@ const {spawn}=require('node:child_process');
 const {randomBytes}=require('node:crypto');
 const {join}=require('node:path');
 const {Frames,encodeFrame,validReady,HEADER}=require('./security.cjs');
-function cleanEnv(source){const out={};for(const k of ['SystemRoot','WINDIR','PATH','TEMP','TMP','HOME','USERPROFILE','LOCALAPPDATA','APPDATA','XDG_DATA_HOME','XDG_STATE_HOME','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','LANG','LC_ALL'])if(source[k])out[k]=source[k];return out;}
+function cleanEnv(source){const out={};for(const k of ['SystemRoot','WINDIR','PATH','TEMP','TMP','HOME','USERPROFILE','LOCALAPPDATA','APPDATA','PROCESSOR_ARCHITECTURE','PROCESSOR_ARCHITEW6432','XDG_DATA_HOME','XDG_STATE_HOME','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','LANG','LC_ALL'])if(source[k])out[k]=source[k];return out;}
 class Sidecar{
  constructor(manifest,resources,onExit,dependencies={}){this.spawn=dependencies.spawn||spawn;this.fetch=dependencies.fetch||fetch;this.manifest=manifest;this.resources=resources;this.onExit=onExit;this.child=null;this.origin=null;this.token=null;}
  async start(){

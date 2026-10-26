@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import struct
 import sys
 import threading
 from urllib.parse import urlsplit
@@ -33,13 +34,28 @@ def verify_spa(root):
     return root
 
 
+def _is_x64():
+    """x64 build target check that survives a cleaned environment.
+
+    Electron starts the sidecar with an allow-listed environment, and
+    platform.machine() on Windows reads PROCESSOR_ARCHITECTURE (falling back to
+    a WMI query that can fail). When the OS reports nothing, trust the pointer
+    width of this x64-only frozen binary instead of refusing to start.
+    """
+    machine = (os.environ.get('PROCESSOR_ARCHITEW6432') or os.environ.get('PROCESSOR_ARCHITECTURE')
+               or platform.machine()).lower()
+    if machine:
+        return machine in ('amd64', 'x86_64')
+    return struct.calcsize('P') == 8
+
+
 def verify_manifest(root, session):
     from app.paths import APP_VERSION
     value = json.loads((Path(root)/'build-manifest.json').read_text(encoding='utf-8'))
     expected = {'schema_version':1, 'version':APP_VERSION, 'build_id':session.build_id,
                 'edition':session.edition, 'platform':sys.platform, 'arch':'x64'}
     if (not isinstance(value,dict) or any(value.get(k) != v for k,v in expected.items())
-        or platform.machine().lower() not in ('amd64','x86_64')):
+        or not _is_x64()):
         raise ValueError('installed build manifest mismatch')
     return expected
 
@@ -83,6 +99,35 @@ def terminate_posix_group():
     # SQLite/lifespan shutdown completed; bound cleanup of TERM-ignoring trees.
     time.sleep(.2)
     os.killpg(group, signal.SIGKILL)
+
+
+def _wait_for_control_close(pipe, poll=0.2):
+    """Block until the parent sends a byte or closes the control pipe.
+
+    A blocking CRT read of fd 0 holds that descriptor's lock for as long as it
+    waits. On Windows any other thread whose DLL initialisation touches the CRT
+    descriptor table (numpy/OpenBLAS during a lazy import) then blocks forever,
+    which hung Settings in the installed app. Poll the pipe instead so no lock
+    is held while idle.
+    """
+    if os.name != 'nt':
+        pipe.read(1)
+        return
+    import ctypes
+    import msvcrt
+    import time
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.PeekNamedPipe.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                                     ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    handle = msvcrt.get_osfhandle(pipe.fileno())
+    available = wintypes.DWORD(0)
+    while True:
+        if not kernel.PeekNamedPipe(handle, None, 0, None, ctypes.byref(available), None):
+            return  # parent closed the pipe (ERROR_BROKEN_PIPE) or handle invalid
+        if available.value:
+            return
+        time.sleep(poll)
 
 
 def main():
@@ -143,7 +188,7 @@ def main():
         server = uvicorn.Server(uvicorn.Config(DesktopBoundary(app,session),log_config=None,access_log=False,log_level='critical',timeout_graceful_shutdown=3))
         def monitor():
             # No additional commands are accepted; any bytes or EOF invalidate ownership.
-            control_in.read(1)
+            _wait_for_control_close(control_in)
             request_stop()
         threading.Thread(target=monitor,daemon=True).start()
         async def run():

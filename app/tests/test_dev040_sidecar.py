@@ -131,3 +131,40 @@ def test_posix_cleanup_escalates_only_owned_group(monkeypatch):
     monkeypatch.setattr(signal,'SIGKILL',9,raising=False)
     sidecar.terminate_posix_group()
     assert calls == [('ignore',signal.SIGTERM,signal.SIG_IGN),('kill',8123,signal.SIGTERM),('wait',.2),('kill',8123,9)]
+
+
+def test_x64_check_survives_a_cleaned_environment(monkeypatch):
+    """Regression: Electron's allow-listed env has no PROCESSOR_ARCHITECTURE and
+    platform.machine() can then be empty, which used to refuse sidecar startup."""
+    from app.desktop import sidecar
+    for name in ("PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(sidecar.platform, "machine", lambda: "")
+    assert sidecar._is_x64() is True
+    monkeypatch.setattr(sidecar.struct, "calcsize", lambda _fmt: 4)
+    assert sidecar._is_x64() is False
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "ARM64")
+    assert sidecar._is_x64() is False
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    assert sidecar._is_x64() is True
+
+
+def test_control_pipe_monitor_returns_on_eof_and_on_data():
+    """The monitor must wake on parent EOF or any byte, without a blocking CRT read."""
+    import os
+    import threading
+    from app.desktop import sidecar
+    for action in ("close", "byte"):
+        read_fd, write_fd = os.pipe()
+        reader = os.fdopen(read_fd, "rb")
+        done = threading.Event()
+        threading.Thread(target=lambda: (sidecar._wait_for_control_close(reader, poll=0.01), done.set()), daemon=True).start()
+        assert not done.wait(0.1)
+        if action == "close":
+            os.close(write_fd)
+        else:
+            os.write(write_fd, b"x")
+        assert done.wait(3)
+        if action == "byte":
+            os.close(write_fd)
+        reader.close()

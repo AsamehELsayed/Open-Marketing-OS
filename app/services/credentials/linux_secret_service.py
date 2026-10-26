@@ -101,7 +101,10 @@ class LinuxSecretServiceBackend:
         for item in items:
             if item.is_locked():
                 raise SecureStorageUnavailable("Linux secure storage is locked. Unlock your desktop login keyring and retry.")
-            if item.get_attributes() != attributes:
+            # Real providers (gnome-keyring, KWallet) add their own "xdg:" bookkeeping
+            # attributes such as xdg:schema; those are not part of our namespace.
+            actual = {k: v for k, v in item.get_attributes().items() if not k.startswith("xdg:")}
+            if actual != attributes:
                 raise SecureStorageUnavailable("Linux secure storage returned an invalid credential namespace.")
         return items
 
