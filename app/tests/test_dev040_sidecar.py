@@ -137,16 +137,14 @@ def test_x64_check_survives_a_cleaned_environment(monkeypatch):
     """Regression: Electron's allow-listed env has no PROCESSOR_ARCHITECTURE and
     platform.machine() can then be empty, which used to refuse sidecar startup."""
     from app.desktop import sidecar
-    for name in ("PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432"):
-        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(sidecar.platform, "machine", lambda: "")
     assert sidecar._is_x64() is True
     monkeypatch.setattr(sidecar.struct, "calcsize", lambda _fmt: 4)
     assert sidecar._is_x64() is False
-    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "ARM64")
-    assert sidecar._is_x64() is False
-    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    monkeypatch.setattr(sidecar.platform, "machine", lambda: "AMD64")
     assert sidecar._is_x64() is True
+    monkeypatch.setattr(sidecar.platform, "machine", lambda: "ARM64")
+    assert sidecar._is_x64() is False
 
 
 def test_control_pipe_monitor_returns_on_eof_and_on_data():

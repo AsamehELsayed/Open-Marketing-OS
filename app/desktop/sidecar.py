@@ -39,11 +39,11 @@ def _is_x64():
 
     Electron starts the sidecar with an allow-listed environment, and
     platform.machine() on Windows reads PROCESSOR_ARCHITECTURE (falling back to
-    a WMI query that can fail). When the OS reports nothing, trust the pointer
-    width of this x64-only frozen binary instead of refusing to start.
+    a WMI query that can fail). The launcher forwards that
+    variable, but when the OS still reports nothing trust the pointer width of this
+    x64-only frozen binary instead of refusing to start.
     """
-    machine = (os.environ.get('PROCESSOR_ARCHITEW6432') or os.environ.get('PROCESSOR_ARCHITECTURE')
-               or platform.machine()).lower()
+    machine = platform.machine().lower()
     if machine:
         return machine in ('amd64', 'x86_64')
     return struct.calcsize('P') == 8
