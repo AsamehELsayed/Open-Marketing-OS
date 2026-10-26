@@ -4,10 +4,10 @@ const path=require('node:path');
 const {Sidecar}=require('./lifecycle.cjs');
 const {requestHeaders,exactOrigin,externalURL}=require('./security.cjs');
 const manifest=require('./build-manifest.json');
-let window,backend,quitting=false,starting=false;
+let window,backend,quitting=false,starting=false,recovering=false;
 const state={origin:null,token:null,contentsId:null};
 function invalidate(){state.origin=null;state.token=null;}
-async function recover(message){if(quitting||starting)return;invalidate();if(window){window.removeAllListeners('closed');window.destroy();}window=null;const result=await dialog.showMessageBox({type:'error',title:'Open Marketing OS',message,buttons:['Retry','Quit'],defaultId:0,cancelId:1});if(result.response===0)await launch();else app.quit();}
+async function recover(message){if(quitting||starting||recovering)return;recovering=true;invalidate();if(window){window.removeAllListeners('closed');window.destroy();}window=null;const result=await dialog.showMessageBox({type:'error',title:'Open Marketing OS',message,buttons:['Retry','Quit'],defaultId:0,cancelId:1});if(result.response===0){recovering=false;await launch();}else app.quit();}
 async function launch(){if(starting||quitting)return;starting=true;invalidate();if(backend)await backend.stop();
  try{backend=new Sidecar(manifest,process.resourcesPath,()=>{if(!starting&&!quitting)void recover('The local service stopped. Your saved data is preserved.');});await backend.start();
  const dedicated=session.fromPartition(`omos-${require('node:crypto').randomUUID()}`,{cache:false});
@@ -29,6 +29,6 @@ async function launch(){if(starting||quitting)return;starting=true;invalidate();
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
  ipcMain.handle('desktop:status',event=>{if(event.sender.id!==state.contentsId||event.senderFrame!==event.sender.mainFrame||!exactOrigin(event.senderFrame.url,state.origin))throw Error('Unauthorized');return {version:manifest.version,edition:manifest.edition,connected:!!state.origin};});
- app.whenReady().then(launch);app.on('window-all-closed',()=>app.quit());
+ app.whenReady().then(launch);app.on('window-all-closed',()=>{if(!recovering)app.quit();});
  app.on('before-quit',event=>{if(quitting)return;event.preventDefault();quitting=true;invalidate();void backend?.stop().finally(()=>app.quit());});
  process.on('uncaughtException',()=>{invalidate();void backend?.stop().finally(()=>app.exit(1));});process.on('SIGTERM',()=>app.quit());process.on('SIGINT',()=>app.quit());}
