@@ -1,10 +1,10 @@
 # Phase 3: Windows Beta Acceptance (Open Marketing OS 0.1.0-beta.2)
 
-**Decision: NO-GO for a limited Windows beta pilot until one real-AI campaign completes end to end.**
-Everything that can be tested without a real model is GO-ready. The real-model path was exercised once with an
-authorized OpenRouter key and **did not complete** (section 5b). The decision flips to GO when checklist item 4
-(on a funded account with a capable model) passes, items 1-3 and 5 pass, and you accept the unsigned-installer
-SmartScreen warning. This is not a public-release decision.
+**Decision: CONDITIONAL GO for a limited Windows beta pilot** (build 03c4ebfa, CI run 40417018537).
+The full journey (chat, plan, generate, revise, approve, export, second project, restart) completed in the installed
+app with a real OpenRouter model, once, on one free model. It becomes GO when the manual checklist (items 1-3, 5)
+passes on a clean Windows account, you accept the unsigned-installer SmartScreen warning, and the pilot is told to use a
+capable model (free models are very slow, section 5b). Not a public-release decision.
 
 Build success and runtime acceptance are reported separately. Nothing is marked PASS unless it was executed.
 
@@ -12,7 +12,10 @@ Build success and runtime acceptance are reported separately. Nothing is marked 
 | Run | Commit | Windows | Linux | Note |
 |---|---|---|---|---|
 | 40273844902 | 88f24e1d | success | success | Phase 2 baseline (given) |
-| 40403299813 | 1809cec9 | success | success | Phase 3 fix build (this branch, workflow_dispatch) |
+| 40403299813 | 1809cec9 | success | success | Phase 3 crash-recovery fix build (this branch, workflow_dispatch) |
+| 40406294249 | 5b9d75fa | success | success | + usage-accounting fix |
+| 40412126804 | 2dca08a3 | success | success | + labelled-suggestion validator and prompt |
+| 40417018537 | 03c4ebfa | success | success | **Final**: + call-to-action validator fix |
 
 CI success means the installer builds and unit tests pass. It says nothing about runtime behaviour (section 3).
 The regular backend `CI` workflow only runs on pull requests; no PR was opened, so it did not run on this branch.
@@ -22,12 +25,14 @@ The regular backend `CI` workflow only runs on pull requests; no PR was opened, 
 |---|---|---|---|
 | Run 40273844902 installer | 51c1fdbc3aef...84570cb8 | match (also matches candidate-manifest) | 88f24e1d...-40273844902-1 |
 | Run 40403299813 installer | c1843338ae0f...ae8f866 | match | 1809cec9...-40403299813-1 |
-| Run 40406294249 installer (final) | 080299cfa594...bcd3b5 | match | 5b9d75fa...-40406294249-1 |
+| Run 40406294249 installer | 080299cfa594...bcd3b5 | match | 5b9d75fa...-40406294249-1 |
+| Run 40412126804 installer | a2ced1954f27...125162 | match | 2dca08a3...-40412126804-1 |
+| Run 40417018537 installer (final) | c804d6f1fa28...5cd9d6 | match | 03c4ebfa...-40417018537-1 |
 
 These are the real CI bytes downloaded with `gh`, not a local rebuild. Both installers are **not code-signed**
 (`Get-AuthenticodeSignature`: NotSigned), so SmartScreen will warn.
 
-## 3. Runtime acceptance (executed on the installed app, run-40403299813 build)
+## 3. Runtime acceptance (executed on the installed app; run-40403299813 build, repeated unchanged on the final 03c4ebfa build)
 Method: silent NSIS install to a normal path, isolated LOCALAPPDATA/APPDATA, real Electron window driven over CDP.
 Harness: `scripts/acceptance/windows/`. 30 of 31 checks PASS. The one FAIL is the harness's own cleanup `taskkill`
 erroring because no sidecar was left (the expected state). The same suite on the 88f24e1d build had a real FAIL
@@ -57,52 +62,58 @@ Settings, connect key, persistence across restart, install/uninstall behaviour, 
 | 3 | High | A real reasoning model reported `reasoning_tokens` above `output_tokens`; the strict ModelCall check threw away the provider's answer and failed the generation | Fixed in `model_router.extract_usage` (a subset leg larger than its parent is treated as unknown); regression test added; build 5b9d75fa (run 40406294249, Windows and Linux green) |
 
 
+| 4 | High | The evidence gate refused any figure in a labelled creative suggestion (e.g. posting cadence), and the prompt did not tell models how to label suggestions or fill "Persisted user facts" | Fixed (commit 2dca08a3): labelled suggestion lines may carry content-plan figures (posts, stories, emails, days, weeks); prices, discounts, percentages, dates, results, outcome targets and figures that could restate a source are still refused; prompt updated; tests added |
+| 5 | Medium | A labelled call to action naming "followers" was refused only because the word is on the high-risk list | Fixed (commit 03c4ebfa): exempt only labelled lines that start with a call-to-action verb, contain no figure, no other high-risk term and no outcome verb; "followers have doubled", "boost followers", "reach 10k followers" are still refused; tests added |
+
 ## 5. Chat, plan, generate, revise, approve, export
 - **From source, deterministic provider, real Chromium against the real app:** `test_dev044_ui_journey.py` 2/2 PASS (includes revise, approved-only export, persistence after reload, cross-project 404).
-- **Installed app:** only chat, plan, and the no-provider generate failure were executed. **Generate, revise, approve and export in the installed app are NOT executed.** They need a real OpenRouter key, and the provider URL is hard-coded and the sidecar environment allowlisted, so no deterministic provider can be injected without weakening the security boundary. The owner authorized one real run; it did not complete (section 5b).
+- **Installed app:** only chat, plan, and the no-provider generate failure were executed. **Generate, revise, approve and export in the installed app are NOT executed.** They need a real OpenRouter key, and the provider URL is hard-coded and the sidecar environment allowlisted, so no deterministic provider can be injected without weakening the security boundary. The owner authorized one real run; see section 5b for the executed result.
 
-## 5b. Real OpenRouter run (authorized, executed, did NOT complete)
+## 5b. Real OpenRouter run (authorized, executed)
 Installed app, isolated profile, key entered by the owner in Settings (never read or logged by me; profile and key
 deleted afterwards). Provider test: Credential Configured, Provider Healthy, Capability Verified.
-Chat to campaign card and plan worked with the real app. Then "Write this content":
 
-| Attempt | Build | Model | Result |
+Attempts, in order. Each failure exposed a real defect that no deterministic test could:
+| # | Build | Model | Result |
 |---|---|---|---|
-| 1 | 88f24e1d+fix1 (1809cec9) | recursive/flint-v1.0:free | **Bug**: provider answered but `reasoning_tokens > output_tokens` failed the strict ModelCall contract, so the whole generation was rejected. Fixed (defect 3). |
-| 2 | 5b9d75fa | recursive/flint-v1.0:free | Model answered; app refused strategy_brief: "Persisted user facts" held a paraphrase not found in the owner's words/profile (persisted_fact_source_match). Nothing saved. |
-| 3 | 5b9d75fa | recursive/flint-v1.0:free | Same gate refused again (quoted its own campaign title as a "fact"). Nothing saved. |
-| 4 | 5b9d75fa | anthropic/claude-haiku-5.5 (paid) | "Provider request failed" after 5 s; no model_calls row. Cause not visible (message is sanitized). Likely no OpenRouter credit, unconfirmed. |
-| 5 | 5b9d75fa | nvidia/nemotron-3.5-super-vl:free | Gate refused: "5 feed posts per week plus 3 stories" flagged as an unsupported number (numeric_source_match) although labelled a creative suggestion. Nothing saved. |
+| 1 | 1809cec9 | recursive/flint-v1.0:free | Bug: `reasoning_tokens > output_tokens` failed the ModelCall contract, rejecting the whole answer. Fixed (defect 3). |
+| 2-3 | 5b9d75fa | recursive/flint-v1.0:free | Evidence gate refused the strategy brief: model restated the campaign title under "Persisted user facts". Prompt now says how to fill that section. |
+| 4 | 5b9d75fa | anthropic/claude-haiku-5.5 | "Provider request failed" after 5 s, cause not visible (likely no account credit, unconfirmed). Haiku was not tested further. |
+| 5 | 5b9d75fa | nvidia/nemotron-3.5-super-vl:free | Gate refused "5 feed posts per week plus 3 stories" in a labelled suggestion. Gate now accepts content-plan figures on labelled suggestion lines (defect 4). |
+| 6 | 2dca08a3 | nvidia/nemotron-3.5-super-vl:free | Chat to campaign card OK (551 s). Generate OK: 3 AI drafts saved (276 s), export disabled until approval. Revise refused: "Suggestion: Invite followers to share a childhood bakery memory..." (only "followers" tripped the gate). Fixed (defect 5). |
+| 7 | 03c4ebfa | nvidia/nemotron-3.5-super-vl:free | **Revise OK, send to review OK, approve OK, approved-only export OK.** |
 
-Cost: the free-model calls were recorded at 0.0; the Haiku request did not complete. No deliverable was ever
-produced, so **revise, approve and export in the installed app are NOT executed**, and the second-project check
-with real content was not done (isolation was proven without content in section 3).
+Evidence from attempt 7 (final build):
+- Export zip (HTTP 200, 999 bytes) held only the approved social post (approved version 4) and the summary; the other two items were listed as "NOT INCLUDED (not approved yet)".
+- Second project created through the GUI: its campaign list, chat list and campaign page showed none of the first project's content; the first project's work package and approved export requested through the second project's id returned 404.
+- After a clean quit and relaunch the 3 deliverables persisted (strategy_brief DRAFT, ad_copy DRAFT, social_post APPROVED).
+- Cost: all runs used free models (recorded cost 0.0). The Haiku request did not complete.
 
-What this shows:
-- The refusals are the product's honesty gates working as designed and failing safe (nothing fabricated, nothing saved, clear message, app stays up).
-- But all 3 free-model generations that reached the gates were refused, so the first-run experience on a weak or free model is "it never writes anything". A beta user will hit this. Either recommend a capable model in the OpenRouter edition (default is `openrouter/auto`, which may route anywhere), or make the gates and the prompt tolerant of clearly labelled suggestions. I did not loosen the gates: that is a product decision.
-- Defect 3 was invisible to every deterministic test and only a real provider exposed it.
+Caveats, stated plainly:
+- One successful run, on one free model. This proves the plumbing end to end; it does not prove output quality or reliability across models. Haiku or any paid model was not verified.
+- The free model is slow: chat turn 551 s, generation 276 s. A pilot user will think the app hung unless told. Recommend a capable paid model.
+- The saved "deliverable" is the model's four-section working document (Persisted user facts, Retrieved evidence, AI suggestions, Unknown information), not ready-to-post copy. That is a product-quality observation, not a defect in the release gate.
+- Export was fetched through the same API the Download button uses; the native Save dialog was not driven.
 
 ## 6. Other automated tests run
-Desktop unit tests 9/9. Router/model/campaign backend subset: 624 passed, 0 failed, 7 skipped
+Full backend suite on commit 2dca08a3: 3080 passed, 0 failed, 85 skipped (one file, `test_w2_langchain_first.py`, excluded: chromadb import mismatch in this machine's Python env). Validator tests on the final commit: 106/106; campaign/deliverable/journey subset 322 passed. Desktop unit tests 9/9. Earlier router subset: 624 passed, 0 failed, 7 skipped
 (`test_w2_langchain_first.py` excluded: chromadb import mismatch in this machine's Python env, same as Phase 2).
-The full backend suite was not re-run locally this phase.
+The full suite was not re-run on the final commit 03c4ebfa after its small validator change (the relevant subsets were).
 
 ## 7. NOT executed
-Real-model chat and the real OpenRouter path; installed-app generate/revise/approve/export; uninstall and credential
-persistence re-test on the fix build; clean-VM or Windows 10 install; SmartScreen flow; reboot persistence; sleep/resume;
+A paid or capable model (Haiku failed at the provider; cause unknown); output quality across models; the native Save dialog for downloads; uninstall and credential persistence re-test on the fix build; clean-VM or Windows 10 install; SmartScreen flow; reboot persistence; sleep/resume;
 antivirus interaction; the full backend CI on this branch. Linux was not tested and is not required for this decision.
 
 ## 8. Remaining blockers and risks
 No code blocker. Open items:
-1. Manual checklist, especially the one real-key campaign run (needs authorization).
+1. Manual checklist items 1-3 and 5 on a clean Windows account (item 4, the real-key run, was executed by me on one free model; repeat with a capable paid model if the pilot will use one).
 2. Unsigned installer.
-3. The fix is on branch `claude/windows-beta-acceptance-phase-3-ad1d9b` and is **not merged** into the integration branch. The build you ship must contain commit 5b9d75fa (the usage fix) on top of 1809cec9.
+3. The fix is on branch `claude/windows-beta-acceptance-phase-3-ad1d9b` and is **not merged** into the integration branch. The build you ship must contain commit 03c4ebfa (usage fix, labelled-suggestion and call-to-action validator changes, crash-recovery fix).
 4. The native Retry dialog was exercised by a synthetic Enter keypress on the default button, not by a human click.
 
 ## Exact release-readiness status
-- Build: green (Windows and Linux, run 40406294249 at 5b9d75fa; earlier 40403299813 and 40273844902)
-- Artifact integrity: verified
-- Windows runtime, automated, no real AI: PASS
-- Windows runtime, real AI: ATTEMPTED, NOT COMPLETED (usage bug fixed; evidence gates refused all 3 free-model generations that reached them; Haiku call failed at the provider, cause unconfirmed). Blocks GO.
+- Build: green (Windows and Linux, run 40417018537 at 03c4ebfa; installer sha256 c804d6f1...5ac5cd9d6 matches SHA256SUMS)
+- Windows runtime, automated, no real AI: PASS (30 of 31; the one FAIL is the harness's own cleanup `taskkill` finding nothing to kill)
+- Windows runtime, real AI, installed app: PASS once, on one free model (chat, plan, generate, revise, approve, export, second project, restart)
+- Not verified: paid/capable model, output quality, clean-machine/Windows 10, human-click recovery dialog, SmartScreen flow
 - Merge / tag / publish: not done, awaiting your approval

@@ -9,7 +9,7 @@ from the CI artifact. Record PASS/FAIL and a screenshot for any FAIL.
 2. **Persistence across reboot (10 min)**: create a business, reboot, relaunch. The business is still there.
 3. **Crash recovery by a human (5 min)**: in Task Manager end `omos-sidecar.exe` while the app is open. A dialog offers Retry/Quit.
    Click Retry: the app returns with data intact. Repeat and click Quit: the app closes with no stray processes.
-4. **One real campaign run, NEEDS YOUR AUTHORIZATION (20 min, low-cost model)**: Settings, AI & Models, connect your own
+4. **One real campaign run with a capable paid model (20 min; already passed once on a free model, see the Phase 3 report, section 5b; free models take 5-10 minutes per step)**: Settings, AI & Models, connect your own
    OpenRouter key. Chat "Create a 30-day Instagram and email campaign for local families", review the plan, Write this content,
    revise one item, send to review, approve, download the approved .zip. The zip must contain only approved items.
    Create a second project and confirm none of the first project's content appears.
