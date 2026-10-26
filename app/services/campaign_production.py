@@ -523,7 +523,15 @@ _SCHEMA_RULES = (
     "Retrieved evidence: cite supplied evidence only as [document_id:chunk_id] "
     "copied exactly from the supplied list. If no evidence was supplied, write "
     "'No project evidence available' and cite nothing.\n"
-    "AI suggestions: clearly labelled suggestions, not facts.\n"
+    "Persisted user facts: list only wording copied exactly from the request "
+    "or profile, one per line. Never restate the campaign title or summary, and "
+    "never paraphrase, there. If there is nothing to copy, write 'No persisted "
+    "facts supplied.'\n"
+    "AI suggestions: start every suggestion with 'Suggestion:'. Content-plan "
+    "quantities such as posting cadence, number of posts, emails or days are "
+    "allowed only on such lines. Never put prices, discounts, percentages, "
+    "dates, results, or targets such as followers, customers, leads or sales "
+    "in a suggestion.\n"
     "Unknown or unsupported information: anything you could not verify from "
     "the profile, brief, or evidence, including what is still missing."
 )
@@ -1059,6 +1067,42 @@ _FUTURE_METRIC_RECOMMENDATION_RE = re.compile(
     r"ctr|roas|roi|impressions?|clicks?))*\s+after\s+launch\.?\s*$")
 
 
+_SUGGESTION_LABEL_RE = re.compile(
+    r"(?i)^\W*(?:suggest(?:ion|ed)|recommend(?:ation|ed)|idea|proposed)\b[^:\r\n]{0,60}:")
+_FIGURE_THAT_IS_A_CLAIM_RE = re.compile(
+    r"(?i)[$€£%]|\b(?:EGP|USD|EUR|GBP|CAD|AUD|percent(?:age)?)\b"
+    r"|\d[\d,.]*\s*k?\s+(?:new\s+|more\s+|extra\s+)?"
+    r"(?:customers?|leads?|orders?|conversions?|saves?|visits?|sign-?ups?|"
+    r"subscribers?|enquir(?:y|ies)|bookings?)\b")
+
+
+_PLAN_UNITS = (r"posts?|stor(?:y|ies)|reels?|carousels?|emails?|newsletters?|"
+               r"sends?|videos?|captions?|variations?|ads?|times|days?|weeks?|"
+               r"months?")
+_PLAN_FIGURE_RE = re.compile(
+    rf"(?i)(?<![\w.])\d+(?:\s+[a-z-]+){{0,2}}\s+(?:{_PLAN_UNITS})\b(?!\s*\d)"
+    rf"|(?<![\w.])(?:day|week|month)\s+\d+\b")
+
+
+def _is_labelled_planning_suggestion(statement: str) -> bool:
+    """A clearly labelled suggestion whose figures are only a content plan.
+
+    "Suggestion: 5 feed posts and 3 stories per week" is a creative idea, not a
+    business fact. Anything that reads as a price, discount, percentage, date,
+    result or outcome target (high-risk terms, currency, percent, customer or
+    lead counts) is not exempt and still has to match a source.
+    """
+    if not (_SUGGESTION_LABEL_RE.search(statement)
+            and not _HIGH_RISK_TERMS.search(statement)
+            and not _FIGURE_THAT_IS_A_CLAIM_RE.search(statement)):
+        return False
+    # Every figure must be a content-plan quantity; a figure that could restate
+    # a source fact ("4 cups", "-4 degrees") must still match that source.
+    figures = list(_NUMERIC_TOKEN_RE.finditer(_normalize_safe_quantities(statement)))
+    planned = list(_PLAN_FIGURE_RE.finditer(statement))
+    return bool(figures) and len(planned) == len(figures)
+
+
 def _markdown_sections(text: str) -> list[tuple[str, str]]:
     """Split markdown into heading-local bodies without carrying context forward."""
     sections: list[tuple[str, list[str]]] = []
@@ -1106,6 +1150,11 @@ def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label:
             # figures, or any other factual claim still pass through validation.
             if (section_heading.startswith("ai suggestions")
                     and _FUTURE_METRIC_RECOMMENDATION_RE.fullmatch(statement)):
+                continue
+            # A labelled creative suggestion may carry content-plan figures
+            # (cadence, counts, durations). Only in the AI suggestions section.
+            if (section_heading.startswith("ai suggestions")
+                    and _is_labelled_planning_suggestion(statement)):
                 continue
 
             normalized_statement = _normalize_safe_quantities(statement)

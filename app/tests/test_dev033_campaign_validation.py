@@ -796,3 +796,66 @@ def test_rejection_diagnostic_is_bounded_project_scoped_and_actionable():
     assert diagnostic["can_revise"] is True
     assert diagnostic["can_retry"] is True
     assert "Nothing was saved" in str(caught.value)
+
+
+# --- labelled creative suggestions may carry content-plan figures ----------
+
+@pytest.mark.parametrize("suggestion", [
+    ("**Suggested Instagram cadence:** 5 feed posts per week plus 3 stories per "
+     "week, focused on family-friendly baking moments \u2014 a creative suggestion."),
+    "Suggestion: Send 2 emails per week for 4 weeks.",
+    "- Suggestion: Run the campaign for 30 days with a recap post on day 15.",
+    "Idea: three reels and one carousel in the first week.",
+])
+def test_labelled_suggestion_may_carry_content_plan_figures(suggestion):
+    rows = _validate("No persisted facts supplied.", suggestions=suggestion)
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize("suggestion", [
+    "Post 5 feed posts per week plus 3 stories per week.",
+    "Send 2 emails per week for 4 weeks.",
+    "The bakery has 5 branches. Suggestion: post often.",
+    "Post 5 times per week (suggestion).",
+])
+def test_unlabelled_figures_in_suggestions_are_still_rejected(suggestion):
+    with pytest.raises(DeliverableValidationError) as caught:
+        _validate("No persisted facts supplied.", suggestions=suggestion)
+
+    assert caught.value.diagnostic["rule"] in {
+        "numeric_source_match", "high_risk_source_match",
+        "business_place_source_match"}
+
+
+@pytest.mark.parametrize("suggestion", [
+    "Suggestion: Offer 20% off the first order.",
+    "Suggestion: Price the box at EGP 150.",
+    "Suggestion: Aim for 50 new customers in 30 days.",
+    "Suggestion: Aim for 200 leads.",
+    "Suggestion: Announce a discount on June 5.",
+    "Suggestion: Expect revenue growth of 3 times.",
+    "Suggestion: Post daily and guarantee delivery in 2 days.",
+    "Suggestion: Reach 10k followers.",
+])
+def test_label_does_not_exempt_prices_percentages_dates_or_outcome_targets(suggestion):
+    with pytest.raises(DeliverableValidationError):
+        _validate("No persisted facts supplied.", suggestions=suggestion)
+
+
+def test_labelled_figures_are_not_exempt_outside_the_suggestions_section():
+    with pytest.raises(DeliverableValidationError):
+        _validate("Suggestion: 5 feed posts per week.")
+
+
+def test_generation_prompt_tells_the_model_how_to_label_suggestions_and_copy_facts():
+    from app.services.campaign_production import build_generation_prompt
+
+    system, _ = build_generation_prompt(
+        {"profile": {}, "brief_md": "", "evidence": []},
+        types=["strategy_brief"], user_request="Plan a launch.")
+
+    lowered = system.casefold()
+    assert "start every suggestion with 'suggestion:'" in lowered
+    assert "never restate the campaign title" in lowered
+    assert "no persisted facts supplied" in lowered
