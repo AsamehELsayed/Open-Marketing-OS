@@ -1,5 +1,9 @@
 # Phase 2 — Desktop Runtime Acceptance (Open Marketing OS 0.1.0-beta.2)
 
+> **Status update:** the Phase 2 fixes were built by CI run 40273844902 (commit 88f24e1d, Windows and Linux green).
+> That build's installer was downloaded and its checksum verified in Phase 3. See
+> `docs/acceptance-phase3-windows-beta.md` for the current Windows status. This page is the Phase 2 record and is otherwise unchanged.
+
 Verdict: **NO-GO for a limited beta on the CI artifacts of run 40246611654. GO-candidate once the fixes on
 `claude/desktop-runtime-acceptance-p2-e84f05` are rebuilt by CI and the manual checks below pass.**
 
