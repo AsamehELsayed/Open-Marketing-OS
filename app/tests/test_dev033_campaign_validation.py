@@ -859,3 +859,30 @@ def test_generation_prompt_tells_the_model_how_to_label_suggestions_and_copy_fac
     assert "start every suggestion with 'suggestion:'" in lowered
     assert "never restate the campaign title" in lowered
     assert "no persisted facts supplied" in lowered
+
+
+# --- labelled calls to action may name followers without stating a metric ----
+
+@pytest.mark.parametrize("suggestion", [
+    "Suggestion: Invite followers to share a childhood bakery memory in the comments.",
+    "- Suggestion: Ask followers to tag a friend who loves bread.",
+    "Idea: Encourage clicks on the link in bio to see the menu.",
+])
+def test_labelled_call_to_action_may_name_followers_without_a_metric(suggestion):
+    rows = _validate("No persisted facts supplied.", suggestions=suggestion)
+
+    assert rows[0]["type"] == "strategy_brief"
+
+
+@pytest.mark.parametrize("suggestion", [
+    "Invite followers to share a childhood bakery memory in the comments.",
+    "Suggestion: This will boost followers quickly.",
+    "Suggestion: Reach 10k followers.",
+    "Suggestion: Gain followers with a giveaway.",
+    "Suggestion: Offer a discount to followers.",
+    "Suggestion: Thank followers for the 5-star reviews.",
+    "Suggestion: Followers have doubled since launch.",
+])
+def test_followers_remain_refused_when_unlabelled_or_stating_a_result(suggestion):
+    with pytest.raises(DeliverableValidationError):
+        _validate("No persisted facts supplied.", suggestions=suggestion)

@@ -1084,6 +1084,41 @@ _PLAN_FIGURE_RE = re.compile(
     rf"|(?<![\w.])(?:day|week|month)\s+\d+\b")
 
 
+_ENGAGEMENT_NOUN_RE = re.compile(r"(?i)\b(?:followers?|clicks?|impressions?)\b")
+_OUTCOME_VERB_RE = re.compile(
+    r"(?i)\b(?:gain(?:s|ing)?|grow(?:s|ing)?|growth|boosts?|increas(?:e|es|ing)|"
+    r"reach(?:es)?|attract(?:s|ing)?|brings?|drives?)\b")
+
+
+_CALL_TO_ACTION_VERBS = frozenset({
+    "invite", "ask", "encourage", "prompt", "remind", "thank", "tell", "show",
+    "share", "reply", "tag", "poll", "include", "add", "link", "direct", "send",
+    "post", "run", "use", "create", "feature", "host", "start", "try", "let",
+    "highlight", "answer", "respond", "celebrate", "spotlight", "repost",
+})
+
+
+def _is_labelled_engagement_suggestion(statement: str) -> bool:
+    """A labelled call to action that names an audience, such as
+    "Suggestion: Invite followers to share a memory in the comments."
+
+    "followers/clicks/impressions" are on the high-risk list because they are
+    performance metrics. With no figure, no other high-risk term and no outcome
+    verb ("boost", "gain", "reach"), the line states no metric or result.
+    """
+    label = _SUGGESTION_LABEL_RE.search(statement)
+    if label is None:
+        return False
+    first = re.match(r"\W*([a-z]+)", statement[label.end():], re.IGNORECASE)
+    if first is None or first.group(1).casefold() not in _CALL_TO_ACTION_VERBS:
+        return False
+    return bool(not re.search(r"\d", statement)
+                and _ENGAGEMENT_NOUN_RE.search(statement)
+                and not _OUTCOME_VERB_RE.search(statement)
+                and not _HIGH_RISK_TERMS.search(_ENGAGEMENT_NOUN_RE.sub("", statement))
+                and not _FIGURE_THAT_IS_A_CLAIM_RE.search(statement))
+
+
 def _is_labelled_planning_suggestion(statement: str) -> bool:
     """A clearly labelled suggestion whose figures are only a content plan.
 
@@ -1154,7 +1189,8 @@ def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label:
             # A labelled creative suggestion may carry content-plan figures
             # (cadence, counts, durations). Only in the AI suggestions section.
             if (section_heading.startswith("ai suggestions")
-                    and _is_labelled_planning_suggestion(statement)):
+                    and (_is_labelled_planning_suggestion(statement)
+                         or _is_labelled_engagement_suggestion(statement))):
                 continue
 
             normalized_statement = _normalize_safe_quantities(statement)
