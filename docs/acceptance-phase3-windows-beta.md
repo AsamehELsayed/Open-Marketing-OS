@@ -18,7 +18,7 @@ Build success and runtime acceptance are reported separately. Nothing is marked 
 | 40417018537 | 03c4ebfa | success | success | **Final**: + call-to-action validator fix |
 
 CI success means the installer builds and unit tests pass. It says nothing about runtime behaviour (section 3).
-The regular backend `CI` workflow only runs on pull requests; no PR was opened, so it did not run on this branch.
+The regular `CI` workflow (backend 3.11 and 3.12, frontend, secret hygiene, packaging, skills provenance, Windows DPAPI) runs on pull requests. On PR #17 it first failed on 6 items that came from the Phase 2 integration code (a fake test key not allowlisted in the secret scan; Linux-only assumptions in 5 tests that had only ever run on Windows). Test and allowlist fixes only; no product code changed. **All 8 checks pass on commit 54a0493a.** No product or installer file changed after build 03c4ebfa, so that installer is still the tested candidate.
 
 ## 2. Artifact integrity (executed)
 | Artifact | SHA-256 | vs SHA256SUMS | Embedded build id |
@@ -98,7 +98,7 @@ Caveats, stated plainly:
 ## 6. Other automated tests run
 Full backend suite on commit 2dca08a3: 3080 passed, 0 failed, 85 skipped (one file, `test_w2_langchain_first.py`, excluded: chromadb import mismatch in this machine's Python env). Validator tests on the final commit: 106/106; campaign/deliverable/journey subset 322 passed. Desktop unit tests 9/9. Earlier router subset: 624 passed, 0 failed, 7 skipped
 (`test_w2_langchain_first.py` excluded: chromadb import mismatch in this machine's Python env, same as Phase 2).
-The full suite was not re-run on the final commit 03c4ebfa after its small validator change (the relevant subsets were).
+CI ran the full backend suite on Linux (3.11 and 3.12) at 54a0493a: pass.
 
 ## 7. NOT executed
 A paid or capable model (Haiku failed at the provider; cause unknown); output quality across models; the native Save dialog for downloads; uninstall and credential persistence re-test on the fix build; clean-VM or Windows 10 install; SmartScreen flow; reboot persistence; sleep/resume;
