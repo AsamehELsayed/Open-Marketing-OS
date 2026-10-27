@@ -456,37 +456,25 @@ def extract_deliverable_parts(content_md: str) -> dict:
         r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b",
         text,
     )
-    if first_audit and first_audit.start() > 0:
-        final_copy = text[:first_audit.start()].strip()
-        audit_md = text[first_audit.start():].strip()
-        return {
-            "final_copy": final_copy,
-            "audit_md": audit_md,
-            "has_final_copy": bool(final_copy),
-            "has_audit": bool(audit_md),
-        }
-
-    sugg_match = re.search(r"(?im)^\s*#{1,6}\s*(?:AI suggestions|Recommendations)\s*$", text)
-    if sugg_match:
-        sugg_after = text[sugg_match.end():]
-        next_h = re.search(
-            r"(?im)^\s*#{1,6}\s*(?:Unknown or unsupported information|Missing information)\b",
-            sugg_after,
-        )
-        raw_sugg = sugg_after[:next_h.start()].strip() if next_h else sugg_after.strip()
-        lines = []
-        for line in raw_sugg.splitlines():
-            cleaned = re.sub(r"(?i)^\s*-\s*Suggestion(?:,\s*not a fact)?:\s*", "", line)
-            cleaned = re.sub(r"(?i)^Suggestion(?:,\s*not a fact)?:\s*", "", cleaned)
-            if cleaned.strip():
-                lines.append(cleaned.strip())
-        final_copy = "\n\n".join(lines)
-        return {
-            "final_copy": final_copy or text,
-            "audit_md": text,
-            "has_final_copy": bool(final_copy),
-            "has_audit": True,
-        }
+    if first_audit:
+        if first_audit.start() > 0:
+            final_copy = text[:first_audit.start()].strip()
+            audit_md = text[first_audit.start():].strip()
+            return {
+                "final_copy": final_copy,
+                "audit_md": audit_md,
+                "has_final_copy": bool(final_copy),
+                "has_audit": bool(audit_md),
+            }
+        else:
+            # Begins immediately with audit sections; no final copy exists.
+            # Do NOT promote AI suggestions into publish-ready copy as a fallback.
+            return {
+                "final_copy": "",
+                "audit_md": text,
+                "has_final_copy": False,
+                "has_audit": True,
+            }
 
     return {
         "final_copy": text,

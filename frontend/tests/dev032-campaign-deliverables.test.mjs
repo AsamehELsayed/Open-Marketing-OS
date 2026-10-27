@@ -48,6 +48,7 @@ const {
   normalizeDeliverableList,
   normalizeRevision,
   normalizeRevisionList,
+  parseDeliverableContent,
   summarizeRevision,
 } = await import(
   await moduleUrl("../src/components/workspace/deliverables.ts", { "../../api/client.ts": CLIENT_URL })
@@ -484,6 +485,52 @@ assert.equal(
   "conversation.md",
   "the chat export still refuses an extension it did not ask for",
 );
+
+// ---------------------------------------------------------------------------
+// Deliverable parsing: clean separation of ready-to-post copy and audit trail
+// ---------------------------------------------------------------------------
+
+const parsedFinal = parseDeliverableContent(`## Final copy
+Warm morning loaves baked daily.
+
+Stop by today!
+
+## Persisted user facts
+- Audience: local families
+
+## Retrieved evidence
+No project evidence available
+
+## AI suggestions
+Suggestion: Post early.
+
+## Unknown or unsupported information
+None.`);
+
+assert.equal(parsedFinal.hasFinalCopy, true);
+assert.equal(parsedFinal.hasAudit, true);
+assert.match(parsedFinal.finalCopy, /Warm morning loaves baked daily/);
+assert.match(parsedFinal.auditMd, /## Persisted user facts/);
+assert.ok(!parsedFinal.finalCopy.includes("## Persisted user facts"));
+
+// AI suggestions must NOT be promoted to final copy as a fallback
+const parsedAuditOnly = parseDeliverableContent(`## Persisted user facts
+- Product: Organic flour
+
+## Retrieved evidence
+No project evidence available
+
+## AI suggestions
+- Suggestion, not a fact: Buy one get one free.
+Suggestion: Try it today.
+
+## Unknown or unsupported information
+None.`);
+
+assert.equal(parsedAuditOnly.hasFinalCopy, false, "Audit-only output must not set hasFinalCopy");
+assert.equal(parsedAuditOnly.finalCopy, "", "AI suggestions must not be promoted to final copy");
+assert.equal(parsedAuditOnly.hasAudit, true);
+assert.match(parsedAuditOnly.auditMd, /Buy one get one free/);
 
 console.log(
   "DEV-032 campaign deliverables: scoped calls, editor/status/history rules, exports, and stale-scope discard passed",

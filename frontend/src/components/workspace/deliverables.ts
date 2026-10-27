@@ -332,38 +332,23 @@ export function parseDeliverableContent(contentMd: string): ParsedDeliverableCon
   const firstAuditMatch = text.match(
     /^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b/im
   );
-  if (firstAuditMatch && typeof firstAuditMatch.index === "number" && firstAuditMatch.index > 0) {
-    const finalCopy = text.slice(0, firstAuditMatch.index).trim();
-    const auditMd = text.slice(firstAuditMatch.index).trim();
+  if (firstAuditMatch && typeof firstAuditMatch.index === "number") {
+    if (firstAuditMatch.index > 0) {
+      const finalCopy = text.slice(0, firstAuditMatch.index).trim();
+      const auditMd = text.slice(firstAuditMatch.index).trim();
+      return {
+        finalCopy,
+        auditMd,
+        hasFinalCopy: Boolean(finalCopy),
+        hasAudit: Boolean(auditMd),
+      };
+    }
+    // Begins immediately with audit sections; no final copy exists.
+    // Do NOT promote AI suggestions into publish-ready copy as a fallback.
     return {
-      finalCopy,
-      auditMd,
-      hasFinalCopy: Boolean(finalCopy),
-      hasAudit: Boolean(auditMd),
-    };
-  }
-
-  const suggMatch = text.match(/^\s*#{1,6}\s*(?:AI suggestions|Recommendations)\s*$/im);
-  if (suggMatch && typeof suggMatch.index === "number") {
-    const after = text.slice(suggMatch.index + suggMatch[0].length);
-    const nextH = after.match(
-      /^\s*#{1,6}\s*(?:Unknown or unsupported information|Missing information)\b/im
-    );
-    const rawSugg = (nextH && typeof nextH.index === "number" ? after.slice(0, nextH.index) : after).trim();
-    const lines = rawSugg
-      .split(/\r?\n/)
-      .map((l) =>
-        l
-          .replace(/^\s*[-*+]\s*Suggestion(?:,\s*not a fact)?:\s*/i, "")
-          .replace(/^Suggestion(?:,\s*not a fact)?:\s*/i, "")
-          .trim()
-      )
-      .filter(Boolean);
-    const finalCopy = lines.join("\n\n");
-    return {
-      finalCopy: finalCopy || text,
+      finalCopy: "",
       auditMd: text,
-      hasFinalCopy: Boolean(finalCopy),
+      hasFinalCopy: false,
       hasAudit: true,
     };
   }

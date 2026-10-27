@@ -86,7 +86,8 @@ def test_extract_deliverable_parts_with_final_copy():
     assert "## AI suggestions" in parts["audit_md"]
 
 
-def test_extract_deliverable_parts_legacy_fallback():
+def test_extract_deliverable_parts_no_suggestion_fallback():
+    """AI suggestions must NEVER be promoted to publish-ready copy as a fallback."""
     sample = (
         "## Persisted user facts\n"
         "- Audience: local families\n\n"
@@ -99,10 +100,123 @@ def test_extract_deliverable_parts_legacy_fallback():
         "None.\n"
     )
     parts = deliverables.extract_deliverable_parts(sample)
+    assert parts["has_final_copy"] is False, "Suggestions must not be promoted to final copy!"
+    assert parts["final_copy"] == ""
+    assert parts["has_audit"] is True
+    assert "Handcrafted breads baked fresh daily." in parts["audit_md"]
+
+
+def test_social_post_ready_to_post_contract():
+    social_sample = (
+        "## Final copy\n"
+        "Crispy crust, tender crumb, and nothing artificial. We wake up before sunrise "
+        "so your family starts the morning right. 🥖☀️\n\n"
+        "Stop by today for our fresh sourdough loaves!\n"
+        "#FreshBaking #ArtisanBread #FamilyBakery\n\n"
+        "## Persisted user facts\n"
+        "- Product: Artisan sourdough\n\n"
+        "## Retrieved evidence\n"
+        "No project evidence available\n\n"
+        "## AI suggestions\n"
+        "Suggestion: Post at 7:30 AM.\n\n"
+        "## Unknown or unsupported information\n"
+        "None.\n"
+    )
+    parts = deliverables.extract_deliverable_parts(social_sample)
     assert parts["has_final_copy"] is True
     assert parts["has_audit"] is True
-    assert "Handcrafted breads baked fresh daily." in parts["final_copy"]
-    assert "Visit today." in parts["final_copy"]
+    assert "#FreshBaking" in parts["final_copy"]
+    assert "Crispy crust" in parts["final_copy"]
+    assert "## Persisted user facts" not in parts["final_copy"]
+    assert "Suggestion: Post at 7:30 AM." in parts["audit_md"]
+
+
+def test_email_subject_and_body_ready_to_post_contract():
+    email_sample = (
+        "## Final copy\n"
+        "Subject: Warm morning loaves are fresh out of the oven!\n\n"
+        "Good morning,\n\n"
+        "There is nothing quite like warm, fresh bread on a crisp morning. "
+        "Come join us this weekend and bring home something special for breakfast.\n\n"
+        "Warmly,\n"
+        "The Neighborhood Bakers\n\n"
+        "## Persisted user facts\n"
+        "- Audience: local families\n\n"
+        "## Retrieved evidence\n"
+        "No project evidence available\n\n"
+        "## AI suggestions\n"
+        "Suggestion: Send on Friday morning.\n\n"
+        "## Unknown or unsupported information\n"
+        "None.\n"
+    )
+    parts = deliverables.extract_deliverable_parts(email_sample)
+    assert parts["has_final_copy"] is True
+    assert parts["has_audit"] is True
+    assert "Subject: Warm morning loaves" in parts["final_copy"]
+    assert "Good morning," in parts["final_copy"]
+    assert "## Persisted user facts" not in parts["final_copy"]
+
+
+def test_ad_copy_headline_and_cta_contract():
+    ad_sample = (
+        "## Final copy\n"
+        "Headline: Handcrafted Bread Made Fresh Daily\n"
+        "Body: Wholesome ingredients and artisan recipes made for family tables. Taste real craft.\n"
+        "Call to action: Visit Bakery\n\n"
+        "## Persisted user facts\n"
+        "- Audience: local families\n\n"
+        "## Retrieved evidence\n"
+        "No project evidence available\n\n"
+        "## AI suggestions\n"
+        "Suggestion: Target parents within 5 miles.\n\n"
+        "## Unknown or unsupported information\n"
+        "None.\n"
+    )
+    parts = deliverables.extract_deliverable_parts(ad_sample)
+    assert parts["has_final_copy"] is True
+    assert "Headline: Handcrafted Bread" in parts["final_copy"]
+    assert "Call to action: Visit Bakery" in parts["final_copy"]
+    assert "Suggestion: Target parents" not in parts["final_copy"]
+
+
+def test_malformed_and_incomplete_model_responses():
+    """Ensure malformed model outputs are rejected by output validation."""
+    context = {"evidence_ids": [], "project_id": "p_test"}
+
+    # Missing all headings
+    with pytest.raises(production.DeliverableValidationError) as exc:
+        production.validate_generated_items(
+            '## DELIVERABLE type="social_post" title="Post" platform="Instagram"\n'
+            'Just some raw copy without required audit sections.\n',
+            types=["social_post"], allowed_ids=[], context=context, user_request=""
+        )
+    assert "did not separate" in str(exc.value)
+
+    # Missing requested type
+    with pytest.raises(production.DeliverableValidationError) as exc:
+        production.validate_generated_items(
+            '## DELIVERABLE type="ad_copy" title="Ad" platform=""\n'
+            '## Final copy\nAd copy\n'
+            '## Persisted user facts\nNo persisted facts supplied.\n'
+            '## Retrieved evidence\nNo project evidence available\n'
+            '## AI suggestions\nSuggestion: test\n'
+            '## Unknown or unsupported information\nNone.\n',
+            types=["social_post"], allowed_ids=[], context=context, user_request=""
+        )
+    assert "asked for social_post" in str(exc.value) or "omitted requested deliverable type" in str(exc.value)
+
+    # Unsupported citations in content
+    with pytest.raises(production.DeliverableValidationError) as exc:
+        production.validate_generated_items(
+            '## DELIVERABLE type="social_post" title="Post" platform="Instagram"\n'
+            '## Final copy\nPost text\n'
+            '## Persisted user facts\nNo persisted facts supplied.\n'
+            '## Retrieved evidence\nFabricated claim [doc1:chunk99]\n'
+            '## AI suggestions\nSuggestion: test\n'
+            '## Unknown or unsupported information\nNone.\n',
+            types=["social_post"], allowed_ids=[], context=context, user_request=""
+        )
+    assert "unsupported" in str(exc.value).lower() or "citation" in str(exc.value).lower()
 
 
 def test_approved_package_export_structure(client_env):
@@ -159,19 +273,20 @@ def test_cross_process_db_lock_and_recovery(client_env):
     assert exc_info.value.status == 409
     assert exc_info.value.code == "generation_in_progress"
 
-    # 3. Simulate stale lock (started 200s ago)
+    # 3. Simulate stale lock (started and last heartbeat 200s ago)
     stale_time = (datetime.now(timezone.utc) - timedelta(seconds=200)).isoformat()
     meta["generation_in_progress"]["started_at"] = stale_time
+    meta["generation_in_progress"]["heartbeat_at"] = stale_time
     production._write_campaign_metadata(conn, "p_test", "c_lock", meta)
 
     # 4. New acquisition recovers stale lock automatically
-    flow._acquire_db_lock(conn, "p_test", "c_lock", "turn-3")
+    lease3 = flow._acquire_db_lock(conn, "p_test", "c_lock", "turn-3")
     campaign_after = deliverables._require_scope(conn, "p_test", "c_lock")
     meta_after = json.loads(campaign_after["workflow_json"])
     assert meta_after["generation_in_progress"]["turn_id"] == "turn-3"
 
-    # 5. Release cleans up
-    flow._release_db_lock(conn, "p_test", "c_lock")
+    # 5. Release cleans up with lease token
+    flow._release_db_lock(conn, "p_test", "c_lock", lease3)
     campaign_clean = deliverables._require_scope(conn, "p_test", "c_lock")
     meta_clean = json.loads(campaign_clean["workflow_json"])
     assert "generation_in_progress" not in meta_clean

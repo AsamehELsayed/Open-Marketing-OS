@@ -493,8 +493,18 @@ def build_generation_context(conn, *, project_id: str, campaign_title: str = "",
 _SCHEMA_RULES = (
     "Return Markdown only. For every deliverable emit exactly one block that "
     'begins with a heading of the form \'## DELIVERABLE type="<type>" '
-    'title="<title>" platform="<platform>"\', where <type> is one of: {types}. '
-    "The block body must contain these four headings in this order: "
+    'title="<title>" platform="<platform>"\', where <type> is one of: {types}.\n\n'
+    "The block body MUST begin with a heading '## Final copy' containing the complete, "
+    "publish-ready marketing copy for that deliverable:\n"
+    "- If type is social_post: publish-ready post caption with engaging hook, body copy, "
+    "clear call-to-action, and relevant hashtags.\n"
+    "- If platform is Email or type is email: publish-ready email with 'Subject: <subject line>' "
+    "followed by the complete email greeting, body copy, CTA, and sign-off.\n"
+    "- If type is ad_copy: publish-ready ad with 'Headline: <headline>', 'Body: <ad body copy>', "
+    "and 'Call to action: <CTA>'.\n"
+    "- If type is strategy_brief, creative_brief, or content_calendar: the complete, ready-to-use "
+    "strategic brief or editorial schedule.\n\n"
+    "Immediately following Final copy, the block must contain these four audit sections in this exact order: "
     "## Persisted user facts, ## Retrieved evidence, ## AI suggestions, and "
     "## Unknown or unsupported information.\n"
     "Use these factual categories throughout every block:\n"

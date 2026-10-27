@@ -95,98 +95,294 @@ def save_answers(conn, project_id: str, campaign_id: str, answers: dict) -> dict
 
 _GEN_LOCKS: dict[str, threading.Lock] = {}
 _GEN_LOCKS_GUARD = threading.Lock()
-STALE_LOCK_TIMEOUT_SECONDS = 180
+DEFAULT_LEASE_TIMEOUT_SECONDS = 60
+HEARTBEAT_INTERVAL_SECONDS = 5.0
 
 
-def _acquire_db_lock(conn, project_id: str, campaign_id: str, turn_id: str) -> None:
-    """Acquire generation lock in database to prevent duplicate writes across processes."""
-    campaign = deliverables._require_scope(conn, project_id, campaign_id)
-    raw_meta = campaign.get("workflow_json") or "{}"
+def _acquire_db_lock(conn, project_id: str, campaign_id: str, turn_id: str,
+                     *, lease_timeout_s: int = DEFAULT_LEASE_TIMEOUT_SECONDS) -> str:
+    """Acquire generation lease in database using an atomic transaction.
+
+    Returns the unique owner token for fencing. Raises FlowError(409) if an active lease exists.
+    """
+    deliverables._require_scope(conn, project_id, campaign_id)
+    if getattr(conn, "in_transaction", False):
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    acquired_tx = False
+    for attempt in range(10):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            acquired_tx = True
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+                time.sleep(0.05)
+                continue
+            raise FlowError(f"Database lock error: {exc}", status=500)
+    if not acquired_tx:
+        raise FlowError("Database is currently busy; retry in a moment.", status=409, code="generation_in_progress")
+
     try:
-        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-    except (TypeError, ValueError):
-        meta = {}
+        row = conn.execute(
+            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+            (campaign_id, project_id),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            raise deliverables.DeliverableNotFound(f"Campaign {campaign_id} not found in project {project_id}")
 
-    in_prog = meta.get("generation_in_progress")
-    if isinstance(in_prog, dict):
-        started_str = in_prog.get("started_at")
-        started_dt = None
-        if started_str:
+        raw_meta = row[0] or "{}"
+        try:
+            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+        except (TypeError, ValueError):
+            meta = {}
+
+        in_prog = meta.get("generation_in_progress")
+        if isinstance(in_prog, dict):
+            active_str = in_prog.get("heartbeat_at") or in_prog.get("started_at")
+            active_dt = None
+            if active_str:
+                try:
+                    active_dt = datetime.fromisoformat(active_str)
+                except Exception:
+                    pass
+            if active_dt:
+                now_dt = datetime.now(timezone.utc)
+                if active_dt.tzinfo is None:
+                    active_dt = active_dt.replace(tzinfo=timezone.utc)
+                elapsed = (now_dt - active_dt).total_seconds()
+                owner_timeout = int(in_prog.get("lease_timeout_s") or lease_timeout_s)
+                if elapsed < owner_timeout:
+                    started_str = in_prog.get("started_at") or active_str
+                    try:
+                        started_dt = datetime.fromisoformat(started_str)
+                        if started_dt.tzinfo is None:
+                            started_dt = started_dt.replace(tzinfo=timezone.utc)
+                        total_elapsed = int((now_dt - started_dt).total_seconds())
+                    except Exception:
+                        total_elapsed = int(elapsed)
+                    conn.rollback()
+                    raise FlowError(
+                        f"Content is already being written for this campaign (started {total_elapsed}s ago).",
+                        status=409,
+                        code="generation_in_progress",
+                        extra={"started_at": started_str, "elapsed_s": total_elapsed},
+                    )
+
+        lease_token = uuid.uuid4().hex
+        now_iso = datetime.now(timezone.utc).isoformat()
+        meta["generation_in_progress"] = {
+            "owner_token": lease_token,
+            "pid": os.getpid(),
+            "turn_id": str(turn_id or ""),
+            "started_at": now_iso,
+            "heartbeat_at": now_iso,
+            "lease_timeout_s": int(lease_timeout_s),
+        }
+        conn.execute(
+            "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+            (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+        )
+        conn.commit()
+        return lease_token
+    except Exception:
+        if getattr(conn, "in_transaction", False):
             try:
-                started_dt = datetime.fromisoformat(started_str)
+                conn.rollback()
             except Exception:
                 pass
-        if started_dt:
-            now_dt = datetime.now(timezone.utc)
-            if started_dt.tzinfo is None:
-                started_dt = started_dt.replace(tzinfo=timezone.utc)
-            elapsed = (now_dt - started_dt).total_seconds()
-            if elapsed < STALE_LOCK_TIMEOUT_SECONDS:
-                raise FlowError(
-                    f"Content is already being written for this campaign (started {int(elapsed)}s ago).",
-                    status=409,
-                    code="generation_in_progress",
-                    extra={"started_at": started_str, "elapsed_s": int(elapsed)},
-                )
-
-    meta["generation_in_progress"] = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "pid": os.getpid(),
-        "turn_id": str(turn_id or ""),
-    }
-    production._write_campaign_metadata(conn, project_id, campaign_id, meta)
+        raise
 
 
-def _release_db_lock(conn, project_id: str, campaign_id: str) -> None:
-    """Release generation lock in database."""
+def _heartbeat_db_lock(conn, project_id: str, campaign_id: str, lease_token: str) -> bool:
+    """Extend the lease for an active in-flight generation. Returns True if lease renewed."""
+    if not lease_token:
+        return False
+    if getattr(conn, "in_transaction", False):
+        try:
+            conn.commit()
+        except Exception:
+            pass
     try:
-        campaign = deliverables._require_scope(conn, project_id, campaign_id)
-        raw_meta = campaign.get("workflow_json") or "{}"
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+            (campaign_id, project_id),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        meta = json.loads(row[0] or "{}")
+        in_prog = meta.get("generation_in_progress")
+        if isinstance(in_prog, dict) and in_prog.get("owner_token") == lease_token:
+            in_prog["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+                (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+            )
+            conn.commit()
+            return True
+        conn.rollback()
+        return False
+    except Exception:
+        if getattr(conn, "in_transaction", False):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+
+
+def _verify_db_lock(conn, project_id: str, campaign_id: str, lease_token: str) -> bool:
+    """Fencing check: verify that this owner_token still holds the valid active lease."""
+    if not lease_token:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+            (campaign_id, project_id),
+        ).fetchone()
+        if not row:
+            return False
+        meta = json.loads(row[0] or "{}")
+        in_prog = meta.get("generation_in_progress")
+        return isinstance(in_prog, dict) and in_prog.get("owner_token") == lease_token
+    except Exception:
+        return False
+
+
+def _release_db_lock(conn, project_id: str, campaign_id: str,
+                     lease_token: str | None = None, *, force: bool = False) -> bool:
+    """Release generation lock in database. Only the lease owner (or force) may release."""
+    if lease_token is None and not force:
+        return False
+    if getattr(conn, "in_transaction", False):
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+            (campaign_id, project_id),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        raw_meta = row[0] or "{}"
         meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-        if isinstance(meta, dict) and "generation_in_progress" in meta:
+        in_prog = meta.get("generation_in_progress")
+        if force or (isinstance(in_prog, dict) and (lease_token is None or in_prog.get("owner_token") == lease_token)):
             meta.pop("generation_in_progress", None)
-            production._write_campaign_metadata(conn, project_id, campaign_id, meta)
+            conn.execute(
+                "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+                (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+            )
+            conn.commit()
+            return True
+        conn.rollback()
+        return False
+    except Exception:
+        if getattr(conn, "in_transaction", False):
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+
+
+def _start_lease_heartbeat(conn, project_id: str, campaign_id: str, lease_token: str,
+                           stop_event: threading.Event, interval_s: float = HEARTBEAT_INTERVAL_SECONDS) -> threading.Thread | None:
+    db_path = None
+    try:
+        rows = conn.execute("PRAGMA database_list").fetchall()
+        for r in rows:
+            f = r["file"] if hasattr(r, "keys") else r[2]
+            if f and f not in ("", ":memory:"):
+                db_path = Path(f)
+                break
     except Exception:
         pass
+    if not db_path:
+        return None
+
+    def _worker():
+        try:
+            hb_conn = sqlite3.connect(str(db_path), timeout=5.0)
+            hb_conn.execute("PRAGMA journal_mode=WAL;")
+            while not stop_event.wait(interval_s):
+                try:
+                    ok = _heartbeat_db_lock(hb_conn, project_id, campaign_id, lease_token)
+                    if not ok:
+                        break
+                except Exception:
+                    pass
+            hb_conn.close()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_worker, daemon=True, name=f"lease-hb-{campaign_id[:8]}")
+    t.start()
+    return t
 
 
 def generate_from_plan(conn, *, project_id: str, campaign_id: str,
                        turn_id: str = "", provider: str = "",
-                       model_id: str = "") -> dict:
+                       model_id: str = "", lease_timeout_s: int = DEFAULT_LEASE_TIMEOUT_SECONDS) -> dict:
     """Serialise per campaign so a double click makes one provider call."""
     with _GEN_LOCKS_GUARD:
         lock = _GEN_LOCKS.setdefault(f"{project_id}:{campaign_id}",
                                      threading.Lock())
-    # Reject overlapping calls immediately; a queued retry after failure could
-    # otherwise start a second expensive provider request without user intent.
     deliverables._require_scope(conn, project_id, campaign_id)
     if not lock.acquire(blocking=False):
         raise FlowError("Content is already being written for this campaign.",
                         status=409, code="generation_in_progress")
     t0 = time.time()
+    lease_token = None
+    stop_heartbeat = threading.Event()
+    hb_thread = None
     try:
-        _acquire_db_lock(conn, project_id, campaign_id, turn_id)
+        lease_token = _acquire_db_lock(
+            conn, project_id, campaign_id, turn_id, lease_timeout_s=lease_timeout_s
+        )
+        hb_thread = _start_lease_heartbeat(
+            conn, project_id, campaign_id, lease_token, stop_heartbeat
+        )
         result = _generate_from_plan(
             conn, project_id=project_id, campaign_id=campaign_id,
-            turn_id=turn_id, provider=provider, model_id=model_id)
+            turn_id=turn_id, provider=provider, model_id=model_id,
+            lease_token=lease_token)
         result["elapsed_s"] = round(time.time() - t0, 2)
         return result
     finally:
+        stop_heartbeat.set()
+        if hb_thread and hb_thread.is_alive():
+            hb_thread.join(timeout=2.0)
         try:
-            _release_db_lock(conn, project_id, campaign_id)
+            if lease_token is not None:
+                _release_db_lock(conn, project_id, campaign_id, lease_token)
         finally:
             lock.release()
 
 
 def _generate_from_plan(conn, *, project_id: str, campaign_id: str,
                         turn_id: str = "", provider: str = "",
-                        model_id: str = "") -> dict:
+                        model_id: str = "", lease_token: str = "") -> dict:
     """Write the proposed deliverables for one campaign, once.
 
     Refuses (instead of guessing) while essential details are missing, and
     refuses a second generation so a double click or a repeated "go ahead"
     can never pile up duplicate drafts.
     """
+    if lease_token and not _verify_db_lock(conn, project_id, campaign_id, lease_token):
+        raise FlowError(
+            "Generation lock lease expired or was taken by another request; refusing to write state.",
+            status=409, code="lease_expired")
     campaign = deliverables._require_scope(conn, project_id, campaign_id)
     intake = _intake_of(campaign)
     profile = get_profile(conn, project_id) or {}
