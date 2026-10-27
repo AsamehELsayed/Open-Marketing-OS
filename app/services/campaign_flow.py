@@ -101,10 +101,18 @@ def generate_from_plan(conn, *, project_id: str, campaign_id: str,
     with _GEN_LOCKS_GUARD:
         lock = _GEN_LOCKS.setdefault(f"{project_id}:{campaign_id}",
                                      threading.Lock())
-    with lock:
+    # Reject overlapping calls immediately; a queued retry after failure could
+    # otherwise start a second expensive provider request without user intent.
+    deliverables._require_scope(conn, project_id, campaign_id)
+    if not lock.acquire(blocking=False):
+        raise FlowError("Content is already being written for this campaign.",
+                        status=409, code="generation_in_progress")
+    try:
         return _generate_from_plan(
             conn, project_id=project_id, campaign_id=campaign_id,
             turn_id=turn_id, provider=provider, model_id=model_id)
+    finally:
+        lock.release()
 
 
 def _generate_from_plan(conn, *, project_id: str, campaign_id: str,

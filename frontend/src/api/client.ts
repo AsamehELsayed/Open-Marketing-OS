@@ -970,7 +970,7 @@ export const api = {
       method: "PUT", body: JSON.stringify({ answers }),
     }),
   generateCampaignContent: (project_id: string, campaign_id: string) =>
-    request<{ created: string[]; titles: string[] }>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/generate`, { method: "POST" }),
+    request<{ created: string[]; titles: string[]; provider: string; model: string }>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/generate`, { method: "POST" }),
   aiReviseCampaignDeliverable: (project_id: string, campaign_id: string, deliverable_id: string, instruction: string) =>
     request<SpaCampaignDeliverable>(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/ai-revise`, {
       method: "POST", body: JSON.stringify({ instruction }),
