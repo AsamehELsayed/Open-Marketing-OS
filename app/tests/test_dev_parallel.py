@@ -303,8 +303,8 @@ def test_worktree_isolation():
         assert not (p2 / "w1-only.txt").exists()
         lst = subprocess.run(["git", "worktree", "list", "--porcelain"],
                              cwd=str(REPO), capture_output=True, text=True)
-        norm = lst.stdout.replace("/", "\\")
-        assert str(p1) in norm and str(p2) in norm
+        norm = lst.stdout.replace("\\", "/")
+        assert p1.as_posix() in norm and p2.as_posix() in norm
     finally:
         dev_sched.remove_worktrees("TESTWT")
     assert not p1.exists() and not p2.exists()

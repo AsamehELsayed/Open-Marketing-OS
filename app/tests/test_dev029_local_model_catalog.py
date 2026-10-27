@@ -1,5 +1,6 @@
 """Provenance and schema checks for the pinned Local profile."""
 import json
+import sys
 
 import pytest
 
@@ -27,9 +28,13 @@ def test_catalog_pins_authoritative_model_shards_and_runtime():
     assert runtime.version == "b11429"
     assert runtime.source == "ggml-org/llama.cpp"
     assert runtime.revision == "d81235049384534c167caea52b85a694f6103d14"
-    assert runtime.size_bytes == 19398918
+    pinned = {
+        "win32": (19398918, "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe"),
+        "linux": (17693462, "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392"),
+    }[sys.platform if sys.platform in ("win32", "linux") else "win32"]
+    assert runtime.size_bytes == pinned[0]
     assert runtime.license == "MIT"
-    assert runtime.sha256 == "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe"
+    assert runtime.sha256 == pinned[1]
 
 
 def test_catalog_rejects_size_hash_and_path_drift(tmp_path):
