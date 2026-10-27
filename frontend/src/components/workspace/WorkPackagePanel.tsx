@@ -121,7 +121,8 @@ export default function WorkPackagePanel({ projectId, campaignId, onReview }: {
     setNotice("");
     try {
       const out = await api.generateCampaignContent(projectId, campaignId);
-      setNotice(`${out.created.length} draft(s) written${out.model ? ` using ${out.model}${out.provider ? ` (${out.provider})` : ""}` : ""}. Nothing is approved yet - review each one below.`);
+      const timeStr = out.elapsed_s ? ` in ${out.elapsed_s}s` : "";
+      setNotice(`${out.created.length} draft(s) written${out.model ? ` using ${out.model}${out.provider ? ` (${out.provider})` : ""}` : ""}${timeStr}. Nothing is approved yet - review each one below.`);
       setReload((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The content couldn’t be written. Nothing was saved.");

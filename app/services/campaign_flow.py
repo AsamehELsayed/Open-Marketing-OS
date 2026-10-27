@@ -8,9 +8,12 @@ save content that chat generation could not.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
+import os
 import re
 import threading
+import time
 import uuid
 
 from app.services import campaign_deliverables as deliverables
@@ -92,6 +95,59 @@ def save_answers(conn, project_id: str, campaign_id: str, answers: dict) -> dict
 
 _GEN_LOCKS: dict[str, threading.Lock] = {}
 _GEN_LOCKS_GUARD = threading.Lock()
+STALE_LOCK_TIMEOUT_SECONDS = 180
+
+
+def _acquire_db_lock(conn, project_id: str, campaign_id: str, turn_id: str) -> None:
+    """Acquire generation lock in database to prevent duplicate writes across processes."""
+    campaign = deliverables._require_scope(conn, project_id, campaign_id)
+    raw_meta = campaign.get("workflow_json") or "{}"
+    try:
+        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+    except (TypeError, ValueError):
+        meta = {}
+
+    in_prog = meta.get("generation_in_progress")
+    if isinstance(in_prog, dict):
+        started_str = in_prog.get("started_at")
+        started_dt = None
+        if started_str:
+            try:
+                started_dt = datetime.fromisoformat(started_str)
+            except Exception:
+                pass
+        if started_dt:
+            now_dt = datetime.now(timezone.utc)
+            if started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+            elapsed = (now_dt - started_dt).total_seconds()
+            if elapsed < STALE_LOCK_TIMEOUT_SECONDS:
+                raise FlowError(
+                    f"Content is already being written for this campaign (started {int(elapsed)}s ago).",
+                    status=409,
+                    code="generation_in_progress",
+                    extra={"started_at": started_str, "elapsed_s": int(elapsed)},
+                )
+
+    meta["generation_in_progress"] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "pid": os.getpid(),
+        "turn_id": str(turn_id or ""),
+    }
+    production._write_campaign_metadata(conn, project_id, campaign_id, meta)
+
+
+def _release_db_lock(conn, project_id: str, campaign_id: str) -> None:
+    """Release generation lock in database."""
+    try:
+        campaign = deliverables._require_scope(conn, project_id, campaign_id)
+        raw_meta = campaign.get("workflow_json") or "{}"
+        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+        if isinstance(meta, dict) and "generation_in_progress" in meta:
+            meta.pop("generation_in_progress", None)
+            production._write_campaign_metadata(conn, project_id, campaign_id, meta)
+    except Exception:
+        pass
 
 
 def generate_from_plan(conn, *, project_id: str, campaign_id: str,
@@ -107,12 +163,19 @@ def generate_from_plan(conn, *, project_id: str, campaign_id: str,
     if not lock.acquire(blocking=False):
         raise FlowError("Content is already being written for this campaign.",
                         status=409, code="generation_in_progress")
+    t0 = time.time()
     try:
-        return _generate_from_plan(
+        _acquire_db_lock(conn, project_id, campaign_id, turn_id)
+        result = _generate_from_plan(
             conn, project_id=project_id, campaign_id=campaign_id,
             turn_id=turn_id, provider=provider, model_id=model_id)
+        result["elapsed_s"] = round(time.time() - t0, 2)
+        return result
     finally:
-        lock.release()
+        try:
+            _release_db_lock(conn, project_id, campaign_id)
+        finally:
+            lock.release()
 
 
 def _generate_from_plan(conn, *, project_id: str, campaign_id: str,

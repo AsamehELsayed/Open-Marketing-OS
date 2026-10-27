@@ -421,6 +421,81 @@ def package_export(conn, project_id: str, campaign_id: str) -> bytes:
     return output.getvalue()
 
 
+def extract_deliverable_parts(content_md: str) -> dict:
+    """Separate ready-to-post deliverable copy from structured audit sections."""
+    text = str(content_md or "").strip()
+    if not text:
+        return {
+            "final_copy": "",
+            "audit_md": "",
+            "has_final_copy": False,
+            "has_audit": False,
+        }
+
+    match = re.search(r"(?im)^\s*#{1,6}\s*Final copy\s*$", text)
+    if match:
+        body_after = text[match.end():]
+        audit_match = re.search(
+            r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b",
+            body_after,
+        )
+        if audit_match:
+            final_copy = body_after[:audit_match.start()].strip()
+            audit_md = body_after[audit_match.start():].strip()
+        else:
+            final_copy = body_after.strip()
+            audit_md = ""
+        return {
+            "final_copy": final_copy,
+            "audit_md": audit_md,
+            "has_final_copy": bool(final_copy),
+            "has_audit": bool(audit_md),
+        }
+
+    first_audit = re.search(
+        r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b",
+        text,
+    )
+    if first_audit and first_audit.start() > 0:
+        final_copy = text[:first_audit.start()].strip()
+        audit_md = text[first_audit.start():].strip()
+        return {
+            "final_copy": final_copy,
+            "audit_md": audit_md,
+            "has_final_copy": bool(final_copy),
+            "has_audit": bool(audit_md),
+        }
+
+    sugg_match = re.search(r"(?im)^\s*#{1,6}\s*(?:AI suggestions|Recommendations)\s*$", text)
+    if sugg_match:
+        sugg_after = text[sugg_match.end():]
+        next_h = re.search(
+            r"(?im)^\s*#{1,6}\s*(?:Unknown or unsupported information|Missing information)\b",
+            sugg_after,
+        )
+        raw_sugg = sugg_after[:next_h.start()].strip() if next_h else sugg_after.strip()
+        lines = []
+        for line in raw_sugg.splitlines():
+            cleaned = re.sub(r"(?i)^\s*-\s*Suggestion(?:,\s*not a fact)?:\s*", "", line)
+            cleaned = re.sub(r"(?i)^Suggestion(?:,\s*not a fact)?:\s*", "", cleaned)
+            if cleaned.strip():
+                lines.append(cleaned.strip())
+        final_copy = "\n\n".join(lines)
+        return {
+            "final_copy": final_copy or text,
+            "audit_md": text,
+            "has_final_copy": bool(final_copy),
+            "has_audit": True,
+        }
+
+    return {
+        "final_copy": text,
+        "audit_md": "",
+        "has_final_copy": bool(text),
+        "has_audit": False,
+    }
+
+
 def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
     """ZIP of the last APPROVED text of each deliverable, plus a summary.
 
@@ -444,8 +519,17 @@ def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
             rev = revs[-1]
             slug = re.sub(r"[^A-Za-z0-9_-]+", "-", rev["title"]).strip("-_")[:80]
             slug = slug or rev["type"]
+            parts = extract_deliverable_parts(rev["content_md"])
+            if parts["has_final_copy"] and parts["has_audit"]:
+                export_text = (f"# {rev['title']}\n\n"
+                               f"{parts['final_copy']}\n\n"
+                               f"---\n"
+                               f"## Audit & Provenance\n\n"
+                               f"{parts['audit_md']}\n")
+            else:
+                export_text = rev["content_md"]
             archive.writestr(f"{rev['type']}/{slug}-{row['id'][:8]}.md",
-                             rev["content_md"])
+                             export_text)
             note = ""
             if rev["version"] != row["current_version"]:
                 note = (" (a newer edit is still being reviewed; "

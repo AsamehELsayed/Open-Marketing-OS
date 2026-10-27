@@ -26,4 +26,6 @@ def test_inflight_generation_is_rejected_and_lock_released(monkeypatch):
         finish.set()
         thread.join(5)
     assert not thread.is_alive()
-    assert campaign_flow.generate_from_plan(None, project_id='p', campaign_id='c') == {'ok': True}
+    res = campaign_flow.generate_from_plan(None, project_id='p', campaign_id='c')
+    assert res.get('ok') is True
+    assert 'elapsed_s' in res
