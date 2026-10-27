@@ -97,11 +97,16 @@ Audited against `frontend/`: 6 advisories reported at start of Phase 4 (followin
 
 ## 6. Priority 6: Candidate Build Integrity & Windows Verification
 
-- **Base Candidate:** `cce9d94219408b0088e1565b791ec78a51d97925`.
-- **Main Nonpublishing Candidate Run:** [run 40574847380](https://github.com/AsamehELsayed/Open-Marketing-OS/actions/runs/40574847380).
-  - SHA256: `8f7b423c877ea7fad0dd1574f8a7631475778d1498d948484aca30fc6941c180`.
-  - Matches `SHA256SUMS` and candidate manifest.
-  - Embedded build ID: `cce9d94219408b0088e1565b791ec78a51d97925-40574847380-1`.
+- **Base Main Candidate:** `cce9d94219408b0088e1565b791ec78a51d97925` (Reference run 40574847380).
+- **Phase 4 Candidate Commit:** `913d09d66381d0fb093a318f58bc5a140ec4c7ba` on branch `codex/phase4-windows-beta` (PR #18).
+- **Phase 4 Candidate Build Run:** [run 40593550741](https://github.com/AsamehELsayed/Open-Marketing-OS/actions/runs/40593550741) (`Native desktop candidates (nonpublishing)`).
+  - Candidate Artifact: `desktop-win-x64-openrouter` (195,161,063 bytes zip archive).
+  - Installer File: `Open Marketing OS Setup 0.1.0-beta.2.exe` (195,174,555 bytes).
+  - Exact SHA256 Checksum: `92d1b018740f359c2e86bc76bcc1edd28f1c89ea2ca1eca9f5f7faa02571666e`.
+  - Checksum Verification: Matches `SHA256SUMS`, `candidate-manifest.json`, and local `Get-FileHash -Algorithm SHA256`.
+  - Embedded Build ID: `913d09d66381d0fb093a318f58bc5a140ec4c7ba-40593550741-1`.
+  - Nonpublishing Guarantee: `published: false` in `candidate-manifest.json`; zero binary assets released externally.
+  - Linux Candidate: `desktop-linux-x64-openrouter` (493,731,676 bytes zip) built and verified in 4m 32s.
 - **PR #18 Candidate Verification:**
   - Branch: `codex/phase4-windows-beta`.
   - Clean frontend production build artifact generated in `frontend/dist/`.
@@ -110,7 +115,24 @@ Audited against `frontend/`: 6 advisories reported at start of Phase 4 (followin
 
 ---
 
-## 7. Automated Test Summary
+## 7. Automated Test Summary & CI Verification
+
+### GitHub Actions CI Run [40593206625](https://github.com/AsamehELsayed/Open-Marketing-OS/actions/runs/40593206625) (PR #18)
+
+| CI Job | Status | Duration | Metrics |
+|---|---|---|---|
+| Locked runtime installable and bootable | **PASS** | 36s | Pinned runtime healthy |
+| Windows tests (DPAPI credential vault) | **PASS** | 1m 59s | DPAPI encrypt/decrypt verified |
+| Packaging inputs are consistent | **PASS** | 19s | Clean supply chain consistency |
+| Desktop unit tests | **PASS** | 30s | 9 tests passed |
+| Skills provenance gate | **PASS** | 48s | 100% provenance verified |
+| Secret hygiene | **PASS** | 8s | 0 leaked credentials |
+| Frontend typecheck and build | **PASS** | 26s | Clean static bundle output |
+| Backend tests (Python 3.11) | **PASS** | 4m 09s | Full backend test suite pass |
+| Backend tests (Python 3.12) | **PASS** | 3m 45s | **3,083 passed, 99 skipped, 0 failed** (`test_fanout_concurrency_cap_respected` deterministically verified) |
+| Deterministic browser campaign journey | **PASS** | 1m 23s | Full Playwright journey pass |
+
+### Local Test Evidence
 
 | Test Suite | Scope | Result | Execution Time |
 |---|---|---|---|
@@ -127,8 +149,18 @@ Audited against `frontend/`: 6 advisories reported at start of Phase 4 (followin
 
 ---
 
-## 8. Summary & Next Steps
+## 8. Summary & Release Recommendation
 
-Phase 4 objectives have been met on branch `codex/phase4-windows-beta` without starting a new PR, without breaking existing compatibility, without speculative upgrades, and without making paid provider calls.
+**Decision: CONDITIONAL GO for Windows Beta Pilot**
 
-The candidate is ready for CI validation on PR #18.
+All seven Phase 4 priorities have been fully addressed and verified on existing Draft PR #18 (branch `codex/phase4-windows-beta`):
+1. **Concurrency test flakiness eliminated:** Deterministic synchronization with `threading.Barrier` and peak concurrency invariants.
+2. **LangChain Chroma compatibility resolved:** Pinned `langchain-chroma<1.1.0` in `requirements-optional.txt` and verified local collection.
+3. **Ready-to-post deliverables & structured audit:** Model outputs real copy with clipboard copy UI, audit trail separation, and approved-only package export.
+4. **Generation lock & request recovery:** Cross-process database locking via `campaigns.workflow_json`, 180s automatic stale recovery, and model timing visibility.
+5. **npm advisories addressed:** Fixed 2 advisories via `npm audit fix`; audited 4 remaining development/SSR advisories as non-applicable.
+6. **Fresh candidate installer verified:** Run 40593550741 produced `Open Marketing OS Setup 0.1.0-beta.2.exe` (SHA256 `92d1b018740f359c2e86bc76bcc1edd28f1c89ea2ca1eca9f5f7faa02571666e`), matching build ID `913d09d66381d0fb093a318f58bc5a140ec4c7ba-40593550741-1`.
+7. **CI verification complete:** GitHub Actions CI run 40593206625 passed 10/10 jobs on PR #18 with zero test failures.
+
+Release candidate is clean, reproducible, and ready for founder review.
+
