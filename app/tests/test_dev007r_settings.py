@@ -165,3 +165,19 @@ def test_no_raw_environment_surface_in_settings_payload(client):
         "vault://", "Traceback",
     ):
         assert token not in text
+
+
+def test_connect_openrouter_reports_unavailable_secure_storage_as_503(client):
+    """Regression: a missing/locked Linux keyring used to surface as a bare HTTP 500."""
+    from app.services.credentials.linux_secret_service import SecureStorageUnavailable
+
+    class UnavailableBackend(MemoryBackend):
+        def put(self, key, plaintext):
+            raise SecureStorageUnavailable("Linux secure storage needs a desktop session D-Bus.")
+
+    config_store.set_default_backend(UnavailableBackend())
+    secret = "sk-or-v1-unit-test-key-not-real"
+    response = client.post("/api/settings/credentials/connect", json={"target": "openrouter", "token": secret})
+    assert response.status_code == 503
+    assert "secure storage" in response.json()["detail"].lower()
+    assert secret not in response.text

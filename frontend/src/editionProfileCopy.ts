@@ -37,7 +37,7 @@ export function getStartHereProfileCopy(profileId: unknown) {
       return {
         kind: "openrouter" as const,
         title: "Set up OpenRouter",
-        text: "This edition starts with AUTO routing, Local inference disabled, and OpenRouter selected as its cloud default. Enter your own OpenRouter key in Settings → AI & Models; Windows DPAPI-backed storage protects it for your user account. No Local model download or runtime setup is required. Prompts and evidence selected for a turn are sent to OpenRouter.",
+        text: "This edition starts with AUTO routing, Local inference disabled, and OpenRouter selected as its cloud default. Enter your own OpenRouter key in Settings → AI & Models; the OS credential vault protects saved keys. No Local model download or runtime setup is required. Prompts and evidence selected for a turn are sent to OpenRouter.",
         stepTitle: "Connect OpenRouter",
         stepText: "Enter and test your own OpenRouter key. AUTO uses the configured cloud route; Local model setup is not required.",
         stepAction: "Open OpenRouter settings",
@@ -77,10 +77,10 @@ export function getAiSettingsProfileCopy(profileId: unknown) {
         kind: "openrouter" as const,
         localModelAvailable: false,
         summaryTitle: "OpenRouter edition setup",
-        summaryText: "This edition starts with AUTO routing, Local inference disabled, and OpenRouter as its cloud default. Enter and test your own OpenRouter key below; Windows stores it with DPAPI protection bound to your user account. Prompts and evidence selected for each turn are sent to OpenRouter. Downloading or starting a Local model is not required.",
+        summaryText: "This edition starts with AUTO routing, Local inference disabled, and OpenRouter as its cloud default. Enter and test your own OpenRouter key below; the OS credential vault protects saved keys. Prompts and evidence selected for each turn are sent to OpenRouter. Downloading or starting a Local model is not required.",
         routingText: "This edition starts with AUTO routing to the configured cloud provider and Local inference disabled. OpenRouter requires your own saved credential.",
         autoText: "Uses the configured cloud provider because Local inference is disabled in this edition. Set up your OpenRouter credential below.",
-        openrouterText: "Enter your own OpenRouter key here. OMOS stores it with Windows DPAPI protection; prompts and evidence selected for a turn are sent to OpenRouter for cloud inference.",
+        openrouterText: "Enter your own OpenRouter key here. OMOS saves it in the OS credential vault; prompts and evidence selected for a turn are sent to OpenRouter for cloud inference.",
       };
     default:
       return {

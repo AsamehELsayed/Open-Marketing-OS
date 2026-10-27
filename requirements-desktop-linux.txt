@@ -1,0 +1,2 @@
+# Explicit Secret Service API only: no generic keyring/backend discovery.
+SecretStorage==3.3.3; sys_platform == "linux"

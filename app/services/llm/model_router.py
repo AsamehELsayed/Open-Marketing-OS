@@ -368,6 +368,13 @@ def _local_model_enabled() -> bool:
         return True
 
 
+def _no_ai_message(cloud_provider: str) -> str:
+    if cloud_provider == "openrouter":
+        return ("Local AI is unavailable and OpenRouter is not connected. "
+                "Add an OpenRouter key in Settings.")
+    return "Local AI is unavailable and OpenAI is not configured"
+
+
 def decide_route(mode: str, *, local_available: bool = True,
                  openai_configured: bool | None = None,
                  openrouter_configured: bool | None = None,
@@ -427,13 +434,13 @@ def decide_route(mode: str, *, local_available: bool = True,
         escalation_reason = "local unavailable"
     if escalation_reason is None or escalation_reason == LOCAL_DEFAULT_REASON:
         if not local_available and not has_key:
-            raise RuntimeError("Local AI is unavailable and OpenAI is not configured")
+            raise RuntimeError(_no_ai_message(cloud_provider))
         return ModelRoute(mode="AUTO", provider="local", model=local_model,
                           reason=LOCAL_DEFAULT_REASON)
     if escalation_reason in OPENAI_ESCALATIONS:
         if not has_key:
             if escalation_reason == "local unavailable":
-                raise RuntimeError("Local AI is unavailable and OpenAI is not configured")
+                raise RuntimeError(_no_ai_message(cloud_provider))
             return ModelRoute(mode="AUTO", provider="local", model=local_model,
                               reason=f"{escalation_reason}; {OPENAI_UNAVAILABLE_NOTE}")
 
@@ -469,6 +476,14 @@ def extract_usage(usage: dict | None) -> dict[str, int | None]:
                     value = candidate
                 break
         out[leg] = value
+    # A provider may report a subset leg larger than its parent (some reasoning
+    # models report reasoning separately from completion tokens). The ModelCall
+    # contract rejects that, which would fail the whole request after the
+    # provider already answered. Unknown is never estimated, so drop the leg.
+    for sub, parent in (("cached_tokens", "input_tokens"),
+                        ("reasoning_tokens", "output_tokens")):
+        if out[sub] is not None and out[parent] is not None and out[sub] > out[parent]:
+            out[sub] = None
     return out
 
 

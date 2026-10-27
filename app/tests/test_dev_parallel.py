@@ -80,7 +80,7 @@ def make_run(run_id, classification="MEDIUM"):
     return d
 
 
-def w(wid, cmd, deps=None, out="", agent="opencode-stub"):
+def w(wid, cmd, deps=None, out="", agent="python-test-worker"):
     return {"worker_id": wid, "role": "implementer", "task": f"task-{wid}",
             "depends_on": deps or [], "files_or_scope": [f"scope/{wid}"],
             "can_run_parallel": not deps, "command": cmd,
@@ -240,7 +240,7 @@ def test_run_json_mirror(tmp_path):
         json.dumps({"max_concurrency": 1, "workers": ws}))
     asyncio.run(dev_sched.run_all_async("M1", 1))
     run = json.loads((TMP_RUNS / "M1" / "run.json").read_text())
-    assert run["workers"] == [{"worker_id": "W1", "agent": "opencode-stub",
+    assert run["workers"] == [{"worker_id": "W1", "agent": "python-test-worker",
                                "status": "completed", "artifact": ""}]
 
 
@@ -257,27 +257,36 @@ def test_approval_bridge_gate():
     assert _cli("gate", "--id", "AUTHG", "--stage", "implementing").returncode == 0
 
 
-def test_default_worker_command_is_auto():
-    assert dev_sched.DEFAULT_WORKER_COMMAND == ["opencode", "run", "--auto"]
+@pytest.mark.parametrize("command", [None, [], "codex run", [""], [123]])
+def test_missing_or_invalid_command_fails_without_launch(tmp_path, monkeypatch, command):
+    make_run("NOIMPLICIT")
+    worker = w("W1", command)
+    async def unexpected_launch(*args, **kwargs):
+        pytest.fail("invalid command must never launch a provider")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unexpected_launch)
+    (TMP_RUNS / "NOIMPLICIT" / "graph.json").write_text(json.dumps({
+        "workers": [worker, w("W2", py_cmd(WORK, tmp_path / "blocked"), deps=["W1"])]}))
+    result = asyncio.run(dev_sched.run_all_async("NOIMPLICIT", 2))
+    assert result == {"completed": [], "failed": ["W1"], "blocked": ["W2"]}
+    record = read_execs("NOIMPLICIT")[0]
+    assert "explicit nonempty command" in record["note"]
+    assert record["worker_id"] == "W1"
+    assert not (tmp_path / "blocked").exists()
 
 
-def test_opencode_json_allows_routine_denies_destructive():
-    cfg = json.loads((REPO / "opencode.json").read_text(encoding="utf-8"))
-    bash = cfg["permission"]["bash"]
-    for pat in ("python scripts/dev_run.py *", "python scripts/dev_sched.py *",
-                "python -m pytest*", "pytest*", "git status*", "git diff*",
-                "git log*", "git worktree*", "git add*", "opencode run*"):
-        assert bash.get(pat) == "allow", pat
-    for pat in ("git push *", "rm *", "del *", "Remove-Item *", "sudo *"):
-        assert bash.get(pat) == "deny", pat
-    assert bash.get("*") == "ask"
+def test_agent_identity_does_not_invent_provider(tmp_path):
+    make_run("IDENTITY")
+    worker = w("W1", py_cmd(WORK, tmp_path / "identity"))
+    del worker["agent"]
+    (TMP_RUNS / "IDENTITY" / "graph.json").write_text(json.dumps({"workers": [worker]}))
+    assert asyncio.run(dev_sched.run_all_async("IDENTITY", 1))["completed"] == ["W1"]
+    assert read_execs("IDENTITY")[0]["agent"] == "unspecified-external-worker"
 
 
-def test_resolve_argv_no_bare_shim():
-    argv = dev_sched.resolve_argv(["opencode", "run"])
-    assert argv[0].lower() != "opencode"  # never a bare shim name
-    assert Path(argv[-2] if argv[0].lower().endswith("cmd.exe")
-                else argv[0]).exists() or argv[0].lower() == "powershell"
+def test_resolve_argv_uses_explicit_executable():
+    argv = dev_sched.resolve_argv([sys.executable, "-c", "pass"])
+    assert Path(argv[0]).exists()
+    assert argv[1:] == ["-c", "pass"]
 
 
 # 9. worktree isolation -------------------------------------------------------------
@@ -294,8 +303,8 @@ def test_worktree_isolation():
         assert not (p2 / "w1-only.txt").exists()
         lst = subprocess.run(["git", "worktree", "list", "--porcelain"],
                              cwd=str(REPO), capture_output=True, text=True)
-        norm = lst.stdout.replace("/", "\\")
-        assert str(p1) in norm and str(p2) in norm
+        norm = lst.stdout.replace("\\", "/")
+        assert p1.as_posix() in norm and p2.as_posix() in norm
     finally:
         dev_sched.remove_worktrees("TESTWT")
     assert not p1.exists() and not p2.exists()
@@ -341,3 +350,15 @@ def test_gate_ordering_qa_then_review():
         "input_artifact": "i", "output_artifact": "app/main.py"}) + "\n")
     r = _cli("gate", "--id", "ORD", "--stage", "approved")
     assert r.returncode != 0 and "APPROVE" in r.stdout  # reviewer first
+
+
+def test_log_exec_preserves_worker_id():
+    assert _cli("new", "--id", "WORKERID", "--title", "worker proof", "--class", "SMALL").returncode == 0
+    result = _cli("log-exec", "--id", "WORKERID", "--role", "implementer",
+                  "--agent", "codex-worker", "--worker-id", "W0", "--task", "proof",
+                  "--started", "2026-01-01T00:00:00Z", "--completed", "2026-01-01T00:01:00Z",
+                  "--status", "completed", "--input", "AGENTS.md", "--output", "AGENTS.md")
+    assert result.returncode == 0, result.stderr
+    assert read_execs("WORKERID")[0]["worker_id"] == "W0"
+    run = json.loads((TMP_RUNS / "WORKERID" / "run.json").read_text())
+    assert run["workers"][0]["worker_id"] == "W0"

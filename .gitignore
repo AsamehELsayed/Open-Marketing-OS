@@ -53,6 +53,7 @@ logs/
 # The DPAPI ciphertext store. Useless outside the creating Windows account and
 # sensitive regardless.
 credentials/
+!app/services/credentials/
 *.bin.enc
 
 # --- models and weights -------------------------------------------------------

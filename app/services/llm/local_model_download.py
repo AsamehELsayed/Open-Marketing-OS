@@ -264,3 +264,116 @@ def download_pinned_model(install_root: str | Path, *, explicit: bool = False,
                           catalog: LocalModelCatalog | None = None) -> DownloadResult:
     """Convenience function for a single explicit download request."""
     return LocalModelDownloader(install_root, catalog=catalog).download(explicit=explicit)
+
+
+def install_runtime_archive(archive: Path, destination: Path, runtime) -> Path:
+    """Install a verified native archive; reject links, traversal and weights.
+
+    This never fetches bytes. Callers must obtain the pinned archive through an
+    explicit user action. Existing installations are never overwritten.
+    """
+    import stat
+    import tarfile
+    import zipfile
+    archive = Path(archive)
+    destination = Path(destination)
+    if archive.stat().st_size != runtime.size_bytes:
+        raise ModelDownloadError("size_mismatch", "Runtime archive size differs from pin")
+    with archive.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    if digest != runtime.sha256:
+        raise ModelDownloadError("checksum_mismatch", "Runtime archive checksum differs from pin")
+    if destination.exists():
+        raise ModelDownloadError("runtime_exists", "Runtime destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix="runtime-", dir=destination.parent))
+    total = 0
+    try:
+        def safe_name(name):
+            nonlocal total
+            path = Path(name.replace("\\", "/"))
+            if path.is_absolute() or ".." in path.parts or ":" in name or name.lower().endswith(".gguf"):
+                raise ModelDownloadError("unsafe_archive", "Runtime archive has unsafe contents")
+            target = stage / path
+            target.resolve().relative_to(stage.resolve())
+            return target
+        if runtime.asset_name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as bundle:
+                for item in bundle.infolist():
+                    target = safe_name(item.filename)
+                    if stat.S_ISLNK(item.external_attr >> 16):
+                        raise ModelDownloadError("unsafe_archive", "Runtime links are forbidden")
+                    total += item.file_size
+                    if total > 1024 * 1024 * 1024:
+                        raise ModelDownloadError("unsafe_archive", "Runtime expands beyond size limit")
+                    if item.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with bundle.open(item) as src, target.open("xb") as dst:
+                            shutil.copyfileobj(src, dst)
+        elif runtime.asset_name.endswith(".tar.gz"):
+            deferred_links = []
+            with tarfile.open(archive, "r:gz") as bundle:
+                for item in bundle:
+                    target = safe_name(item.name)
+                    if item.issym():
+                        link_name = Path(item.linkname.replace("\\", "/"))
+                        if link_name.is_absolute() or ".." in link_name.parts or ":" in item.linkname:
+                            raise ModelDownloadError("unsafe_archive", "Runtime symlink target is unsafe")
+                        deferred_links.append((target, item.linkname))
+                        continue
+                    if not item.isfile() and not item.isdir():
+                        raise ModelDownloadError("unsafe_archive", "Runtime special files are forbidden")
+                    total += item.size
+                    if total > 1024 * 1024 * 1024:
+                        raise ModelDownloadError("unsafe_archive", "Runtime expands beyond size limit")
+                    if item.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with bundle.extractfile(item) as src, target.open("xb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        target.chmod(0o755 if item.mode & 0o111 else 0o644)
+            # Pinned upstream tarballs may use relative SONAME links. Resolve
+            # and materialize only regular-file targets contained in the
+            # verified extraction root so the installed runtime has no links.
+            pending = list(deferred_links)
+            while pending:
+                remaining = []
+                installed = 0
+                for target, link_name in pending:
+                    if target.exists():
+                        raise ModelDownloadError("unsafe_archive", "Runtime symlink collides with a file")
+                    try:
+                        resolved = (target.parent / link_name).resolve(strict=True)
+                        resolved.relative_to(stage.resolve())
+                    except FileNotFoundError:
+                        remaining.append((target, link_name))
+                        continue
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        raise ModelDownloadError("unsafe_archive", "Runtime symlink target is missing or escapes") from exc
+                    if not resolved.is_file():
+                        raise ModelDownloadError("unsafe_archive", "Runtime symlink target must be a file")
+                    shutil.copyfile(resolved, target)
+                    target.chmod(resolved.stat().st_mode & 0o777)
+                    installed += 1
+                if not installed:
+                    raise ModelDownloadError("unsafe_archive", "Runtime symlink target is missing or escapes")
+                pending = remaining
+        else:
+            raise ModelDownloadError("unsafe_archive", "Runtime archive format is unsupported")
+        candidates = list(stage.rglob(runtime.executable))
+        if len(candidates) != 1 or not candidates[0].is_file():
+            raise ModelDownloadError("runtime_missing", "Runtime archive must contain one native server")
+        server = candidates[0]
+        # Native upstream archives may wrap files in one directory. Preserve all
+        # siblings (shared libraries) in the runtime root consumed by manager.
+        payload = server.parent
+        if os.name != "nt":
+            server.chmod(0o755)
+        os.replace(payload, destination)
+        return destination / runtime.executable
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)

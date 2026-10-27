@@ -438,11 +438,27 @@ export interface CampaignWorkPackage {
       url: string; title: string; snippet: string; retrieved_at: string;
       found_by: string; scope: "campaign" | "project";
       verification: "search_lead" | "inspected"; verification_label: string;
+      scope_label: string; use: string;
     }[];
     ai_suggested: string[];
     research: { state: "available" | "unavailable"; message: string };
   };
   needs_owner_input: { field: string; question: string }[];
+  understanding: {
+    facts: { field: string; label: string; value: string; source: "owner_request" | "business_profile"; source_label: string }[];
+    missing: { field: string; label: string; question: string; essential: boolean }[];
+    ready_to_generate: boolean;
+  };
+  proposal: {
+    audience: string; audience_source: string; channels: string[]; duration: string;
+    message_focus: string; message_focus_note: string;
+    recommendations: { channel: string; idea: string }[]; recommendations_note: string;
+    deliverables: { type: string; platform: string | null; label: string; reason: string }[];
+    ready_to_generate: boolean;
+    research: { inspected: number; leads: number; note: string };
+  };
+  stage: { id: "needs_input" | "proposal" | "review" | "ready"; label: string; next: string };
+  download: { approved: string[]; not_included: string[] };
 }
 
 export function saveDownloadedFile({ blob, filename }: { blob: Blob; filename: string }): void {
@@ -949,6 +965,16 @@ export const api = {
     request<CampaignWorkPackage>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/work-package`),
   saveProjectGoal: (project_id: string, goal: string) =>
     request<{ goal: string }>(`/api/projects/${encodeURIComponent(project_id)}/goal`, { method: "PUT", body: JSON.stringify({ goal }) }),
+  saveCampaignAnswers: (project_id: string, campaign_id: string, answers: Record<string, string | string[]>) =>
+    request<CampaignWorkPackage>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/intake`, {
+      method: "PUT", body: JSON.stringify({ answers }),
+    }),
+  generateCampaignContent: (project_id: string, campaign_id: string) =>
+    request<{ created: string[]; titles: string[] }>(`/api/projects/${encodeURIComponent(project_id)}/campaigns/${encodeURIComponent(campaign_id)}/generate`, { method: "POST" }),
+  aiReviseCampaignDeliverable: (project_id: string, campaign_id: string, deliverable_id: string, instruction: string) =>
+    request<SpaCampaignDeliverable>(`${campaignDeliverablePath(project_id, campaign_id, deliverable_id)}/ai-revise`, {
+      method: "POST", body: JSON.stringify({ instruction }),
+    }),
   downloadApprovedCampaignPackage: (project_id: string, campaign_id: string) =>
     downloadAttachment(`${campaignDeliverablesPath(project_id, campaign_id)}/exports/package.zip?approved_only=true`, "campaign-approved-package.zip", [".zip"]),
   getResultsSummary: (project_id?: string) =>

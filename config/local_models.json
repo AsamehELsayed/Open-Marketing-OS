@@ -41,5 +41,36 @@
     "license_url": "https://github.com/ggml-org/llama.cpp/blob/d81235049384534c167caea52b85a694f6103d14/LICENSE",
     "attestation_url": "https://github.com/ggml-org/llama.cpp/attestations/52904614",
     "executable": "llama-server.exe"
+  },
+  "runtimes": {
+    "win32-x64": {
+      "name": "llama.cpp",
+      "version": "b11429",
+      "source": "ggml-org/llama.cpp",
+      "revision": "d81235049384534c167caea52b85a694f6103d14",
+      "asset_name": "llama-b11429-bin-win-cpu-x64.zip",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cpu-x64.zip",
+      "size_bytes": 19398918,
+      "sha256": "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe",
+      "license": "MIT",
+      "license_url": "https://github.com/ggml-org/llama.cpp/blob/d81235049384534c167caea52b85a694f6103d14/LICENSE",
+      "attestation_url": "https://github.com/ggml-org/llama.cpp/attestations/52904614",
+      "executable": "llama-server.exe"
+    },
+    "linux-x64": {
+      "name": "llama.cpp",
+      "version": "b11429",
+      "source": "ggml-org/llama.cpp",
+      "revision": "d81235049384534c167caea52b85a694f6103d14",
+      "asset_name": "llama-b11429-bin-ubuntu-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
+      "size_bytes": 17693462,
+      "sha256": "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392",
+      "license": "MIT",
+      "license_url": "https://github.com/ggml-org/llama.cpp/blob/d81235049384534c167caea52b85a694f6103d14/LICENSE",
+      "attestation_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b11429",
+      "executable": "llama-server",
+      "native_validation": "not_verified"
+    }
   }
 }

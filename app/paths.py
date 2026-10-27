@@ -86,8 +86,18 @@ def bundle_root() -> Path:
     if override:
         return Path(override)
     if is_frozen():
-        return Path(sys.executable).resolve().parent
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
     return Path(__file__).resolve().parent.parent
+
+
+def _xdg_root(name: str, fallback: Path) -> Path:
+    value = (os.environ.get(name, "") or "").strip()
+    if value:
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            raise ValueError(f"{name} must be absolute")
+        return candidate
+    return fallback
 
 
 def _local_app_data() -> Path:
@@ -98,6 +108,8 @@ def _local_app_data() -> Path:
     backend never needs to be reachable by other machines, so local (not
     roaming) scope is correct.
     """
+    if sys.platform != "win32":
+        return _xdg_root("XDG_DATA_HOME", Path.home() / ".local" / "share") / APP_NAME
     base = (os.environ.get("LOCALAPPDATA", "") or "").strip()
     if base:
         return Path(base) / APP_NAME
@@ -143,6 +155,8 @@ def logs_dir() -> Path:
     override = (os.environ.get(ENV_LOGS, "") or "").strip()
     if override:
         return Path(override)
+    if is_frozen() and sys.platform != "win32" and not os.environ.get(ENV_WORKSPACE):
+        return _xdg_root("XDG_STATE_HOME", Path.home() / ".local" / "state") / APP_NAME / _LOGS_SUBDIR
     return user_data_root() / _LOGS_SUBDIR
 
 
@@ -155,7 +169,9 @@ def ensure_writable_dirs() -> None:
     traceback.
     """
     for path in (user_data_root(), data_dir(), credentials_dir(), logs_dir()):
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if sys.platform != "win32" and is_frozen():
+            path.chmod(0o700)
 
 
 def describe() -> dict[str, str]:

@@ -50,7 +50,11 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: "Approved",
 };
 
-export function deliverableTypeLabel(type: string): string {
+export function deliverableTypeLabel(type: string, platform?: string | null): string {
+  // Email copy is stored as ad_copy with platform "Email"; owners see "Email".
+  if (type === "ad_copy" && /^e-?mail/i.test(String(platform ?? "").trim())) {
+    return "Email";
+  }
   return TYPE_LABELS[type] ?? "Deliverable";
 }
 

@@ -208,3 +208,24 @@ def test_model_badge_data_has_cost_or_null(isolated):
     assert call.estimated_cost_usd == 0.012
     assert call.pricing_version == "provider-reported"
     assert call.route_mode == "OPENROUTER"
+
+
+def test_no_ai_message_names_openrouter_when_it_is_the_cloud_provider():
+    from app.services.llm.model_router import decide_route
+    with pytest.raises(RuntimeError) as err:
+        decide_route("AUTO", local_available=False, openai_configured=False,
+                     openrouter_configured=False, cloud_provider="openrouter")
+    assert "OpenRouter" in str(err.value) and "OpenAI" not in str(err.value)
+
+
+def test_extract_usage_drops_subset_legs_that_exceed_their_parent():
+    from app.contracts.model_call import ModelCall  # noqa: F401  (contract stays strict)
+    from app.services.llm.model_router import extract_usage
+    usage = extract_usage({"prompt_tokens": 100, "completion_tokens": 50,
+                           "total_tokens": 150, "reasoning_tokens": 400,
+                           "cached_tokens": 900})
+    assert usage["reasoning_tokens"] is None and usage["cached_tokens"] is None
+    assert usage["output_tokens"] == 50 and usage["input_tokens"] == 100
+    ok = extract_usage({"prompt_tokens": 100, "completion_tokens": 50,
+                        "reasoning_tokens": 20, "cached_tokens": 10})
+    assert ok["reasoning_tokens"] == 20 and ok["cached_tokens"] == 10

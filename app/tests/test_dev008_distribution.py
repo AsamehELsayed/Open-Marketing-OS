@@ -44,6 +44,8 @@ def test_frozen_build_redirects_every_mutable_path(monkeypatch, tmp_path):
     monkeypatch.delenv(paths.ENV_CREDENTIALS, raising=False)
     monkeypatch.delenv(paths.ENV_LOGS, raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux data root
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))  # Linux logs root
 
     assert paths.is_frozen() is True
     root = paths.user_data_root()
@@ -60,6 +62,8 @@ def test_no_mutable_path_falls_back_into_the_bundle(monkeypatch, tmp_path):
 
     monkeypatch.setenv(paths.ENV_FROZEN, "1")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux data root
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))  # Linux logs root
     for var in (paths.ENV_WORKSPACE, paths.ENV_CREDENTIALS, paths.ENV_LOGS,
                 paths.ENV_BUNDLE):
         monkeypatch.delenv(var, raising=False)
@@ -78,6 +82,8 @@ def test_ensure_writable_dirs_is_idempotent(monkeypatch, tmp_path):
 
     monkeypatch.setenv(paths.ENV_FROZEN, "1")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux data root
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))  # Linux logs root
     monkeypatch.delenv(paths.ENV_WORKSPACE, raising=False)
     monkeypatch.delenv(paths.ENV_CREDENTIALS, raising=False)
     monkeypatch.delenv(paths.ENV_LOGS, raising=False)
@@ -104,6 +110,8 @@ def test_credentials_dir_never_lands_in_a_readonly_install(monkeypatch, tmp_path
     monkeypatch.delenv("OMOS_CREDENTIALS_DIR", raising=False)
     monkeypatch.setenv("OMOS_FROZEN", "1")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux data root
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))  # Linux logs root
     monkeypatch.delenv("OMOS_WORKSPACE_DIR", raising=False)
     assert cred_store.default_root() == tmp_path / "OpenMarketingOS" / "credentials"
 

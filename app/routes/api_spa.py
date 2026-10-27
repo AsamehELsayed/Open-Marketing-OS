@@ -1133,7 +1133,12 @@ def spa_settings_connect_credential(body: ConnectCredentialBody):
                     raise HTTPException(
                         status_code=400, detail="Bright Data configuration is invalid")
             elif target == "openrouter":
-                ConfigService.store_openrouter_key(token, conn=conn)
+                from app.services.credentials.linux_secret_service import SecureStorageUnavailable
+                try:
+                    ConfigService.store_openrouter_key(token, conn=conn)
+                except SecureStorageUnavailable as exc:
+                    # Already sanitized and actionable; never a bare 500.
+                    raise HTTPException(status_code=503, detail=str(exc))
             else:
 
                 raise HTTPException(status_code=400, detail="Unknown integration target")

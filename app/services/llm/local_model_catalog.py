@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import re
+import platform
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -69,6 +71,7 @@ class RuntimeProfile:
     license_url: str
     attestation_url: str
     executable: str
+    native_validation: str = "not_verified"
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,7 @@ class LocalModelCatalog:
                 "license": self.runtime.license,
                 "license_url": self.runtime.license_url,
                 "attestation_url": self.runtime.attestation_url,
+                "native_validation": self.runtime.native_validation,
             },
         }
 
@@ -127,7 +131,7 @@ def _hex_digest(value: str, field: str) -> str:
     return value
 
 
-def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> LocalModelCatalog:
+def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH, *, target_platform: str | None = None, machine: str | None = None) -> LocalModelCatalog:
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         model_raw = raw["model"]
@@ -185,7 +189,18 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> LocalModelCatalog:
             temporary_disk_bytes=temporary_disk_bytes,
         )
 
-        runtime_raw = raw["runtime"]
+        target = target_platform or sys.platform
+        arch = (machine or platform.machine()).lower()
+        if target not in {"win32", "linux"} or arch not in {"amd64", "x86_64", "x64"}:
+            raise CatalogError("Local runtime is unsupported on this OS/architecture")
+        if "runtimes" in raw:
+            runtime_raw = raw["runtimes"].get(f"{target}-x64")
+            if runtime_raw is None:
+                raise CatalogError("No pinned runtime for this OS/architecture")
+        elif target == "win32":
+            runtime_raw = raw["runtime"]
+        else:
+            raise CatalogError("No pinned Linux runtime; Windows fallback is forbidden")
         for field in ("url", "license_url", "attestation_url"):
             _require_https(str(runtime_raw[field]), field)
         runtime = RuntimeProfile(
@@ -201,6 +216,7 @@ def load_catalog(path: str | Path = DEFAULT_CATALOG_PATH) -> LocalModelCatalog:
             license_url=str(runtime_raw["license_url"]),
             attestation_url=str(runtime_raw["attestation_url"]),
             executable=str(runtime_raw["executable"]),
+            native_validation=str(runtime_raw.get("native_validation", "not_verified")),
         )
         if Path(runtime.executable).name != runtime.executable:
             raise CatalogError("runtime executable name is unsafe")

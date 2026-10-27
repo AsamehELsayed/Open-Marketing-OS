@@ -3,8 +3,10 @@
 The vault (vault.py) holds SQLite refs only; secret bytes live behind this
 seam. A backend implements put/get/delete of ciphertext keyed by
 "<scope>/<uuid4hex>" (for example "installation/9f2c..."). Default backend
-is the Windows DPAPI file store (DpapiFileBackend), bound to the current
-Windows user. Future OS backends (macOS Keychain, Linux libsecret, Windows
+is selected explicitly by OS: Windows DPAPI file store (DpapiFileBackend),
+bound to the current Windows user, or Linux Secret Service with encrypted
+session and persistent default keyring. Unsupported systems fail closed.
+Other OS backends (macOS Keychain, Windows
 Credential Manager) plug in here by implementing SecretBackend and being
 passed to vault calls or installed via set_default_backend().
 
@@ -64,7 +66,7 @@ def default_root() -> Path:
 
 def validate_key(key: str) -> str:
     """Backend keys are strictly '<scope>/<32-lowercase-hex>' — no path tricks."""
-    if not isinstance(key, str) or not KEY_RE.match(key):
+    if not isinstance(key, str) or not KEY_RE.fullmatch(key):
         raise ValueError("backend key must be '<scope>/<32-hex>'")
     return key
 
@@ -195,10 +197,17 @@ _default: SecretBackend | None = None
 
 
 def default_backend() -> SecretBackend:
-    """Process default backend — DPAPI file store until set_default_backend() overrides."""
+    """Select the OS vault explicitly; unsupported platforms fail closed."""
     global _default
     if _default is None:
-        _default = DpapiFileBackend()
+        if sys.platform == "win32":
+            _default = DpapiFileBackend()
+        elif sys.platform.startswith("linux"):
+            from app.services.credentials.linux_secret_service import LinuxSecretServiceBackend
+
+            _default = LinuxSecretServiceBackend()
+        else:
+            raise RuntimeError("Secure credential storage is unsupported on this platform")
     return _default
 
 

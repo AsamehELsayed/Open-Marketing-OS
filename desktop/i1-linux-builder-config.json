@@ -1,0 +1,56 @@
+{
+  "appId": "com.openmarketingos.desktop",
+  "productName": "Open Marketing OS",
+  "asar": true,
+  "directories": {
+    "output": "../dist/i1-candidates/linux"
+  },
+  "files": [
+    "*.cjs",
+    "build-manifest.json",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../build/desktop/i1-linux-backend",
+      "to": "backend",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "linux": {
+    "syncDesktopName": true,
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "deb",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "category": "Office",
+    "maintainer": "Open Marketing OS"
+  }
+}

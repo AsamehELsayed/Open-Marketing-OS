@@ -209,6 +209,28 @@ def creates_deliverables(text: str) -> bool:
             and any(verb in lowered for verb in _CREATE_VERBS))
 
 
+_GO_AHEAD_RE = re.compile(
+    r"^\s*(?:(?:yes|yep|yeah|ok(?:ay)?|sure|great|perfect|thanks|thank you)"
+    r"[\s,.!-]*)?(?:(?:(?:that|this|it|the plan)\s+)?(?:looks|sounds)\s+good[\s,.!-]*)?"
+    r"(?:please\s+|go\s+ahead\s+(?:and\s+)?|proceed\s+(?:and\s+)?|"
+    r"you\s+can\s+|let'?s\s+)*(?:"
+    # A bare pronoun object ("do it", "make it") is not a clear go-ahead.
+    r"(?:generate|write|draft|create|produce)\s+"
+    r"(?:it|them|that|this|everything|all\s+of\s+(?:it|them))|"
+    r"(?:generate|write|draft|create|produce|make|do)\s+"
+    r"(?:everything|"
+    r"the\s+(?:plan|content|campaign|deliverables?|posts?|emails?|copy|assets?)"
+    r"(?:\s+(?:now|please))?))\s*[.!]*\s*$|"
+    r"^\s*(?:yes|yep|ok(?:ay)?|sure)?[\s,.!-]*go\s+ahead\s*[.!]*\s*$",
+    re.IGNORECASE)
+
+
+def is_generation_go_ahead(text: str) -> bool:
+    """True for a short confirmation like "yes, go ahead and write it"."""
+    value = str(text or "")
+    return len(value) <= 120 and bool(_GO_AHEAD_RE.match(value))
+
+
 def looks_like_revision(text: str) -> bool:
     """True when the turn asks to change content that already exists."""
     value = str(text or "")
@@ -219,39 +241,46 @@ def looks_like_revision(text: str) -> bool:
 
 
 def requested_channels(text: str) -> list[str]:
-    lowered = f" {str(text or '').lower()} "
-    return [term for term in _CHANNEL_TERMS if _mentions(lowered, term)]
+    from app.services import campaign_request
+
+    return campaign_request.extract_channels(text)
 
 
 def requested_duration(text: str) -> str:
-    match = re.search(r"(?<!\w)(\d{1,3})\s*[- ]?(day|days|week|weeks|month|months)"
-                      r"(?!\w)", str(text or "").lower())
-    return f"{match.group(1)} {match.group(2)}" if match else ""
+    from app.services import campaign_request
+
+    return campaign_request.extract_duration(text)
 
 
 def _requested_audience(text: str) -> str:
     """Only an explicitly named audience counts.
 
-    A loose "for ..." fallback was removed: it captured approval phrases and
-    unrelated clauses, and a wrong audience is worse than an absent one.
+    A loose "for ..." fallback would capture approval phrases and unrelated
+    clauses, and a wrong audience is worse than an absent one. The extractor
+    accepts "targeting X" / "audience: X" and "for X" only when X ends in a
+    recognised group noun (families, parents, students, ...).
     """
-    match = re.search(
-        r"(?i)\b(?:audience|target(?:ing)?|aimed at)\s*(?:is|of|at)?\s*[:\-]?\s*"
-        r"(?:our\s+|the\s+)?([^,.;!?\r\n]{2,120})", str(text or ""))
-    if not match:
-        return ""
-    candidate = match.group(1).strip(" .:-")
-    return candidate[:400] if candidate else ""
+    from app.services import campaign_request
+
+    return campaign_request.extract_audience(text)
 
 
 def campaign_intake(text: str, *, objective: str = "", turn_id: str = "") -> dict:
-    """Extended campaign metadata taken only from what the user actually said.
+    """Campaign facts taken only from what the user actually said.
 
     No invented budget, metric, price, date, or audience. Absent facts stay
     absent rather than being filled with plausible defaults.
     """
-    return {
-        "objective": trim_objective(objective),
+    from app.services import campaign_request
+
+    stated = campaign_request.extract(text)
+    # The graph falls back to "website marketing" when the request names no
+    # goal. That is a placeholder, not something the owner said.
+    placeholder = (str(objective or "").strip().lower() == "website marketing"
+                   and "website marketing" not in str(text or "").lower())
+    intake = {
+        "objective": stated.get("objective") or (
+            "" if placeholder else trim_objective(objective)),
         "target_audience": _requested_audience(text),
         "channels": requested_channels(text),
         "duration": requested_duration(text),
@@ -261,6 +290,13 @@ def campaign_intake(text: str, *, objective: str = "", turn_id: str = "") -> dic
             "turn_id": str(turn_id or ""),
         },
     }
+    # Additional facts the owner stated (area, offer, business, product,
+    # constraints, content wanted). Only present when actually said.
+    for key in ("geography", "offer", "business", "product", "constraints",
+                "content_requirements"):
+        if stated.get(key):
+            intake[key] = stated[key]
+    return intake
 
 
 def trim_objective(objective: str) -> str:
@@ -274,6 +310,9 @@ def trim_objective(objective: str) -> str:
     if not value:
         return ""
     value = re.split(r"[,;]", value, maxsplit=1)[0]
+    # A clause that is only an audience is not an objective.
+    if re.match(r"(?i)\s*(?:targeting|target|aimed\s+at|audience)(?!\w)", value):
+        return ""
     value = re.split(r"(?i)\s+(?:targeting|target|audience|for\s+our)\b",
                      value, maxsplit=1)[0]
     for pattern in (
@@ -484,7 +523,15 @@ _SCHEMA_RULES = (
     "Retrieved evidence: cite supplied evidence only as [document_id:chunk_id] "
     "copied exactly from the supplied list. If no evidence was supplied, write "
     "'No project evidence available' and cite nothing.\n"
-    "AI suggestions: clearly labelled suggestions, not facts.\n"
+    "Persisted user facts: list only wording copied exactly from the request "
+    "or profile, one per line. Never restate the campaign title or summary, and "
+    "never paraphrase, there. If there is nothing to copy, write 'No persisted "
+    "facts supplied.'\n"
+    "AI suggestions: start every suggestion with 'Suggestion:'. Content-plan "
+    "quantities such as posting cadence, number of posts, emails or days are "
+    "allowed only on such lines. Never put prices, discounts, percentages, "
+    "dates, results, or targets such as followers, customers, leads or sales "
+    "in a suggestion.\n"
     "Unknown or unsupported information: anything you could not verify from "
     "the profile, brief, or evidence, including what is still missing."
 )
@@ -1020,6 +1067,77 @@ _FUTURE_METRIC_RECOMMENDATION_RE = re.compile(
     r"ctr|roas|roi|impressions?|clicks?))*\s+after\s+launch\.?\s*$")
 
 
+_SUGGESTION_LABEL_RE = re.compile(
+    r"(?i)^\W*(?:suggest(?:ion|ed)|recommend(?:ation|ed)|idea|proposed)\b[^:\r\n]{0,60}:")
+_FIGURE_THAT_IS_A_CLAIM_RE = re.compile(
+    r"(?i)[$€£%]|\b(?:EGP|USD|EUR|GBP|CAD|AUD|percent(?:age)?)\b"
+    r"|\d[\d,.]*\s*k?\s+(?:new\s+|more\s+|extra\s+)?"
+    r"(?:customers?|leads?|orders?|conversions?|saves?|visits?|sign-?ups?|"
+    r"subscribers?|enquir(?:y|ies)|bookings?)\b")
+
+
+_PLAN_UNITS = (r"posts?|stor(?:y|ies)|reels?|carousels?|emails?|newsletters?|"
+               r"sends?|videos?|captions?|variations?|ads?|times|days?|weeks?|"
+               r"months?")
+_PLAN_FIGURE_RE = re.compile(
+    rf"(?i)(?<![\w.])\d+(?:\s+[a-z-]+){{0,2}}\s+(?:{_PLAN_UNITS})\b(?!\s*\d)"
+    rf"|(?<![\w.])(?:day|week|month)\s+\d+\b")
+
+
+_ENGAGEMENT_NOUN_RE = re.compile(r"(?i)\b(?:followers?|clicks?|impressions?)\b")
+_OUTCOME_VERB_RE = re.compile(
+    r"(?i)\b(?:gain(?:s|ing)?|grow(?:s|ing)?|growth|boosts?|increas(?:e|es|ing)|"
+    r"reach(?:es)?|attract(?:s|ing)?|brings?|drives?)\b")
+
+
+_CALL_TO_ACTION_VERBS = frozenset({
+    "invite", "ask", "encourage", "prompt", "remind", "thank", "tell", "show",
+    "share", "reply", "tag", "poll", "include", "add", "link", "direct", "send",
+    "post", "run", "use", "create", "feature", "host", "start", "try", "let",
+    "highlight", "answer", "respond", "celebrate", "spotlight", "repost",
+})
+
+
+def _is_labelled_engagement_suggestion(statement: str) -> bool:
+    """A labelled call to action that names an audience, such as
+    "Suggestion: Invite followers to share a memory in the comments."
+
+    "followers/clicks/impressions" are on the high-risk list because they are
+    performance metrics. With no figure, no other high-risk term and no outcome
+    verb ("boost", "gain", "reach"), the line states no metric or result.
+    """
+    label = _SUGGESTION_LABEL_RE.search(statement)
+    if label is None:
+        return False
+    first = re.match(r"\W*([a-z]+)", statement[label.end():], re.IGNORECASE)
+    if first is None or first.group(1).casefold() not in _CALL_TO_ACTION_VERBS:
+        return False
+    return bool(not re.search(r"\d", statement)
+                and _ENGAGEMENT_NOUN_RE.search(statement)
+                and not _OUTCOME_VERB_RE.search(statement)
+                and not _HIGH_RISK_TERMS.search(_ENGAGEMENT_NOUN_RE.sub("", statement))
+                and not _FIGURE_THAT_IS_A_CLAIM_RE.search(statement))
+
+
+def _is_labelled_planning_suggestion(statement: str) -> bool:
+    """A clearly labelled suggestion whose figures are only a content plan.
+
+    "Suggestion: 5 feed posts and 3 stories per week" is a creative idea, not a
+    business fact. Anything that reads as a price, discount, percentage, date,
+    result or outcome target (high-risk terms, currency, percent, customer or
+    lead counts) is not exempt and still has to match a source.
+    """
+    if not (_SUGGESTION_LABEL_RE.search(statement)
+            and not _HIGH_RISK_TERMS.search(statement)
+            and not _FIGURE_THAT_IS_A_CLAIM_RE.search(statement)):
+        return False
+    # Every figure must be a content-plan quantity; a figure that could restate
+    # a source fact ("4 cups", "-4 degrees") must still match that source.
+    figures = list(_NUMERIC_TOKEN_RE.finditer(_normalize_safe_quantities(statement)))
+    planned = list(_PLAN_FIGURE_RE.finditer(statement))
+    return bool(figures) and len(planned) == len(figures)
+
+
 def _markdown_sections(text: str) -> list[tuple[str, str]]:
     """Split markdown into heading-local bodies without carrying context forward."""
     sections: list[tuple[str, list[str]]] = []
@@ -1067,6 +1185,12 @@ def _validate_high_risk_claims(markdown: str, source_texts: list[str], *, label:
             # figures, or any other factual claim still pass through validation.
             if (section_heading.startswith("ai suggestions")
                     and _FUTURE_METRIC_RECOMMENDATION_RE.fullmatch(statement)):
+                continue
+            # A labelled creative suggestion may carry content-plan figures
+            # (cadence, counts, durations). Only in the AI suggestions section.
+            if (section_heading.startswith("ai suggestions")
+                    and (_is_labelled_planning_suggestion(statement)
+                         or _is_labelled_engagement_suggestion(statement))):
                 continue
 
             normalized_statement = _normalize_safe_quantities(statement)
@@ -1664,6 +1788,29 @@ def _existing_ids(conn, *, project_id: str, campaign_id: str) -> set:
 # revision
 # ---------------------------------------------------------------------------
 
+def _owner_request_text(conn, project_id: str, campaign_id: str) -> str:
+    """The owner's own statements for this campaign (stored intake + profile).
+
+    Project-scoped and fail-closed: any problem yields no extra text.
+    """
+    try:
+        row = _campaign_row(conn, project_id, campaign_id)
+        if row is None:
+            return ""
+        _meta, intake = _campaign_metadata(row)
+        if not intake:
+            return ""
+        try:
+            from app.services.business_workspace import get_profile
+            profile = get_profile(conn, project_id)
+        except Exception:
+            profile = None
+        from app.services.campaign_request import plan_request_text
+        return str(plan_request_text(intake, profile if isinstance(profile, dict) else None) or "")
+    except Exception:
+        return ""
+
+
 def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
                        deliverable_id: str, instruction: str,
                        provider: str = "AUTO", model_id: str = "") -> dict:
@@ -1712,7 +1859,8 @@ def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
         items = validate_generated_items(
             text, types=[str(current.get("type", ""))],
             allowed_ids=context["evidence_ids"], single=True,
-            context=context, user_request=instruction)
+            context=context,
+            user_request=f"{instruction}\n{_owner_request_text(conn, pid, cid)}")
     except DeliverableValidationError as exc:
         error, diagnostic = _validation_error_payload(
             exc, context=context, project_id=pid)

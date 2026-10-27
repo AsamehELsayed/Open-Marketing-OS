@@ -7,6 +7,7 @@ import { useProject } from "../components/shell/project-context";
 import { projectOpenRouterCredentialStatus } from "../api/openrouterCredentialStatus";
 import LocalModelSetup from "../components/settings/LocalModelSetup";
 import { getAiSettingsProfileCopy, getEditionKind } from "../editionProfileCopy";
+import { credentialProtectionCopy } from "../credentialProtectionCopy";
 
 /**
  * DEV-008-SKILLS-OPS added the `skills` tab through the six documented
@@ -1013,7 +1014,8 @@ export default function Settings() {
     vision?.status ?? vision?.provider_status ?? vision?.capability_health ?? "unavailable",
     vision?.last_checked_at,
   );
-  const vaultConfigured = Boolean(config?.privacy_security.vault_backend);
+  const vaultProtection = credentialProtectionCopy(config?.privacy_security.vault_backend);
+  const vaultConfigured = vaultProtection.configured;
   const editionKind = getEditionKind(config?.ai.edition_profile);
   const editionAiCopy = getAiSettingsProfileCopy(config?.ai.edition_profile);
   const visibleTabs = editionKind === "openrouter"
@@ -2158,7 +2160,7 @@ export default function Settings() {
                     <div>
                       <h3 className="text-h3 font-semibold text-ink">OS Credential Vault</h3>
                       <p className="text-bodysm text-inksecondary mt-0.5">
-                        Credentials are managed by the application’s protected storage.
+                        {vaultProtection.text}
                       </p>
                     </div>
                     <span className={`rounded-sm border px-2 py-0.5 text-meta font-medium ${badgeClass(stateTone(vaultConfigured ? "configured" : "not_configured"))}`}>
@@ -2223,7 +2225,7 @@ export default function Settings() {
                   <ul className="mt-3 list-disc pl-5 text-meta text-inksecondary space-y-1">
                     <li>No telemetry or analytics beacons are emitted by this software.</li>
                     <li>Workspace files stay in the local user-data area. If you use OpenRouter, the prompt and evidence selected for that turn are sent to the provider.</li>
-                    <li>{editionKind === "openrouter" ? "This edition requires your own OpenRouter credential for cloud inference; Windows protects the saved key with DPAPI." : editionKind === "local" ? "This edition runs account-manager inference locally after you explicitly download and verify the pinned model." : "The active AI route determines whether a turn uses local inference or sends selected content to a configured cloud provider."}</li>
+                    <li>{editionKind === "openrouter" ? `This edition requires your own OpenRouter credential for cloud inference. ${vaultProtection.text}` : editionKind === "local" ? "This edition runs account-manager inference locally after you explicitly download and verify the pinned model." : "The active AI route determines whether a turn uses local inference or sends selected content to a configured cloud provider."}</li>
                   </ul>
                 </section>
               </div>

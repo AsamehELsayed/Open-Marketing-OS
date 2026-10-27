@@ -1,0 +1,33 @@
+{
+  "appId": "com.openmarketingos.desktop",
+  "productName": "Open Marketing OS",
+  "asar": true,
+  "directories": {
+    "output": "../dist/i1-candidates/windows"
+  },
+  "files": [
+    "*.cjs",
+    "build-manifest.json",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../build/desktop/i1-backend",
+      "to": "backend",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  }
+}

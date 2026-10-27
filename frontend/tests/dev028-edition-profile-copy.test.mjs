@@ -57,7 +57,7 @@ const openrouterFirstRun = getStartHereProfileCopy(openrouterId);
 assert.equal(openrouterFirstRun.settingsSection, "ai");
 assert.equal(openrouterFirstRun.showCloudSetupImage, true);
 assert.match(openrouterFirstRun.text, /AUTO routing/);
-assert.match(openrouterFirstRun.text, /DPAPI/);
+assert.match(openrouterFirstRun.text, /OS credential vault/);
 assert.match(openrouterFirstRun.text, /No Local model download or runtime setup is required/);
 assert.match(openrouterFirstRun.text, /sent to OpenRouter/);
 
@@ -70,7 +70,7 @@ assert.match(localSettings.autoText, /ready Local model/);
 const openrouterSettings = getAiSettingsProfileCopy(openrouterId);
 assert.equal(openrouterSettings.localModelAvailable, false);
 assert.match(openrouterSettings.summaryText, /AUTO routing/);
-assert.match(openrouterSettings.summaryText, /DPAPI/);
+assert.match(openrouterSettings.summaryText, /OS credential vault/);
 assert.match(openrouterSettings.summaryText, /not required/);
 assert.match(openrouterSettings.autoText, /Local inference is disabled/);
 assert.match(openrouterSettings.openrouterText, /sent to OpenRouter/);
