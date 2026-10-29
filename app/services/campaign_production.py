@@ -1650,7 +1650,7 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
                    user_request: str, types=None, campaign_title: str = "",
                    provider: str = "AUTO", model_id: str = "",
                    strict_zero_cost: bool = False,
-                   strict_eligibility=None) -> dict:
+                   strict_eligibility=None, lease_token: str = "") -> dict:
     """Generate one deliverable batch and persist it atomically through W1.
 
     Returns an honest result: persisted ids and types, or a campaign-only
@@ -1759,6 +1759,16 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
         "retrieval_error": context.get("retrieval_error", ""),
         **identity,
     }
+    if lease_token:
+        from app.services.campaign_flow import _verify_db_lock
+
+        if not _verify_db_lock(conn, pid, cid, lease_token):
+            return _failure(
+                "Generation lock lease expired or was taken by another request; refusing to persist state.",
+                provider=identity["provider"], model=identity["model"],
+                failure_code="lease_expired", campaign_id=cid,
+                preserved_existing=True)
+
     try:
         saved = _storage().save_generated_batch(
             conn, pid, cid, batch_key, _w1_items(items), provenance)

@@ -408,10 +408,16 @@ def _generate_from_plan(conn, *, project_id: str, campaign_id: str,
         turn_id=turn_id or f"ui-generate-{campaign_id}",
         user_request=campaign_request.plan_request_text(intake, profile_view),
         types=types, campaign_title=str(campaign.get("title") or ""),
-        provider=provider or provider_selection(conn), model_id=model_id)
+        provider=provider or provider_selection(conn), model_id=model_id,
+        lease_token=lease_token)
     if not result.get("ok"):
         code = str(result.get("failure_code") or "")
-        status = 422 if code == "output_validation" else 502
+        if code == "lease_expired":
+            status = 409
+        elif code == "output_validation":
+            status = 422
+        else:
+            status = 502
         raise FlowError(str(result.get("error") or "Content could not be written."),
                         status=status, code=code or "generation_failed",
                         extra={"preserved_existing": True})

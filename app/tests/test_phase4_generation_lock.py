@@ -1,6 +1,8 @@
 from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 
@@ -8,6 +10,7 @@ import pytest
 
 from app.database import sqlite
 from app.services import campaign_flow
+from app.services import campaign_production
 
 
 def _setup_test_campaign(db_path: Path, project_id="p1", campaign_id="c1", title="Test Campaign"):
@@ -265,3 +268,82 @@ def test_expired_owner_cannot_write_state(tmp_path):
         assert exc_info.value.code == "lease_expired"
     finally:
         conn.close()
+
+
+def test_expired_owner_cannot_save_batch_if_lease_lost_during_generation(tmp_path, monkeypatch):
+    """Demonstrate end-to-end write fencing: if lease expires/is preempted during model generation,
+
+    generate_batch aborts before saving to DB and preserves existing deliverables.
+    """
+    from app.services.llm.model_router import ModelRouter
+    from app.tests.campaign_fake_provider import DeterministicCampaignProvider
+
+    db_file = tmp_path / "marketing.db"
+    _setup_test_campaign(db_file)
+    conn = sqlite.connect(db_file)
+
+    provider = DeterministicCampaignProvider()
+    router_obj = ModelRouter(local_provider=provider, default_local_model="deterministic-test")
+    monkeypatch.setattr(campaign_production, "_router", lambda: router_obj)
+
+    try:
+        # Pass a bogus or expired lease token
+        result = campaign_production.generate_batch(
+            conn, project_id="p1", campaign_id="c1", turn_id="turn-fencing-test",
+            user_request="Create an Instagram social post", types=["social_post"],
+            lease_token="expired-or-stolen-token-999"
+        )
+        assert result["ok"] is False
+        assert result["failure_code"] == "lease_expired"
+        assert result.get("preserved_existing") is True
+
+        # Ensure NO deliverables were persisted to database
+        row = conn.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c1'").fetchone()
+        assert row[0] == 0, "Deliverables were saved despite expired lease!"
+    finally:
+        conn.close()
+
+
+def test_real_subprocesses_prevent_duplicate_generation(tmp_path):
+    """Launch two completely independent OS Python processes simultaneously against the same DB.
+
+    Verifies cross-process atomic lease acquisition and rejection at OS process boundary.
+    """
+    db_file = tmp_path / "marketing.db"
+    _setup_test_campaign(db_file)
+
+    script = f"""
+import sys, time
+from pathlib import Path
+from app.database import sqlite
+from app.services import campaign_flow
+
+db_file = Path(r"{db_file}")
+conn = sqlite.connect(db_file)
+proc_id = sys.argv[1]
+try:
+    token = campaign_flow._acquire_db_lock(conn, "p1", "c1", f"proc-{{proc_id}}", lease_timeout_s=10)
+    print(f"ACQUIRED:{{proc_id}}:{{token}}", flush=True)
+    # Hold the lock briefly to ensure the second process collides
+    time.sleep(1.0)
+    campaign_flow._release_db_lock(conn, "p1", "c1", token)
+    print(f"RELEASED:{{proc_id}}", flush=True)
+except campaign_flow.FlowError as exc:
+    print(f"REJECTED:{{proc_id}}:{{exc.code}}", flush=True)
+finally:
+    conn.close()
+"""
+    cwd = Path(__file__).resolve().parents[2]
+    p1 = subprocess.Popen([sys.executable, "-c", script, "1"], cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Give p1 a tiny headstart so both processes overlap
+    time.sleep(0.05)
+    p2 = subprocess.Popen([sys.executable, "-c", script, "2"], cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    out1, err1 = p1.communicate(timeout=10)
+    out2, err2 = p2.communicate(timeout=10)
+
+    combined = out1 + "\n" + out2
+    # Exactly one process must acquire and one must be rejected with generation_in_progress
+    assert ("ACQUIRED:1" in combined and "REJECTED:2:generation_in_progress" in combined) or \
+           ("ACQUIRED:2" in combined and "REJECTED:1:generation_in_progress" in combined), f"Unexpected output:\nProcess 1:\n{out1}\n{err1}\nProcess 2:\n{out2}\n{err2}"
+
