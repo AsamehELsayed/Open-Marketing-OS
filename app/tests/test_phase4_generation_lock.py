@@ -347,3 +347,221 @@ finally:
     assert ("ACQUIRED:1" in combined and "REJECTED:2:generation_in_progress" in combined) or \
            ("ACQUIRED:2" in combined and "REJECTED:1:generation_in_progress" in combined), f"Unexpected output:\nProcess 1:\n{out1}\n{err1}\nProcess 2:\n{out2}\n{err2}"
 
+
+def _setup_ready_campaign(db_path: Path, project_id="p1", campaign_id="c1"):
+    conn = sqlite.connect(db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (project_id, "Northstar Bakery", "2026-10-28", "2026-10-28"),
+    )
+    intake = campaign_production.campaign_intake(
+        "Create a 30-day Instagram campaign targeting local families.",
+        objective="",
+        turn_id="t-init",
+    )
+    meta = {"campaign_intake": intake}
+    conn.execute(
+        "INSERT OR REPLACE INTO campaigns (id, project_id, title, status, updated_at, workflow_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (campaign_id, project_id, "Family Campaign", "active", "2026-10-28", json.dumps(meta)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_lease_expiration_without_ownership_replacement_fences_persistence(tmp_path, monkeypatch):
+    """Concern 1a: If a lease expires without another owner replacing it,
+    neither _verify_db_lock nor save_generated_batch may treat the expired
+    owner_token as valid, and persistence must fail closed with 0 rows committed.
+    """
+    from app.services import campaign_deliverables as deliverables
+    from app.services.llm.model_router import ModelRouter
+    from app.tests.campaign_fake_provider import DeterministicCampaignProvider
+
+    db_file = tmp_path / "expire_no_replace.db"
+    _setup_ready_campaign(db_file, "p1", "c_exp")
+    conn = sqlite.connect(db_file)
+
+    provider = DeterministicCampaignProvider()
+    orig_complete = provider.complete
+
+    def slow_complete(*args, **kwargs):
+        time.sleep(0.35)
+        return orig_complete(*args, **kwargs)
+
+    monkeypatch.setattr(provider, "complete", slow_complete)
+    router_obj = ModelRouter(local_provider=provider, default_local_model="deterministic-test")
+    monkeypatch.setattr(campaign_production, "_router", lambda: router_obj)
+
+    try:
+        # Lease timeout is 0.12s while heartbeat interval is 10s (so no heartbeat renews it),
+        # and NO second owner attempts to acquire the lock.
+        with pytest.raises(campaign_flow.FlowError) as exc_info:
+            campaign_flow.generate_from_plan(
+                conn,
+                project_id="p1",
+                campaign_id="c_exp",
+                turn_id="turn-exp-1",
+                lease_timeout_s=0.12,
+                heartbeat_interval_s=10.0,
+            )
+        assert exc_info.value.status == 409
+        assert exc_info.value.code == "lease_expired"
+
+        # Verify 0 deliverables, 0 revisions, and 0 batches were persisted
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_exp'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverable_revisions WHERE campaign_id='c_exp'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverable_batches WHERE campaign_id='c_exp'").fetchone()[0] == 0
+
+        # Also verify direct save_generated_batch atomic transaction fencing when
+        # the same owner_token is still in workflow_json but its timestamp is expired:
+        expired_token = campaign_flow._acquire_db_lock(conn, "p1", "c_exp", "turn-exp-direct", lease_timeout_s=0.05)
+        time.sleep(0.12)
+        assert campaign_flow._verify_db_lock(conn, "p1", "c_exp", expired_token) is False
+        with pytest.raises(deliverables.DeliverableLeaseError):
+            deliverables.save_generated_batch(
+                conn,
+                "p1",
+                "c_exp",
+                "batch-exp-direct",
+                [{"type": "social_post", "title": "Post", "platform": "Instagram", "content_md": "Body"}],
+                {"provider": "test"},
+                lease_token=expired_token,
+            )
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_exp'").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_owner_change_between_validation_and_persistence_fences_commit(tmp_path, monkeypatch):
+    """Concern 1b: If the lease owner changes AFTER output validation (and even
+    after the pre-check) right before save_generated_batch enters its atomic
+    BEGIN IMMEDIATE transaction, persistence must abort inside the transaction,
+    preserve Owner 2's active lease, and let Owner 2 succeed cleanly.
+    """
+    from app.services.llm.model_router import ModelRouter
+    from app.tests.campaign_fake_provider import DeterministicCampaignProvider
+
+    db_file = tmp_path / "owner_change_race.db"
+    _setup_ready_campaign(db_file, "p1", "c_race")
+    conn1 = sqlite.connect(db_file)
+    conn2 = sqlite.connect(db_file)
+
+    provider = DeterministicCampaignProvider()
+    router_obj = ModelRouter(local_provider=provider, default_local_model="deterministic-test")
+    monkeypatch.setattr(campaign_production, "_router", lambda: router_obj)
+
+    owner2_lease = {}
+
+    def steal_lease_after_validation(_c, pid, cid, lease_token_1):
+        # Simulate Owner 1's lease expiring right after validation/pre-check,
+        # and Owner 2 acquiring the lease before save_generated_batch's BEGIN IMMEDIATE.
+        row = conn2.execute(
+            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+            (cid, pid),
+        ).fetchone()
+        meta = json.loads(row[0])
+        assert meta["generation_in_progress"]["owner_token"] == lease_token_1
+        stale = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+        meta["generation_in_progress"]["started_at"] = stale
+        meta["generation_in_progress"]["heartbeat_at"] = stale
+        conn2.execute(
+            "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+            (json.dumps(meta), cid, pid),
+        )
+        conn2.commit()
+        owner2_lease["token"] = campaign_flow._acquire_db_lock(
+            conn2, pid, cid, "turn-owner-2", lease_timeout_s=60
+        )
+
+    monkeypatch.setattr(campaign_production, "_before_persist_hook", steal_lease_after_validation)
+
+    try:
+        with pytest.raises(campaign_flow.FlowError) as exc_info:
+            campaign_flow.generate_from_plan(
+                conn1, project_id="p1", campaign_id="c_race", turn_id="turn-owner-1"
+            )
+        assert exc_info.value.status == 409
+        assert exc_info.value.code == "lease_expired"
+
+        # Owner 1's transaction must have rolled back with 0 rows
+        assert conn2.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_race'").fetchone()[0] == 0
+        assert conn2.execute("SELECT COUNT(*) FROM campaign_deliverable_batches WHERE campaign_id='c_race'").fetchone()[0] == 0
+
+        # Owner 2's lease must still be active and untouched by Owner 1's finally block
+        assert "token" in owner2_lease
+        assert campaign_flow._verify_db_lock(conn2, "p1", "c_race", owner2_lease["token"]) is True
+
+        # Now Owner 2 finishes its generation using its valid lease and persists cleanly
+        monkeypatch.setattr(campaign_production, "_before_persist_hook", None)
+        res2 = campaign_flow._generate_from_plan(
+            conn2,
+            project_id="p1",
+            campaign_id="c_race",
+            turn_id="turn-owner-2",
+            lease_token=owner2_lease["token"],
+        )
+        assert res2["ok"] is True
+        assert len(res2["deliverables"]) == 2
+        assert conn2.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_race'").fetchone()[0] == 2
+    finally:
+        conn1.close()
+        conn2.close()
+
+
+def test_heartbeat_renewal_and_heartbeat_failure_fencing(tmp_path, monkeypatch):
+    """Concern 1c: Verify that a working background heartbeat keeps a slow
+    generation lease valid past its initial timeout, whereas a heartbeat failure
+    allows the lease to expire and fences persistence from committing.
+    """
+    from app.services.llm.model_router import ModelRouter
+    from app.tests.campaign_fake_provider import DeterministicCampaignProvider
+
+    db_file = tmp_path / "heartbeat_fencing.db"
+    _setup_ready_campaign(db_file, "p1", "c_hb_ok")
+    _setup_ready_campaign(db_file, "p1", "c_hb_fail")
+
+    provider = DeterministicCampaignProvider()
+    orig_complete = provider.complete
+
+    def slow_complete(*args, **kwargs):
+        time.sleep(0.45)
+        return orig_complete(*args, **kwargs)
+
+    monkeypatch.setattr(provider, "complete", slow_complete)
+    router_obj = ModelRouter(local_provider=provider, default_local_model="deterministic-test")
+    monkeypatch.setattr(campaign_production, "_router", lambda: router_obj)
+
+    conn = sqlite.connect(db_file)
+    try:
+        # Part A: Heartbeat succeeds every 0.06s; lease_timeout_s is 0.22s; generation takes 0.45s.
+        res_ok = campaign_flow.generate_from_plan(
+            conn,
+            project_id="p1",
+            campaign_id="c_hb_ok",
+            turn_id="turn-hb-ok",
+            lease_timeout_s=0.22,
+            heartbeat_interval_s=0.06,
+        )
+        assert res_ok["ok"] is True
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_hb_ok'").fetchone()[0] == 2
+
+        # Part B: Heartbeat fails to renew (simulated DB/heartbeat failure).
+        # Generation takes 0.45s while lease_timeout_s is 0.18s -> lease expires and persistence is fenced!
+        monkeypatch.setattr(campaign_flow, "_heartbeat_db_lock", lambda *_a, **_kw: False)
+        with pytest.raises(campaign_flow.FlowError) as exc_info:
+            campaign_flow.generate_from_plan(
+                conn,
+                project_id="p1",
+                campaign_id="c_hb_fail",
+                turn_id="turn-hb-fail",
+                lease_timeout_s=0.18,
+                heartbeat_interval_s=0.05,
+            )
+        assert exc_info.value.status == 409
+        assert exc_info.value.code == "lease_expired"
+        assert conn.execute("SELECT COUNT(*) FROM campaign_deliverables WHERE campaign_id='c_hb_fail'").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+

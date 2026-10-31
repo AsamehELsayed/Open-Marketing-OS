@@ -11,7 +11,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -99,8 +101,38 @@ DEFAULT_LEASE_TIMEOUT_SECONDS = 60
 HEARTBEAT_INTERVAL_SECONDS = 5.0
 
 
+def _is_lease_active(
+    in_prog: dict | None,
+    *,
+    default_timeout_s: float = DEFAULT_LEASE_TIMEOUT_SECONDS,
+    now_dt: datetime | None = None,
+) -> tuple[bool, float, str]:
+    """Return ``(is_active, elapsed_seconds, active_timestamp_str)`` for a lease dict."""
+    if not isinstance(in_prog, dict):
+        return False, 0.0, ""
+    active_str = str(in_prog.get("heartbeat_at") or in_prog.get("started_at") or "").strip()
+    if not active_str:
+        return False, 0.0, ""
+    try:
+        active_dt = datetime.fromisoformat(active_str)
+    except Exception:
+        return False, 0.0, ""
+    if active_dt.tzinfo is None:
+        active_dt = active_dt.replace(tzinfo=timezone.utc)
+    current_dt = now_dt or datetime.now(timezone.utc)
+    elapsed = (current_dt - active_dt).total_seconds()
+    try:
+        raw_timeout = in_prog.get("lease_timeout_s")
+        owner_timeout = float(raw_timeout if raw_timeout is not None else default_timeout_s)
+    except (TypeError, ValueError):
+        owner_timeout = float(default_timeout_s)
+    if owner_timeout <= 0:
+        return False, elapsed, active_str
+    return elapsed < owner_timeout, elapsed, active_str
+
+
 def _acquire_db_lock(conn, project_id: str, campaign_id: str, turn_id: str,
-                     *, lease_timeout_s: int = DEFAULT_LEASE_TIMEOUT_SECONDS) -> str:
+                     *, lease_timeout_s: float = DEFAULT_LEASE_TIMEOUT_SECONDS) -> str:
     """Acquire generation lease in database using an atomic transaction.
 
     Returns the unique owner token for fencing. Raises FlowError(409) if an active lease exists.
@@ -112,90 +144,67 @@ def _acquire_db_lock(conn, project_id: str, campaign_id: str, turn_id: str,
         except Exception:
             pass
 
-    acquired_tx = False
-    for attempt in range(10):
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            acquired_tx = True
-            break
-        except sqlite3.OperationalError as exc:
-            if "locked" in str(exc).lower() or "busy" in str(exc).lower():
-                time.sleep(0.05)
-                continue
-            raise FlowError(f"Database lock error: {exc}", status=500)
-    if not acquired_tx:
-        raise FlowError("Database is currently busy; retry in a moment.", status=409, code="generation_in_progress")
-
     try:
-        row = conn.execute(
-            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
-            (campaign_id, project_id),
-        ).fetchone()
-        if not row:
-            conn.rollback()
-            raise deliverables.DeliverableNotFound(f"Campaign {campaign_id} not found in project {project_id}")
+        with deliverables._atomic(conn):
+            row = conn.execute(
+                "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+                (campaign_id, project_id),
+            ).fetchone()
+            if not row:
+                raise deliverables.DeliverableNotFound(
+                    f"Campaign {campaign_id} not found in project {project_id}"
+                )
 
-        raw_meta = row[0] or "{}"
-        try:
-            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-        except (TypeError, ValueError):
-            meta = {}
-
-        in_prog = meta.get("generation_in_progress")
-        if isinstance(in_prog, dict):
-            active_str = in_prog.get("heartbeat_at") or in_prog.get("started_at")
-            active_dt = None
-            if active_str:
-                try:
-                    active_dt = datetime.fromisoformat(active_str)
-                except Exception:
-                    pass
-            if active_dt:
-                now_dt = datetime.now(timezone.utc)
-                if active_dt.tzinfo is None:
-                    active_dt = active_dt.replace(tzinfo=timezone.utc)
-                elapsed = (now_dt - active_dt).total_seconds()
-                owner_timeout = int(in_prog.get("lease_timeout_s") or lease_timeout_s)
-                if elapsed < owner_timeout:
-                    started_str = in_prog.get("started_at") or active_str
-                    try:
-                        started_dt = datetime.fromisoformat(started_str)
-                        if started_dt.tzinfo is None:
-                            started_dt = started_dt.replace(tzinfo=timezone.utc)
-                        total_elapsed = int((now_dt - started_dt).total_seconds())
-                    except Exception:
-                        total_elapsed = int(elapsed)
-                    conn.rollback()
-                    raise FlowError(
-                        f"Content is already being written for this campaign (started {total_elapsed}s ago).",
-                        status=409,
-                        code="generation_in_progress",
-                        extra={"started_at": started_str, "elapsed_s": total_elapsed},
-                    )
-
-        lease_token = uuid.uuid4().hex
-        now_iso = datetime.now(timezone.utc).isoformat()
-        meta["generation_in_progress"] = {
-            "owner_token": lease_token,
-            "pid": os.getpid(),
-            "turn_id": str(turn_id or ""),
-            "started_at": now_iso,
-            "heartbeat_at": now_iso,
-            "lease_timeout_s": int(lease_timeout_s),
-        }
-        conn.execute(
-            "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
-            (json.dumps(meta, sort_keys=True), campaign_id, project_id),
-        )
-        conn.commit()
-        return lease_token
-    except Exception:
-        if getattr(conn, "in_transaction", False):
+            raw_meta = (row["workflow_json"] if hasattr(row, "keys") else row[0]) or "{}"
             try:
-                conn.rollback()
-            except Exception:
-                pass
-        raise
+                meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+            except (TypeError, ValueError):
+                meta = {}
+
+            in_prog = meta.get("generation_in_progress")
+            now_dt = datetime.now(timezone.utc)
+            active, elapsed, active_str = _is_lease_active(
+                in_prog, default_timeout_s=lease_timeout_s, now_dt=now_dt
+            )
+            if active and isinstance(in_prog, dict):
+                started_str = str(in_prog.get("started_at") or active_str)
+                try:
+                    started_dt = datetime.fromisoformat(started_str)
+                    if started_dt.tzinfo is None:
+                        started_dt = started_dt.replace(tzinfo=timezone.utc)
+                    total_elapsed = int((now_dt - started_dt).total_seconds())
+                except Exception:
+                    total_elapsed = int(elapsed)
+                raise FlowError(
+                    f"Content is already being written for this campaign (started {total_elapsed}s ago).",
+                    status=409,
+                    code="generation_in_progress",
+                    extra={"started_at": started_str, "elapsed_s": total_elapsed},
+                )
+
+            lease_token = uuid.uuid4().hex
+            now_iso = now_dt.isoformat()
+            meta["generation_in_progress"] = {
+                "owner_token": lease_token,
+                "pid": os.getpid(),
+                "turn_id": str(turn_id or ""),
+                "started_at": now_iso,
+                "heartbeat_at": now_iso,
+                "lease_timeout_s": float(lease_timeout_s),
+            }
+            conn.execute(
+                "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+                (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+            )
+            return lease_token
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise FlowError(
+                "Database is currently busy; retry in a moment.",
+                status=409,
+                code="generation_in_progress",
+            ) from exc
+        raise FlowError(f"Database lock error: {exc}", status=500) from exc
 
 
 def _heartbeat_db_lock(conn, project_id: str, campaign_id: str, lease_token: str) -> bool:
@@ -208,37 +217,32 @@ def _heartbeat_db_lock(conn, project_id: str, campaign_id: str, lease_token: str
         except Exception:
             pass
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
-            (campaign_id, project_id),
-        ).fetchone()
-        if not row:
-            conn.rollback()
+        with deliverables._atomic(conn):
+            row = conn.execute(
+                "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+                (campaign_id, project_id),
+            ).fetchone()
+            if not row:
+                return False
+            raw_meta = (row["workflow_json"] if hasattr(row, "keys") else row[0]) or "{}"
+            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+            in_prog = meta.get("generation_in_progress")
+            now_dt = datetime.now(timezone.utc)
+            active, _elapsed, _active_str = _is_lease_active(in_prog, now_dt=now_dt)
+            if active and isinstance(in_prog, dict) and in_prog.get("owner_token") == lease_token:
+                in_prog["heartbeat_at"] = now_dt.isoformat()
+                conn.execute(
+                    "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+                    (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+                )
+                return True
             return False
-        meta = json.loads(row[0] or "{}")
-        in_prog = meta.get("generation_in_progress")
-        if isinstance(in_prog, dict) and in_prog.get("owner_token") == lease_token:
-            in_prog["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
-                (json.dumps(meta, sort_keys=True), campaign_id, project_id),
-            )
-            conn.commit()
-            return True
-        conn.rollback()
-        return False
     except Exception:
-        if getattr(conn, "in_transaction", False):
-            try:
-                conn.rollback()
-            except Exception:
-                pass
         return False
 
 
 def _verify_db_lock(conn, project_id: str, campaign_id: str, lease_token: str) -> bool:
-    """Fencing check: verify that this owner_token still holds the valid active lease."""
+    """Fencing check: verify that this owner_token still holds an unexpired active lease."""
     if not lease_token:
         return False
     try:
@@ -248,9 +252,13 @@ def _verify_db_lock(conn, project_id: str, campaign_id: str, lease_token: str) -
         ).fetchone()
         if not row:
             return False
-        meta = json.loads(row[0] or "{}")
+        raw_meta = (row["workflow_json"] if hasattr(row, "keys") else row[0]) or "{}"
+        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
         in_prog = meta.get("generation_in_progress")
-        return isinstance(in_prog, dict) and in_prog.get("owner_token") == lease_token
+        if not isinstance(in_prog, dict) or in_prog.get("owner_token") != lease_token:
+            return False
+        active, _elapsed, _active_str = _is_lease_active(in_prog)
+        return active
     except Exception:
         return False
 
@@ -266,38 +274,34 @@ def _release_db_lock(conn, project_id: str, campaign_id: str,
         except Exception:
             pass
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
-            (campaign_id, project_id),
-        ).fetchone()
-        if not row:
-            conn.rollback()
+        with deliverables._atomic(conn):
+            row = conn.execute(
+                "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+                (campaign_id, project_id),
+            ).fetchone()
+            if not row:
+                return False
+            raw_meta = (row["workflow_json"] if hasattr(row, "keys") else row[0]) or "{}"
+            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+            in_prog = meta.get("generation_in_progress")
+            if force or (
+                isinstance(in_prog, dict)
+                and (lease_token is None or in_prog.get("owner_token") == lease_token)
+            ):
+                meta.pop("generation_in_progress", None)
+                conn.execute(
+                    "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
+                    (json.dumps(meta, sort_keys=True), campaign_id, project_id),
+                )
+                return True
             return False
-        raw_meta = row[0] or "{}"
-        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-        in_prog = meta.get("generation_in_progress")
-        if force or (isinstance(in_prog, dict) and (lease_token is None or in_prog.get("owner_token") == lease_token)):
-            meta.pop("generation_in_progress", None)
-            conn.execute(
-                "UPDATE campaigns SET workflow_json=? WHERE id=? AND project_id=?",
-                (json.dumps(meta, sort_keys=True), campaign_id, project_id),
-            )
-            conn.commit()
-            return True
-        conn.rollback()
-        return False
     except Exception:
-        if getattr(conn, "in_transaction", False):
-            try:
-                conn.rollback()
-            except Exception:
-                pass
         return False
 
 
 def _start_lease_heartbeat(conn, project_id: str, campaign_id: str, lease_token: str,
-                           stop_event: threading.Event, interval_s: float = HEARTBEAT_INTERVAL_SECONDS) -> threading.Thread | None:
+                           stop_event: threading.Event,
+                           interval_s: float = HEARTBEAT_INTERVAL_SECONDS) -> threading.Thread | None:
     db_path = None
     try:
         rows = conn.execute("PRAGMA database_list").fetchall()
@@ -312,19 +316,25 @@ def _start_lease_heartbeat(conn, project_id: str, campaign_id: str, lease_token:
         return None
 
     def _worker():
+        hb_conn = None
         try:
-            hb_conn = sqlite3.connect(str(db_path), timeout=5.0)
-            hb_conn.execute("PRAGMA journal_mode=WAL;")
             while not stop_event.wait(interval_s):
                 try:
+                    if hb_conn is None:
+                        hb_conn = sqlite3.connect(str(db_path), timeout=5.0)
                     ok = _heartbeat_db_lock(hb_conn, project_id, campaign_id, lease_token)
                     if not ok:
                         break
                 except Exception:
-                    pass
-            hb_conn.close()
+                    break
         except Exception:
             pass
+        finally:
+            if hb_conn is not None:
+                try:
+                    hb_conn.close()
+                except Exception:
+                    pass
 
     t = threading.Thread(target=_worker, daemon=True, name=f"lease-hb-{campaign_id[:8]}")
     t.start()
@@ -333,7 +343,9 @@ def _start_lease_heartbeat(conn, project_id: str, campaign_id: str, lease_token:
 
 def generate_from_plan(conn, *, project_id: str, campaign_id: str,
                        turn_id: str = "", provider: str = "",
-                       model_id: str = "", lease_timeout_s: int = DEFAULT_LEASE_TIMEOUT_SECONDS) -> dict:
+                       model_id: str = "",
+                       lease_timeout_s: float = DEFAULT_LEASE_TIMEOUT_SECONDS,
+                       heartbeat_interval_s: float = HEARTBEAT_INTERVAL_SECONDS) -> dict:
     """Serialise per campaign so a double click makes one provider call."""
     with _GEN_LOCKS_GUARD:
         lock = _GEN_LOCKS.setdefault(f"{project_id}:{campaign_id}",
@@ -351,7 +363,8 @@ def generate_from_plan(conn, *, project_id: str, campaign_id: str,
             conn, project_id, campaign_id, turn_id, lease_timeout_s=lease_timeout_s
         )
         hb_thread = _start_lease_heartbeat(
-            conn, project_id, campaign_id, lease_token, stop_heartbeat
+            conn, project_id, campaign_id, lease_token, stop_heartbeat,
+            interval_s=heartbeat_interval_s,
         )
         result = _generate_from_plan(
             conn, project_id=project_id, campaign_id=campaign_id,
@@ -409,7 +422,7 @@ def _generate_from_plan(conn, *, project_id: str, campaign_id: str,
         user_request=campaign_request.plan_request_text(intake, profile_view),
         types=types, campaign_title=str(campaign.get("title") or ""),
         provider=provider or provider_selection(conn), model_id=model_id,
-        lease_token=lease_token)
+        lease_token=lease_token, require_final_copy=True)
     if not result.get("ok"):
         code = str(result.get("failure_code") or "")
         if code == "lease_expired":
@@ -437,7 +450,7 @@ def ai_revise(conn, *, project_id: str, campaign_id: str, deliverable_id: str,
         conn, project_id=project_id, campaign_id=campaign_id,
         turn_id=f"ui-revise-{uuid.uuid4().hex[:12]}", deliverable_id=deliverable_id,
         instruction=text, provider=provider or provider_selection(conn),
-        model_id=model_id)
+        model_id=model_id, require_final_copy=True)
     if not result.get("ok"):
         code = str(result.get("failure_code") or "")
         status = 409 if code == "revision_conflict" else (

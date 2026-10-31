@@ -3,204 +3,228 @@
     "step": "1. Installation verification",
     "ok": true,
     "details": "EXE=true, Uninstaller=true, Sidecar=true",
-    "time": "2026-10-29T11:26:32.738Z"
+    "time": "2026-10-31T03:45:30.909Z"
   },
   {
     "step": "2. Application launch",
     "ok": true,
-    "details": "Window ready in 7961ms at http://127.0.0.1:57962",
-    "time": "2026-10-29T11:26:40.731Z"
+    "details": "Window ready in 3990ms at http://127.0.0.1:52604",
+    "time": "2026-10-31T03:45:34.919Z"
   },
   {
     "step": "2b. Preload sandbox integrity",
     "ok": true,
     "details": "{\"bridge\":\"object\",\"req\":\"undefined\",\"proc\":\"undefined\",\"mod\":\"undefined\"}",
-    "time": "2026-10-29T11:26:41.368Z"
+    "time": "2026-10-31T03:45:35.058Z"
   },
   {
     "step": "2c. Desktop bridge status",
     "ok": true,
     "details": "{\"version\":\"0.1.0-beta.2\",\"edition\":\"openrouter\",\"connected\":true}",
-    "time": "2026-10-29T11:26:41.394Z"
+    "time": "2026-10-31T03:45:35.062Z"
   },
   {
     "step": "2d. External network fetch blocked",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:26:41.417Z"
+    "time": "2026-10-31T03:45:35.071Z"
   },
   {
     "step": "2e. Sidecar unauthorized request rejected",
     "ok": true,
     "details": "HTTP 401",
-    "time": "2026-10-29T11:26:41.435Z"
+    "time": "2026-10-31T03:45:35.074Z"
   },
   {
     "step": "3a. GUI Create Business Workspace Alpha Bakery",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:26:42.350Z"
+    "time": "2026-10-31T03:45:35.353Z"
   },
   {
     "step": "3b. GUI Create Client Workspace Beta Plumbing",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:26:44.623Z"
+    "time": "2026-10-31T03:45:35.933Z"
   },
   {
     "step": "3c. Projects persisted in database",
     "ok": true,
-    "details": "Alpha=starter, Beta=ceff5d67fc5e4bccae04fa8dafc23d0e",
-    "time": "2026-10-29T11:26:45.244Z"
+    "details": "Alpha=starter, Beta=9af84d28247541c6a5474bfeac76edd7",
+    "time": "2026-10-31T03:45:36.038Z"
   },
   {
     "step": "4a. Chat creates campaign proposal card",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:26:59.243Z"
+    "time": "2026-10-31T03:45:43.156Z"
   },
   {
     "step": "4b. Alpha campaign created",
     "ok": true,
-    "details": "ID=310986c7df434e2fe12466b6ffe1e72c",
-    "time": "2026-10-29T11:26:59.558Z"
+    "details": "ID=f35a14b0c61684136ad55f31e6d06379",
+    "time": "2026-10-31T03:45:43.262Z"
   },
   {
     "step": "4c. Work package proposal renders",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:26:59.920Z"
+    "time": "2026-10-31T03:45:43.406Z"
   },
   {
-    "step": "5a. Seed realistic deliverables with ready-to-post contract",
+    "step": "5a. Configure loopback OpenRouter provider",
     "ok": true,
-    "details": "SEEDED_OK:d1-b4d6ae988318:d2-4ceada762643",
-    "time": "2026-10-29T11:27:00.520Z"
+    "details": "",
+    "time": "2026-10-31T03:45:43.730Z"
+  },
+  {
+    "step": "5a2. Connect OpenRouter credential",
+    "ok": true,
+    "details": "{\"target\":\"openrouter\",\"status\":\"connected\",\"message\":\"Saved securely in Credential Vault.\"}",
+    "time": "2026-10-31T03:45:43.754Z"
+  },
+  {
+    "step": "5b. End-to-end campaign generation executed",
+    "ok": true,
+    "details": "{\"created\":[\"del_3f5a5fd62ac764a396933a2f0d789343\",\"del_e46a20ed3a6beedbb6c0ce75740cd3b2\",\"del_c06be62f32758052abaccbd02ae7e8bb\"],\"titles\":[\"Weekend Sourdough Promotion Strategy\",\"Weekend Sourdough Feature\",\"Morning Loaves Email\"],\"provider\":\"openrouter\",\"model\":\"openrouter/auto\",\"elapsed_s\":1.29}",
+    "time": "2026-10-31T03:45:45.066Z"
+  },
+  {
+    "step": "5c. Generated deliverables validated with final copy and audit sections",
+    "ok": true,
+    "details": "Count=3",
+    "time": "2026-10-31T03:45:45.081Z"
+  },
+  {
+    "step": "5d. Deliverable AI revision executed and validated",
+    "ok": true,
+    "details": "Version=2",
+    "time": "2026-10-31T03:45:45.518Z"
   },
   {
     "step": "6a. Ready-to-Post Copy Card visible with metrics",
     "ok": true,
-    "details": "READY-TO-POST COPY\n24 words · 185 chars\nCopy text\nCrispy golden crust, naturally fermented sourdough, and baked before sunrise. 🥖☀️\n\nStop b",
-    "time": "2026-10-29T11:27:04.315Z"
+    "details": "READY-TO-POST COPY\n25 words · 192 chars\nCopy text\nCrispy golden artisan crust, naturally fermented sourdough, and baked before sunrise. 🥖✨\n",
+    "time": "2026-10-31T03:45:50.230Z"
   },
   {
     "step": "6b. Structured Audit & Provenance Panel separated",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:04.320Z"
+    "time": "2026-10-31T03:45:50.232Z"
   },
   {
     "step": "7a. Deliverable edited and saved",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:06.702Z"
+    "time": "2026-10-31T03:45:52.442Z"
   },
   {
     "step": "7b. Deliverable transitioned to In review",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:08.541Z"
+    "time": "2026-10-31T03:45:54.070Z"
   },
   {
     "step": "7c. Deliverable approved internally",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:10.156Z"
+    "time": "2026-10-31T03:45:55.612Z"
   },
   {
     "step": "8a. Export Markdown handled via Native Save dialog",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:13.003Z"
+    "time": "2026-10-31T03:45:58.243Z"
   },
   {
     "step": "8b. Download approved package handled via Native Save dialog",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:17.206Z"
+    "time": "2026-10-31T03:46:02.309Z"
   },
   {
     "step": "8c. Approved package API returns valid zip payload",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:17.508Z"
+    "time": "2026-10-31T03:46:02.422Z"
   },
   {
     "step": "9a. Cross-project isolation: Beta campaigns page has no Alpha content",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:21.504Z"
+    "time": "2026-10-31T03:46:05.943Z"
   },
   {
     "step": "9b. Cross-project direct access returns HTTP 404",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:21.569Z"
+    "time": "2026-10-31T03:46:05.958Z"
   },
   {
     "step": "10a. DPAPI credential encryption saved in Settings",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:28.219Z"
+    "time": "2026-10-31T03:46:08.574Z"
   },
   {
     "step": "11a. Clean shutdown leaves 0 orphan processes",
     "ok": true,
     "details": "[]",
-    "time": "2026-10-29T11:27:37.753Z"
+    "time": "2026-10-31T03:46:12.821Z"
   },
   {
     "step": "11b. Relaunch successful after clean shutdown",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:41.629Z"
+    "time": "2026-10-31T03:46:14.444Z"
   },
   {
     "step": "11c. Projects persisted across restart",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:41.769Z"
+    "time": "2026-10-31T03:46:14.501Z"
   },
   {
     "step": "11d. Campaign and approved deliverables persisted",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:42.115Z"
+    "time": "2026-10-31T03:46:14.664Z"
   },
   {
     "step": "12a. Sidecar running before crash test",
     "ok": true,
-    "details": "[\"omos-sidecar.exe:54596\"]",
-    "time": "2026-10-29T11:27:44.974Z"
+    "details": "[\"omos-sidecar.exe:25176\"]",
+    "time": "2026-10-31T03:46:15.735Z"
   },
   {
     "step": "12b. App shell survives sidecar termination",
     "ok": true,
-    "details": "[\"Open Marketing OS.exe:49924\",\"Open Marketing OS.exe:80248\",\"Open Marketing OS.exe:65488\"]",
-    "time": "2026-10-29T11:27:50.856Z"
+    "details": "[\"Open Marketing OS.exe:37328\",\"Open Marketing OS.exe:33088\",\"Open Marketing OS.exe:34736\",\"Open Marketing OS.exe:38716\"]",
+    "time": "2026-10-31T03:46:18.925Z"
   },
   {
     "step": "12c. Sidecar recovered via Retry; data healthy",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:27:57.068Z"
+    "time": "2026-10-31T03:46:25.001Z"
   },
   {
     "step": "13a. Hard kill of whole app leaves 0 orphans",
     "ok": true,
     "details": "[]",
-    "time": "2026-10-29T11:28:06.739Z"
+    "time": "2026-10-31T03:46:30.060Z"
   },
   {
     "step": "14a. Uninstallation removed application binaries",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:28:26.924Z"
+    "time": "2026-10-31T03:46:36.735Z"
   },
   {
     "step": "14b. Uninstallation preserved user data directory",
     "ok": true,
     "details": "",
-    "time": "2026-10-29T11:28:26.924Z"
+    "time": "2026-10-31T03:46:36.735Z"
   }
 ]

@@ -333,18 +333,8 @@ export function parseDeliverableContent(contentMd: string): ParsedDeliverableCon
     /^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b/im
   );
   if (firstAuditMatch && typeof firstAuditMatch.index === "number") {
-    if (firstAuditMatch.index > 0) {
-      const finalCopy = text.slice(0, firstAuditMatch.index).trim();
-      const auditMd = text.slice(firstAuditMatch.index).trim();
-      return {
-        finalCopy,
-        auditMd,
-        hasFinalCopy: Boolean(finalCopy),
-        hasAudit: Boolean(auditMd),
-      };
-    }
-    // Begins immediately with audit sections; no final copy exists.
-    // Do NOT promote AI suggestions into publish-ready copy as a fallback.
+    // Audit sections exist without a valid '## Final copy' heading.
+    // Do NOT promote AI suggestions or unlabelled preamble into publish-ready copy.
     return {
       finalCopy: "",
       auditMd: text,

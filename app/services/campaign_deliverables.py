@@ -19,6 +19,8 @@ from hashlib import sha256
 import io
 import json
 import re
+import sqlite3
+import time
 import uuid
 import zipfile
 
@@ -34,6 +36,28 @@ MAX_TITLE_LENGTH = 200
 MAX_PLATFORM_LENGTH = 80
 MAX_CONTENT_LENGTH = 1_000_000
 
+_FINAL_COPY_HEADING_RE = re.compile(r"(?im)^\s*#{1,6}\s*Final copy\s*$")
+_AUDIT_HEADING_RE = re.compile(
+    r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|"
+    r"AI suggestions|Recommendations|Unknown or unsupported information|"
+    r"Missing information)\b"
+)
+_REQUIRED_AUDIT_PATTERNS = (
+    ("persisted user facts", re.compile(r"(?im)^\s*#{1,6}\s*persisted user facts\b")),
+    ("retrieved evidence", re.compile(r"(?im)^\s*#{1,6}\s*retrieved evidence\b")),
+    ("recommendations", re.compile(r"(?im)^\s*#{1,6}\s*(?:ai suggestions|recommendations)\b")),
+    ("missing information", re.compile(r"(?im)^\s*#{1,6}\s*(?:unknown or unsupported information|missing information)\b")),
+)
+_PLACEHOLDER_RE = re.compile(
+    r"(?im)(?:\[\s*(?:insert|your|add|placeholder|tbd|todo)\b[^\]]*\]"
+    r"|<\s*(?:insert|your|placeholder|tbd|todo)\b[^>]*>"
+    r"|\{\{[^{}\r\n]+\}\}"
+    r"|^\s*(?:TODO|TBD)\b)"
+)
+_EMPTY_STRUCTURED_FIELD_RE = re.compile(
+    r"(?im)^\s*(?:\*\*)?(?:Subject|Preview|Headline|Body|Call to action|CTA)(?:\*\*)?\s*:\s*$"
+)
+
 
 class DeliverableNotFound(LookupError):
     """Project, campaign, or scoped deliverable does not exist."""
@@ -41,6 +65,10 @@ class DeliverableNotFound(LookupError):
 
 class DeliverableConflict(RuntimeError):
     """A stale write or invalid editorial transition was requested."""
+
+
+class DeliverableLeaseError(DeliverableConflict):
+    """A generation persistence write was fenced because its owner lease is invalid or expired."""
 
 
 class DeliverableValidationError(ValueError):
@@ -57,7 +85,15 @@ def _atomic(conn):
     owns_transaction = not conn.in_transaction
     savepoint = f"deliverables_{uuid.uuid4().hex}"
     if owns_transaction:
-        conn.execute("BEGIN IMMEDIATE")
+        for attempt in range(10):
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as exc:
+                if attempt < 9 and ("locked" in str(exc).lower() or "busy" in str(exc).lower()):
+                    time.sleep(0.05)
+                    continue
+                raise
     else:
         conn.execute(f"SAVEPOINT {savepoint}")
     try:
@@ -296,6 +332,12 @@ def transition(conn, project_id: str, campaign_id: str, deliverable_id: str,
             raise DeliverableConflict(
                 f"invalid status transition from {current['status']} to {target_status}"
             )
+        if target_status == "APPROVED":
+            parts = extract_deliverable_parts(current["content_md"])
+            if not parts["has_final_copy"]:
+                raise DeliverableValidationError(
+                    "cannot approve deliverable with missing or malformed final copy"
+                )
         stamp = now()
         next_version = expected_version + 1
         updates = {
@@ -326,9 +368,35 @@ def history(conn, project_id: str, campaign_id: str,
     )
 
 
+def _verify_active_lease_in_tx(conn, project_id: str, campaign_id: str,
+                               lease_token: str | None) -> None:
+    """Ensure persistence cannot commit without a currently valid owner lease."""
+    from app.services import campaign_flow
+
+    row = conn.execute(
+        "SELECT workflow_json FROM campaigns WHERE id=? AND project_id=?",
+        (campaign_id, project_id),
+    ).fetchone()
+    if not row:
+        raise DeliverableNotFound("unknown campaign")
+    raw_meta = row["workflow_json"] if hasattr(row, "keys") else row[0]
+    try:
+        meta = json.loads(raw_meta or "{}") if isinstance(raw_meta, str) else dict(raw_meta or {})
+    except (TypeError, ValueError):
+        meta = {}
+    in_prog = meta.get("generation_in_progress")
+    if lease_token or in_prog is not None:
+        if not campaign_flow._verify_db_lock(
+            conn, project_id, campaign_id, str(lease_token or "")
+        ):
+            raise DeliverableLeaseError(
+                "Generation lease expired or was replaced before persistence could commit."
+            )
+
+
 def save_generated_batch(conn, project_id: str, campaign_id: str,
                          idempotency_key: str, items: list[dict],
-                         provenance: dict) -> list[dict]:
+                         provenance: dict, *, lease_token: str = "") -> list[dict]:
     """Atomically persist generated campaign content for the W2 producer.
 
     ``items`` is an ordered non-empty list of mappings with required
@@ -339,6 +407,10 @@ def save_generated_batch(conn, project_id: str, campaign_id: str,
     persisted public row. A retry with the same project, campaign, and
     idempotency key returns the original rows without changing content,
     version, status, or history.
+
+    When ``lease_token`` is supplied (or an in-progress lease exists on the
+    campaign), the owner lease is verified inside the ``BEGIN IMMEDIATE``
+    transaction before any row is written or committed.
     """
     key = _required_text(idempotency_key, "idempotency_key", 200)
     if not isinstance(items, list) or not items:
@@ -350,8 +422,14 @@ def save_generated_batch(conn, project_id: str, campaign_id: str,
         provenance_json = json.dumps(provenance, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError) as exc:
         raise DeliverableValidationError("provenance must be JSON serializable") from exc
+    if lease_token and getattr(conn, "in_transaction", False):
+        try:
+            conn.commit()
+        except Exception:
+            pass
     with _atomic(conn):
         _require_scope(conn, project_id, campaign_id)
+        _verify_active_lease_in_tx(conn, project_id, campaign_id, lease_token)
         existing_batch = repos.CampaignDeliverables.batch(
             conn, project_id, campaign_id, key
         )
@@ -421,8 +499,47 @@ def package_export(conn, project_id: str, campaign_id: str) -> bytes:
     return output.getvalue()
 
 
+def _is_valid_final_copy_body(final_copy: str) -> bool:
+    """Return True only when ``final_copy`` contains clean, publishable prose."""
+    cleaned = str(final_copy or "").strip()
+    if not cleaned:
+        return False
+    if re.search(r"(?im)^\s*#{1,6}\s*DELIVERABLE\b", cleaned):
+        return False
+    if _AUDIT_HEADING_RE.search(cleaned):
+        return False
+    if re.search(r"(?i)\bsuggestion,\s*not\s+a\s+fact\s*:", cleaned):
+        return False
+    if _PLACEHOLDER_RE.search(cleaned):
+        return False
+    if _EMPTY_STRUCTURED_FIELD_RE.search(cleaned):
+        return False
+    meaningful_lines = []
+    for line in cleaned.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if re.match(r"^#{1,6}\s+", s):
+            continue
+        if re.match(r"^[-*_]{3,}$", s):
+            continue
+        meaningful_lines.append(s)
+    return bool(meaningful_lines)
+
+
+def _has_complete_audit_sections(audit_md: str) -> bool:
+    text = str(audit_md or "").strip()
+    if not text:
+        return False
+    return all(pattern.search(text) for _, pattern in _REQUIRED_AUDIT_PATTERNS)
+
+
 def extract_deliverable_parts(content_md: str) -> dict:
-    """Separate ready-to-post deliverable copy from structured audit sections."""
+    """Separate ready-to-post deliverable copy from structured audit sections.
+
+    Never promotes audit notes, AI suggestions, or unlabelled pre-audit text
+    into publish-ready copy.
+    """
     text = str(content_md or "").strip()
     if not text:
         return {
@@ -432,56 +549,98 @@ def extract_deliverable_parts(content_md: str) -> dict:
             "has_audit": False,
         }
 
-    match = re.search(r"(?im)^\s*#{1,6}\s*Final copy\s*$", text)
+    match = _FINAL_COPY_HEADING_RE.search(text)
     if match:
-        body_after = text[match.end():]
-        audit_match = re.search(
-            r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b",
-            body_after,
-        )
-        if audit_match:
-            final_copy = body_after[:audit_match.start()].strip()
-            audit_md = body_after[audit_match.start():].strip()
-        else:
-            final_copy = body_after.strip()
-            audit_md = ""
-        return {
-            "final_copy": final_copy,
-            "audit_md": audit_md,
-            "has_final_copy": bool(final_copy),
-            "has_audit": bool(audit_md),
-        }
-
-    first_audit = re.search(
-        r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b",
-        text,
-    )
-    if first_audit:
-        if first_audit.start() > 0:
-            final_copy = text[:first_audit.start()].strip()
-            audit_md = text[first_audit.start():].strip()
-            return {
-                "final_copy": final_copy,
-                "audit_md": audit_md,
-                "has_final_copy": bool(final_copy),
-                "has_audit": bool(audit_md),
-            }
-        else:
-            # Begins immediately with audit sections; no final copy exists.
-            # Do NOT promote AI suggestions into publish-ready copy as a fallback.
+        prefix = text[:match.start()].strip()
+        if prefix and _AUDIT_HEADING_RE.search(prefix):
             return {
                 "final_copy": "",
                 "audit_md": text,
                 "has_final_copy": False,
-                "has_audit": True,
+                "has_audit": _has_complete_audit_sections(text),
             }
+        body_after = text[match.end():]
+        audit_match = _AUDIT_HEADING_RE.search(body_after)
+        if audit_match:
+            raw_final = body_after[:audit_match.start()].strip()
+            audit_md = body_after[audit_match.start():].strip()
+        else:
+            raw_final = body_after.strip()
+            audit_md = ""
+        valid_final = _is_valid_final_copy_body(raw_final)
+        return {
+            "final_copy": raw_final if valid_final else "",
+            "audit_md": audit_md,
+            "has_final_copy": valid_final,
+            "has_audit": _has_complete_audit_sections(audit_md),
+        }
 
+    first_audit = _AUDIT_HEADING_RE.search(text)
+    if first_audit or re.search(r"(?im)^\s*#{1,6}\s*Final copy\b", text):
+        # Audit sections exist without a valid '## Final copy' heading.
+        # Never promote AI suggestions or unlabelled preamble into final copy.
+        return {
+            "final_copy": "",
+            "audit_md": text,
+            "has_final_copy": False,
+            "has_audit": _has_complete_audit_sections(text),
+        }
+
+    valid_manual = _is_valid_final_copy_body(text)
     return {
-        "final_copy": text,
+        "final_copy": text if valid_manual else "",
         "audit_md": "",
-        "has_final_copy": bool(text),
+        "has_final_copy": valid_manual,
         "has_audit": False,
     }
+
+
+def validate_final_copy(content_md: str, *, deliverable_type: str = "",
+                        platform: str | None = None,
+                        require_audit: bool = False) -> tuple[bool, str, dict]:
+    """Validate that deliverable content has clean, non-empty final copy.
+
+    When ``require_audit`` is True (or when the content uses ``## Final copy``
+    or audit headings), both an explicit ``## Final copy`` section and all four
+    required audit sections must be present and valid.
+    """
+    raw = str(content_md or "").strip()
+    parts = extract_deliverable_parts(raw)
+    has_explicit_final_heading = bool(_FINAL_COPY_HEADING_RE.search(raw))
+    has_any_audit_heading = bool(_AUDIT_HEADING_RE.search(raw))
+    needs_structured = (
+        require_audit
+        or has_explicit_final_heading
+        or has_any_audit_heading
+        or bool(re.search(r"(?im)^\s*#{1,6}\s*Final copy\b", raw))
+    )
+    if needs_structured:
+        if not has_explicit_final_heading:
+            return False, "missing '## Final copy' section", parts
+        if not parts["has_final_copy"]:
+            return False, "final copy is empty or malformed", parts
+        if not parts["has_audit"]:
+            return False, "missing required audit sections", parts
+    else:
+        if not parts["has_final_copy"]:
+            return False, "final copy is empty or malformed", parts
+
+    fc = parts["final_copy"]
+    kind = str(deliverable_type or "").strip().lower()
+    plat = str(platform or "").strip().lower()
+    if needs_structured and kind == "ad_copy" and plat == "email":
+        if not re.search(r"(?im)^\s*(?:\*\*Subject\*\*|Subject)\s*:\s*\S+", fc):
+            return False, "email final copy is missing a Subject line", parts
+        body_lines = [
+            ln.strip() for ln in fc.splitlines()
+            if ln.strip()
+            and not re.match(r"(?i)^(?:\*\*)?(?:Subject|Preview)(?:\*\*)?\s*:", ln.strip())
+            and not re.match(r"^#{1,6}\s+", ln.strip())
+        ]
+        if not body_lines:
+            return False, "email final copy is missing body text", parts
+
+    return True, "", parts
 
 
 def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
@@ -489,8 +648,9 @@ def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
 
     A deliverable that was approved and is now being revised exports its
     approved revision, not the unfinished draft. Deliverables that were never
-    approved are left out and listed in the summary so nothing unreviewed is
-    shipped by accident.
+    approved or whose approved revision has missing/malformed final copy are
+    left out and listed in the summary so nothing unreviewed or malformed is
+    shipped through a legacy fallback.
     """
     rows = list_deliverables(conn, project_id, campaign_id)
     output = io.BytesIO()
@@ -498,24 +658,44 @@ def approved_package_export(conn, project_id: str, campaign_id: str) -> bytes:
              "Only approved content is included in this package.", ""]
     with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         for row in rows:
-            revs = [r for r in repos.CampaignDeliverables.history(
+            full_row = _get(conn, project_id, campaign_id, row["id"])
+            all_revs = repos.CampaignDeliverables.history(
                 conn, project_id, campaign_id, row["id"])
-                if r["status"] == "APPROVED"]
+            revs = [r for r in all_revs if r["status"] == "APPROVED"]
             if not revs:
                 lines.append(f"- NOT INCLUDED (not approved yet): {row['title']}")
                 continue
             rev = revs[-1]
+            is_generated = (
+                bool(full_row.get("generation_idempotency_key"))
+                or any(
+                    r.get("operation") == "GENERATED"
+                    or (r.get("provenance_json") or "{}") not in ("", "{}")
+                    for r in all_revs
+                )
+            )
+            valid_fc, reason, parts = validate_final_copy(
+                rev["content_md"],
+                deliverable_type=str(rev.get("type") or row.get("type") or ""),
+                platform=rev.get("platform") or row.get("platform"),
+                require_audit=is_generated,
+            )
+            if not valid_fc:
+                lines.append(
+                    f"- NOT INCLUDED (invalid or missing final copy - {reason}): "
+                    f"{rev['title']}"
+                )
+                continue
             slug = re.sub(r"[^A-Za-z0-9_-]+", "-", rev["title"]).strip("-_")[:80]
             slug = slug or rev["type"]
-            parts = extract_deliverable_parts(rev["content_md"])
-            if parts["has_final_copy"] and parts["has_audit"]:
+            if parts["has_audit"]:
                 export_text = (f"# {rev['title']}\n\n"
                                f"{parts['final_copy']}\n\n"
                                f"---\n"
                                f"## Audit & Provenance\n\n"
                                f"{parts['audit_md']}\n")
             else:
-                export_text = rev["content_md"]
+                export_text = f"# {rev['title']}\n\n{parts['final_copy']}\n"
             archive.writestr(f"{rev['type']}/{slug}-{row['id'][:8]}.md",
                              export_text)
             note = ""

@@ -1306,7 +1306,8 @@ def _validate_business_place_claims(markdown: str, source_texts: list[str], *,
 
 def validate_generated_items(text: str, *, types: list[str], allowed_ids,
                              single: bool = False, context: dict | None = None,
-                             user_request: str = "") -> list[dict]:
+                             user_request: str = "",
+                             require_final_copy: bool = False) -> list[dict]:
     """Validate a whole batch before anything is persisted.
 
     Raises :class:`DeliverableValidationError` on the first problem so a bad
@@ -1369,6 +1370,21 @@ def validate_generated_items(text: str, *, types: list[str], allowed_ids,
             raise DeliverableValidationError(
                 f"{label} ({kind}) did not separate "
                 f"{', '.join(missing)}, so nothing was saved.")
+        has_final_heading = bool(re.search(r"(?im)^\s*#{1,6}\s*Final copy\b", content))
+        if require_final_copy or has_final_heading:
+            from app.services.campaign_deliverables import validate_final_copy
+
+            valid_fc, fc_reason, _parts = validate_final_copy(
+                content,
+                deliverable_type=kind,
+                platform=item.get("platform"),
+                require_audit=True,
+            )
+            if not valid_fc:
+                raise DeliverableValidationError(
+                    f"{label} ({kind}) has invalid or missing final copy ({fc_reason}), "
+                    "so nothing was saved."
+                )
         citation_diagnostic = _unsupported_citation_diagnostic(
             content, allowed_ids)
         if citation_diagnostic is not None:
@@ -1646,11 +1662,15 @@ def _failure(error: str, *, status: str = "failed", max_error: int = 400,
 # generation
 # ---------------------------------------------------------------------------
 
+_before_persist_hook = None
+
+
 def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
                    user_request: str, types=None, campaign_title: str = "",
                    provider: str = "AUTO", model_id: str = "",
                    strict_zero_cost: bool = False,
-                   strict_eligibility=None, lease_token: str = "") -> dict:
+                   strict_eligibility=None, lease_token: str = "",
+                   require_final_copy: bool = False) -> dict:
     """Generate one deliverable batch and persist it atomically through W1.
 
     Returns an honest result: persisted ids and types, or a campaign-only
@@ -1735,7 +1755,8 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
     try:
         items = validate_generated_items(
             text, types=wanted, allowed_ids=context["evidence_ids"],
-            context=context, user_request=user_request)
+            context=context, user_request=user_request,
+            require_final_copy=require_final_copy)
     except DeliverableValidationError as exc:
         error, diagnostic = _validation_error_payload(
             exc, context=context, project_id=pid)
@@ -1769,9 +1790,25 @@ def generate_batch(conn, *, project_id: str, campaign_id: str, turn_id: str,
                 failure_code="lease_expired", campaign_id=cid,
                 preserved_existing=True)
 
+    if callable(_before_persist_hook):
+        _before_persist_hook(conn, pid, cid, lease_token)
+
     try:
+        from app.services.campaign_deliverables import DeliverableLeaseError
+    except Exception:
+        DeliverableLeaseError = ()  # type: ignore[misc,assignment]
+
+    try:
+        save_kwargs = {"lease_token": lease_token} if lease_token else {}
         saved = _storage().save_generated_batch(
-            conn, pid, cid, batch_key, _w1_items(items), provenance)
+            conn, pid, cid, batch_key, _w1_items(items), provenance,
+            **save_kwargs)
+    except DeliverableLeaseError as exc:
+        return _failure(
+            str(exc) or "Generation lock lease expired or was taken by another request; refusing to persist state.",
+            provider=identity["provider"], model=identity["model"],
+            failure_code="lease_expired", campaign_id=cid,
+            preserved_existing=True)
     except Exception as exc:
         return _failure(f"The generated deliverables could not be saved: {exc}",
                         provider=identity["provider"], model=identity["model"],
@@ -1833,7 +1870,8 @@ def _owner_request_text(conn, project_id: str, campaign_id: str) -> str:
 
 def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
                        deliverable_id: str, instruction: str,
-                       provider: str = "AUTO", model_id: str = "") -> dict:
+                       provider: str = "AUTO", model_id: str = "",
+                       require_final_copy: bool = False) -> dict:
     """Revise exactly one scoped deliverable and save it as a new version.
 
     Uses W1's expected-version revise function, so a stale read is reported as
@@ -1880,7 +1918,8 @@ def revise_deliverable(conn, *, project_id: str, campaign_id: str, turn_id: str,
             text, types=[str(current.get("type", ""))],
             allowed_ids=context["evidence_ids"], single=True,
             context=context,
-            user_request=f"{instruction}\n{_owner_request_text(conn, pid, cid)}")
+            user_request=f"{instruction}\n{_owner_request_text(conn, pid, cid)}",
+            require_final_copy=require_final_copy)
     except DeliverableValidationError as exc:
         error, diagnostic = _validation_error_payload(
             exc, context=context, project_id=pid)

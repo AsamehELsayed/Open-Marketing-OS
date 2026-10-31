@@ -169,6 +169,146 @@ function dismissNativeDialogSoon(timeoutSeconds = 25) {
   });
 }
 
+const MOCK_PORT = 9090;
+let mockServer = null;
+
+function startMockProvider() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        if (req.url && req.url.includes('/models')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            object: 'list',
+            data: [
+              { id: 'openrouter/auto', name: 'OpenRouter Auto' },
+              { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'Llama 3.1 8B Free' },
+            ],
+          }));
+          return;
+        }
+
+        const isRevise = body.includes('revision_request') || body.includes('revising exactly one') || /artisan/i.test(body);
+        let content = '';
+        if (isRevise) {
+          content = [
+            '## DELIVERABLE type="social_post" title="Weekend Sourdough Feature" platform="Instagram"',
+            '',
+            '## Final copy',
+            'Crispy golden artisan crust, naturally fermented sourdough, and baked before sunrise. 🥖✨',
+            '',
+            'Stop by this weekend for our fresh artisan sourdough loaves!',
+            '#ArtisanBread #FamilyBakery #FreshBaking',
+            '',
+            '## Persisted user facts',
+            '- Audience: local families',
+            '',
+            '## Retrieved evidence',
+            'No project evidence available',
+            '',
+            '## AI suggestions',
+            'Suggestion: Post early in the morning with artisan breakfast pairings.',
+            '',
+            '## Unknown or unsupported information',
+            'None.',
+          ].join('\n');
+        } else {
+          content = [
+            '## DELIVERABLE type="strategy_brief" title="Weekend Sourdough Promotion Strategy" platform=""',
+            '',
+            '## Final copy',
+            'Connect with neighborhood families this weekend through social channels and morning email announcements to share our freshly baked artisan sourdough loaves.',
+            '',
+            '## Persisted user facts',
+            '- Audience: local families',
+            '',
+            '## Retrieved evidence',
+            'No project evidence available',
+            '',
+            '## AI suggestions',
+            'Suggestion: Focus on the aroma and morning routine.',
+            '',
+            '## Unknown or unsupported information',
+            'None.',
+            '',
+            '## DELIVERABLE type="social_post" title="Weekend Sourdough Feature" platform="Instagram"',
+            '',
+            '## Final copy',
+            'Crispy golden crust, naturally fermented sourdough, and baked before sunrise. 🥖☀️',
+            '',
+            'Stop by this weekend for our fresh artisan sourdough loaves!',
+            '#ArtisanBread #FamilyBakery #FreshBaking',
+            '',
+            '## Persisted user facts',
+            '- Audience: local families',
+            '',
+            '## Retrieved evidence',
+            'No project evidence available',
+            '',
+            '## AI suggestions',
+            'Suggestion: Post early in the morning with fresh breakfast pairings.',
+            '',
+            '## Unknown or unsupported information',
+            'None.',
+            '',
+            '## DELIVERABLE type="ad_copy" title="Morning Loaves Email" platform="Email"',
+            '',
+            '## Final copy',
+            'Subject: Warm morning loaves are fresh out of the oven!',
+            '',
+            'Good morning,',
+            '',
+            'There is nothing quite like warm, fresh bread on a crisp morning. Come join us this weekend and bring home something special for breakfast.',
+            '',
+            'Warmly,',
+            'The Neighborhood Bakers',
+            '',
+            '## Persisted user facts',
+            '- Audience: local families',
+            '',
+            '## Retrieved evidence',
+            'No project evidence available',
+            '',
+            '## AI suggestions',
+            'Suggestion: Send before the weekend to invite morning visits.',
+            '',
+            '## Unknown or unsupported information',
+            'None.',
+          ].join('\n');
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 'gen-mock-' + Date.now(),
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: 'openrouter/auto',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content,
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: {
+            prompt_tokens: 60,
+            completion_tokens: 150,
+            total_tokens: 210,
+          },
+        }));
+      });
+    });
+
+    server.listen(MOCK_PORT, '127.0.0.1', () => resolve(server));
+    server.on('error', reject);
+  });
+}
+
 (async () => {
   console.log('=== Open Marketing OS Phase 4 Windows Acceptance Suite ===\\n');
 
@@ -287,88 +427,62 @@ function dismissNativeDialogSoon(timeoutSeconds = 25) {
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '04_work_package_proposal.png') });
     }
 
-    // STEP 5: Seed Ready-to-Post Deliverables in SQLite DB
-    const dbPath = path.join(PROFILE, 'local', 'OpenMarketingOS', 'data', 'marketing.db').replace(/\\/g, '/');
-    const seedScript = `
-import sqlite3, uuid, datetime
+    // STEP 5: End-to-End Generation & AI Revision via Deterministic Mock Provider
+    mockServer = await startMockProvider();
 
+    // Configure loopback mock provider in SQLite settings and connect OpenRouter credential
+    const dbPath = path.join(PROFILE, 'local', 'OpenMarketingOS', 'data', 'marketing.db').replace(/\\/g, '/');
+    const configScript = `
+import sqlite3, datetime
 conn = sqlite3.connect("${dbPath}")
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-# Insert Deliverable 1: Social Post
-d1_id = "d1-" + uuid.uuid4().hex[:12]
-social_content = '''## Final copy
-Crispy golden crust, naturally fermented sourdough, and baked before sunrise. 🥖☀️
-
-Stop by this weekend for our fresh artisan sourdough loaves!
-#ArtisanBread #FamilyBakery #FreshBaking
-
-## Persisted user facts
-- Audience: local families
-
-## Retrieved evidence
-No project evidence available
-
-## AI suggestions
-Suggestion: Post early Saturday morning with breakfast pairings.
-
-## Unknown or unsupported information
-None.
-'''
-conn.execute(
-    "INSERT INTO campaign_deliverables (id, project_id, campaign_id, type, title, platform, content_md, current_version, status, created_at, updated_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'DRAFT', ?, ?)",
-    (d1_id, "${alphaProjectId}", "${campaignId}", "social_post", "Weekend Sourdough Feature", "Instagram", social_content, now, now)
-)
-conn.execute(
-    "INSERT INTO campaign_deliverable_revisions (revision_id, deliverable_id, project_id, campaign_id, version, operation, type, title, platform, content_md, status, provenance_json, created_at) "
-    "VALUES (?, ?, ?, ?, 1, 'CREATE', 'social_post', 'Weekend Sourdough Feature', 'Instagram', ?, 'DRAFT', '{}', ?)",
-    (uuid.uuid4().hex, d1_id, "${alphaProjectId}", "${campaignId}", social_content, now)
-)
-
-# Insert Deliverable 2: Email Copy
-d2_id = "d2-" + uuid.uuid4().hex[:12]
-email_content = '''## Final copy
-Subject: Warm morning loaves are fresh out of the oven!
-
-Good morning,
-
-There is nothing quite like warm, fresh bread on a crisp morning. Come join us this weekend and bring home something special for breakfast.
-
-Warmly,
-The Neighborhood Bakers
-
-## Persisted user facts
-- Audience: local families
-
-## Retrieved evidence
-No project evidence available
-
-## AI suggestions
-Suggestion: Send on Friday morning at 8:00 AM.
-
-## Unknown or unsupported information
-None.
-'''
-conn.execute(
-    "INSERT INTO campaign_deliverables (id, project_id, campaign_id, type, title, platform, content_md, current_version, status, created_at, updated_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'DRAFT', ?, ?)",
-    (d2_id, "${alphaProjectId}", "${campaignId}", "ad_copy", "Morning Loaves Email", "Email", email_content, now, now)
-)
-conn.execute(
-    "INSERT INTO campaign_deliverable_revisions (revision_id, deliverable_id, project_id, campaign_id, version, operation, type, title, platform, content_md, status, provenance_json, created_at) "
-    "VALUES (?, ?, ?, ?, 1, 'CREATE', 'ad_copy', 'Morning Loaves Email', 'Email', ?, 'DRAFT', '{}', ?)",
-    (uuid.uuid4().hex, d2_id, "${alphaProjectId}", "${campaignId}", email_content, now)
-)
-
+for k, v in [
+    ("openrouter_base_url", "http://127.0.0.1:${MOCK_PORT}/api/v1"),
+    ("manager_provider", "openrouter"),
+    ("openrouter_default_model", "openrouter/auto"),
+]:
+    conn.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)", (k, v, now))
 conn.commit()
 conn.close()
-print("SEEDED_OK:" + d1_id + ":" + d2_id)
+print("CONFIG_OK")
 `;
-    const seedPy = path.join(PROFILE, 'seed_deliverables.py');
-    fs.writeFileSync(seedPy, seedScript);
-    const seedOutput = cp.execSync(`python "${seedPy}"`).toString().trim();
-    record('5a. Seed realistic deliverables with ready-to-post contract', seedOutput.startsWith('SEEDED_OK'), seedOutput);
+    const cfgPy = path.join(PROFILE, 'config_provider.py');
+    fs.writeFileSync(cfgPy, configScript);
+    const cfgOutput = cp.execSync(`python "${cfgPy}"`).toString().trim();
+    record('5a. Configure loopback OpenRouter provider', cfgOutput === 'CONFIG_OK');
+
+    const connRes = await api(page, '/api/settings/credentials/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: 'openrouter', token: 'acceptance-mock-openrouter-token-42' }),
+    });
+    record('5a2. Connect OpenRouter credential', connRes.status === 200, JSON.stringify(connRes.data));
+
+    // 5b. Invoke real generation via API (exercises campaign_flow, lease fencing, and validation)
+    const genRes = await api(page, `/api/projects/${alphaProjectId}/campaigns/${campaignId}/generate`, {
+      method: 'POST',
+    });
+    record('5b. End-to-end campaign generation executed', genRes.status === 200, JSON.stringify(genRes.data));
+
+    // Verify generated deliverables in DB/API and validate ready-to-post copy
+    const delivsRes = await api(page, `/api/projects/${alphaProjectId}/campaigns/${campaignId}/deliverables`);
+    const delivs = Array.isArray(delivsRes.data) ? delivsRes.data : [];
+    const socialDeliv = delivs.find((d) => d.type === 'social_post');
+    const emailDeliv = delivs.find((d) => d.type === 'ad_copy');
+    const genValid = delivs.length >= 2 && Boolean(socialDeliv) && Boolean(emailDeliv) &&
+      /Crispy golden crust/i.test(socialDeliv.content_md) &&
+      /Subject:/i.test(emailDeliv.content_md);
+    record('5c. Generated deliverables validated with final copy and audit sections', genValid, `Count=${delivs.length}`);
+
+    // 5d. Invoke AI revision on social post to verify revision lifecycle
+    const revRes = await api(page, `/api/projects/${alphaProjectId}/campaigns/${campaignId}/deliverables/${socialDeliv.id}/ai-revise`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction: 'Make it sound more artisanal' }),
+    });
+    const revOk = revRes.status === 200 && revRes.data?.current_version === 2 &&
+      /artisan/i.test(revRes.data?.content_md || '');
+    record('5d. Deliverable AI revision executed and validated', revOk, `Version=${revRes.data?.current_version}`);
 
     // STEP 6: Deliverable Editor & Ready-to-Post Contract Verification
     await page.goto(`${origin}/app/campaigns/${campaignId}`, { waitUntil: 'domcontentloaded' });
@@ -376,10 +490,16 @@ print("SEEDED_OK:" + d1_id + ":" + d2_id)
     await page.getByRole('tab', { name: 'Content' }).click();
     await sleep(1500);
 
+    const socialBtn = page.getByRole('button', { name: /Weekend Sourdough Feature/i });
+    if (await socialBtn.count()) {
+      await socialBtn.click();
+      await sleep(1000);
+    }
+
     const readyCard = page.locator('[data-testid="deliverable-ready-card"]');
     await readyCard.waitFor({ state: 'visible', timeout: 30000 });
     const readyCardText = await readyCard.innerText();
-    const hasFinalCopyText = /Crispy golden crust/i.test(readyCardText);
+    const hasFinalCopyText = /Crispy golden/i.test(readyCardText);
     const hasWordCount = /words ·/i.test(readyCardText);
     record('6a. Ready-to-Post Copy Card visible with metrics', hasFinalCopyText && hasWordCount, readyCardText.slice(0, 140));
 
@@ -526,9 +646,9 @@ print("SEEDED_OK:" + d1_id + ":" + d2_id)
     // STEP 14: Uninstall Verification
     await killAll();
     console.log('\n--- Running silent uninstaller ---');
-    try { cp.execSync(`"${UNINSTALLER}" /S`, { stdio: 'ignore' }); } catch {}
+    try { cp.execSync(`"${UNINSTALLER}" /NCRC /S`, { stdio: 'ignore' }); } catch {}
     let exeRemoved = false;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await sleep(1000);
       if (!fs.existsSync(EXE)) {
         exeRemoved = true;
@@ -543,6 +663,9 @@ print("SEEDED_OK:" + d1_id + ":" + d2_id)
     console.error('Test Suite Exception:', err);
     record('SUITE_ERROR', false, String(err.stack || err));
   } finally {
+    if (mockServer) {
+      try { mockServer.close(); } catch {}
+    }
     await killAll();
     fs.writeFileSync(RESULTS_FILE, JSON.stringify(results, null, 2));
     const passCount = results.filter((r) => r.ok).length;

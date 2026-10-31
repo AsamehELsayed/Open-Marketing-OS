@@ -307,3 +307,181 @@ def test_generate_from_plan_returns_elapsed_and_model_status(client_env):
     assert "elapsed_s" in data
     assert isinstance(data["elapsed_s"], (int, float))
     assert data["elapsed_s"] >= 0.0
+
+
+def test_approved_export_blocks_malformed_or_missing_final_copy_legacy_fallback(client_env):
+    """Concern 4: Malformed or missing final copy must NEVER bypass validation
+    through a legacy fallback in approved_package_export or transition.
+    """
+    client, conn, _ = client_env
+    _make_campaign(conn, "p_test", "c_export_guard")
+
+    # 1. Valid generated deliverable -> approved -> MUST be included
+    r = client.post("/api/projects/p_test/campaigns/c_export_guard/generate")
+    assert r.status_code == 200
+    generated = deliverables.list_deliverables(conn, "p_test", "c_export_guard")
+    valid_item = next(x for x in generated if x["type"] == "social_post")
+    valid_item = deliverables.transition(
+        conn, "p_test", "c_export_guard", valid_item["id"], valid_item["current_version"], "IN_REVIEW"
+    )
+    valid_item = deliverables.transition(
+        conn, "p_test", "c_export_guard", valid_item["id"], valid_item["current_version"], "APPROVED"
+    )
+
+    # 2. Deliverable with audit sections but MISSING '## Final copy' (legacy audit-only shape)
+    audit_only_md = (
+        "## Persisted user facts\n"
+        "- Audience: local families\n\n"
+        "## Retrieved evidence\n"
+        "No project evidence available\n\n"
+        "## AI suggestions\n"
+        "- Suggestion, not a fact: Post a morning photo.\n\n"
+        "## Unknown or unsupported information\n"
+        "None.\n"
+    )
+    d_audit_only = deliverables.create_manual(conn, "p_test", "c_export_guard", {
+        "type": "social_post",
+        "title": "Audit Only Legacy Post",
+        "platform": "Instagram",
+        "content_md": audit_only_md,
+    })
+    d_audit_only = deliverables.transition(
+        conn, "p_test", "c_export_guard", d_audit_only["id"], d_audit_only["current_version"], "IN_REVIEW"
+    )
+    # Transitioning to APPROVED must fail validation because final_copy is missing!
+    with pytest.raises(deliverables.DeliverableValidationError, match="missing or malformed final copy"):
+        deliverables.transition(
+            conn, "p_test", "c_export_guard", d_audit_only["id"], d_audit_only["current_version"], "APPROVED"
+        )
+
+    # Force-seed APPROVED revisions in SQLite to simulate pre-existing/legacy DB rows
+    # attempting to bypass validation at export time:
+    bad_cases = [
+        ("Audit Only Legacy Bypass", "social_post", "Instagram", audit_only_md, False),
+        (
+            "Empty Final Copy Bypass",
+            "social_post",
+            "Instagram",
+            "## Final copy\n   \n\n" + audit_only_md,
+            False,
+        ),
+        (
+            "Unlabelled Preamble Before Audit Bypass",
+            "social_post",
+            "Instagram",
+            "Unlabelled preamble text that is not under Final copy\n\n" + audit_only_md,
+            False,
+        ),
+        (
+            "Generated Stripped Audit Fallback Bypass",
+            "social_post",
+            "Instagram",
+            "Plain text trying to use manual fallback on a generated row.",
+            True,
+        ),
+        (
+            "Placeholder Final Copy Bypass",
+            "social_post",
+            "Instagram",
+            "## Final copy\nStop by for [insert offer here] today!\n\n" + audit_only_md,
+            False,
+        ),
+        (
+            "Email Missing Subject Bypass",
+            "ad_copy",
+            "Email",
+            "## Final copy\nHi families, warm bread is ready this morning.\n\n" + audit_only_md,
+            True,
+        ),
+    ]
+
+    for idx, (title, dtype, plat, body_md, mark_generated) in enumerate(bad_cases):
+        deliv_id = f"del_bad_{idx}"
+        conn.execute(
+            "INSERT INTO campaign_deliverables "
+            "(id, project_id, campaign_id, type, title, platform, content_md, status, "
+            "current_version, generation_idempotency_key, generation_ordinal, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'APPROVED', 1, ?, ?, '2026-01-01', '2026-01-01')",
+            (
+                deliv_id,
+                "p_test",
+                "c_export_guard",
+                dtype,
+                title,
+                plat,
+                body_md,
+                "gen_key_1" if mark_generated else None,
+                idx if mark_generated else None,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO campaign_deliverable_revisions "
+            "(revision_id, project_id, campaign_id, deliverable_id, version, operation, "
+            "type, title, platform, content_md, status, provenance_json, created_at) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'APPROVED', ?, '2026-01-01')",
+            (
+                f"rev_bad_{idx}",
+                "p_test",
+                "c_export_guard",
+                deliv_id,
+                "GENERATED" if mark_generated else "STATUS_TRANSITION",
+                dtype,
+                title,
+                plat,
+                body_md,
+                json.dumps({"provider": "test"}) if mark_generated else "{}",
+            ),
+        )
+    conn.commit()
+
+    export_zip = deliverables.approved_package_export(conn, "p_test", "c_export_guard")
+    archive = zipfile.ZipFile(io.BytesIO(export_zip))
+    names = archive.namelist()
+    summary = archive.read("00-package-summary.md").decode("utf-8")
+
+    # Only the 1 valid deliverable file (+ 00-package-summary.md) may be in the ZIP!
+    deliverable_files = [n for n in names if n != "00-package-summary.md"]
+    assert len(deliverable_files) == 1, f"Malformed deliverables leaked into export: {deliverable_files}"
+    exported_body = archive.read(deliverable_files[0]).decode("utf-8")
+    assert f"# {valid_item['title']}" in exported_body
+    assert "Fresh mornings start with wholesome baking." in exported_body
+
+    # Every malformed deliverable must be explicitly listed as NOT INCLUDED in summary
+    for title, *_ in bad_cases:
+        assert f"NOT INCLUDED (invalid or missing final copy" in summary
+        assert title in summary
+        assert title not in exported_body
+
+
+def test_validate_generated_items_enforces_final_copy_in_phase4_flow():
+    """Verify validate_generated_items rejects missing or malformed final copy when require_final_copy=True."""
+    context = {"evidence_ids": [], "project_id": "p_test", "profile": {}, "brief_md": "", "evidence": []}
+
+    # Missing ## Final copy heading when require_final_copy=True
+    with pytest.raises(production.DeliverableValidationError, match="invalid or missing final copy"):
+        production.validate_generated_items(
+            '## DELIVERABLE type="social_post" title="Post" platform="Instagram"\n'
+            '## Persisted user facts\nNo persisted facts supplied.\n'
+            '## Retrieved evidence\nNo project evidence available\n'
+            '## AI suggestions\nSuggestion, not a fact: test\n'
+            '## Unknown or unsupported information\nNone.\n',
+            types=["social_post"],
+            allowed_ids=[],
+            context=context,
+            require_final_copy=True,
+        )
+
+    # Empty ## Final copy section even when require_final_copy=False (since heading is present)
+    with pytest.raises(production.DeliverableValidationError, match="invalid or missing final copy"):
+        production.validate_generated_items(
+            '## DELIVERABLE type="social_post" title="Post" platform="Instagram"\n'
+            '## Final copy\n   \n'
+            '## Persisted user facts\nNo persisted facts supplied.\n'
+            '## Retrieved evidence\nNo project evidence available\n'
+            '## AI suggestions\nSuggestion, not a fact: test\n'
+            '## Unknown or unsupported information\nNone.\n',
+            types=["social_post"],
+            allowed_ids=[],
+            context=context,
+        )
+

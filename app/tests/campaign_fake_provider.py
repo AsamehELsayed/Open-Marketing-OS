@@ -163,6 +163,17 @@ class DeterministicCampaignProvider:
         instruction = str(user.get("revision_request") or "")
         body = str(current.get("content_md") or "")
         note = f"Revised as requested ({instruction.strip()})."
+        final_match = re.search(r"(?im)^\s*#{1,6}\s*Final copy\s*$", body)
+        audit_match = re.search(
+            r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|"
+            r"AI suggestions|Recommendations|Unknown or unsupported information|"
+            r"Missing information)\b",
+            body,
+        )
+        if final_match and audit_match and audit_match.start() > final_match.end():
+            before_audit = body[:audit_match.start()].rstrip()
+            after_audit = body[audit_match.start():]
+            body = f"{before_audit}\n\n{note}\n\n{after_audit}"
         marker = re.search(r"(?im)^##\s*AI suggestions\s*$", body)
         if marker:
             body = body[:marker.end()] + f"\n{note}" + body[marker.end():]
