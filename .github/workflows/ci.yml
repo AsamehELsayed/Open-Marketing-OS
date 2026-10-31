@@ -16,28 +16,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
-    paths:
-      - '.github/**'
-      - 'app/**'
-      - 'frontend/**'
-      # DEV-008-PUBLISH-GATE: `scripts/**` and `config/**` are both load-bearing
-      # at runtime -- `config/model_pricing.yaml` is read on every graph turn and
-      # its absence once shipped a frozen app that looked healthy and never
-      # replied. A change to it must be able to trigger CI. `tests/**` was
-      # removed because the public repository has no root `tests/`; the real
-      # suite lives in `app/tests/` and is already covered by `app/**`.
-      - 'scripts/**'
-      - 'config/**'
-      - 'launcher/**'
-      - 'packaging/**'
-      - 'docs/**'
-      - 'pytest.ini'
-      - 'requirements*.txt'
-      - 'app.py'
-      - 'LICENSE'
-      - 'NOTICE'
-      - 'README.md'
+    branches: [main, master]
 
 # Minimal permissions: CI only ever needs to read the repository.
 permissions:
@@ -342,6 +321,44 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  desktop-tests:
+    name: Desktop unit tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+        working-directory: desktop
+      - run: npm test
+        working-directory: desktop
+
+  browser-journey:
+    name: Deterministic browser campaign journey
+    runs-on: ubuntu-latest
+    env:
+      OMOS_REQUIRE_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt playwright==1.62.0
+      - run: python -m playwright install --with-deps chromium
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: python -m pytest -q app/tests/test_dev044_ui_journey.py
+
   security:
     name: Secret hygiene
     runs-on: ubuntu-latest
@@ -395,3 +412,4 @@ jobs:
         # documentation rather than policy: a real credential could be added
         # next to an allowlisted sentinel and nothing here would object.
         run: python scripts/package/secret_scan.py --root .
+

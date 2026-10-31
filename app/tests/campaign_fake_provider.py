@@ -49,17 +49,66 @@ def _platforms(user_request: str) -> dict[str, str]:
     return found
 
 
+_FINAL_COPY = {
+    "social_post": (
+        "Fresh mornings start with wholesome baking. Handcrafted daily with honest ingredients, "
+        "our breads and pastries are made to bring local families together around the table.\n\n"
+        "Stop by your neighborhood bakery this week and taste the difference that love and craft make."
+    ),
+    "ad_copy_email": (
+        "Subject: Fresh morning favorites for the family\n\n"
+        "Hi there,\n\n"
+        "Nothing brings a family together like the aroma of freshly baked bread in the morning. "
+        "At your neighborhood bakery, we wake up before sunrise to craft every loaf, pastry, and "
+        "treat using only wholesome, honest ingredients.\n\n"
+        "Whether you are packing school lunches or sharing breakfast together, we are here to make "
+        "your mornings a little brighter.\n\n"
+        "Warmly,\n"
+        "Your Neighborhood Bakery Team"
+    ),
+    "ad_copy": (
+        "Headline: Wholesome Baking for Your Family Table\n\n"
+        "Body: Crafted fresh every morning with simple, honest ingredients. "
+        "Give your family the taste of real neighborhood baking.\n\n"
+        "Call to action: Learn More"
+    ),
+    "strategy_brief": (
+        "Core Strategy: Connect with local families by emphasizing handcrafted morning freshness "
+        "and wholesome neighborhood tradition.\n\n"
+        "Key Message: Honest ingredients, warm hospitality, and daily scratch baking for family moments."
+    ),
+    "creative_brief": (
+        "Visual Theme: Natural morning daylight highlighting golden-crust artisan loaves and "
+        "warm family kitchen tables.\n\n"
+        "Tone & Voice: Warm, authentic, approachable, and craft-centered."
+    ),
+    "content_calendar": (
+        "Weekly Rhythm:\n"
+        "- Opening Feature: Behind the scenes dough preparation and craft insights\n"
+        "- Midweek Spotlight: Wholesome family breakfast pairings\n"
+        "- Weekend Showcase: Artisan specialty loaf highlights"
+    ),
+}
+
+
 def _block(kind: str, title: str, platform: str | None, facts: list[str],
            suggestion: str, unknown: str) -> str:
     attrs = f'type="{kind}" title="{title}"'
     attrs += f' platform="{platform}"' if platform else ' platform=""'
     fact_lines = "\n".join(f"- {line}" for line in facts) or \
         "No persisted facts supplied."
+    if kind == "ad_copy" and platform and platform.lower() == "email":
+        copy_text = _FINAL_COPY["ad_copy_email"]
+    else:
+        copy_text = _FINAL_COPY.get(kind, "")
+    copy_section = f"## Final copy\n{copy_text}\n\n" if copy_text else ""
     return (f"## DELIVERABLE {attrs}\n\n"
+            f"{copy_section}"
             f"## Persisted user facts\n{fact_lines}\n\n"
             "## Retrieved evidence\nNo project evidence available\n\n"
             f"## AI suggestions\n{suggestion}\n\n"
             f"## Unknown or unsupported information\n{unknown}\n")
+
 
 
 class DeterministicCampaignProvider:
@@ -114,6 +163,17 @@ class DeterministicCampaignProvider:
         instruction = str(user.get("revision_request") or "")
         body = str(current.get("content_md") or "")
         note = f"Revised as requested ({instruction.strip()})."
+        final_match = re.search(r"(?im)^\s*#{1,6}\s*Final copy\s*$", body)
+        audit_match = re.search(
+            r"(?im)^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|"
+            r"AI suggestions|Recommendations|Unknown or unsupported information|"
+            r"Missing information)\b",
+            body,
+        )
+        if final_match and audit_match and audit_match.start() > final_match.end():
+            before_audit = body[:audit_match.start()].rstrip()
+            after_audit = body[audit_match.start():]
+            body = f"{before_audit}\n\n{note}\n\n{after_audit}"
         marker = re.search(r"(?im)^##\s*AI suggestions\s*$", body)
         if marker:
             body = body[:marker.end()] + f"\n{note}" + body[marker.end():]

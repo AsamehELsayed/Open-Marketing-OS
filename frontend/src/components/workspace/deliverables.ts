@@ -290,3 +290,64 @@ export function campaignBriefing(
     request: pick("request_facts", "request", "brief_request"),
   };
 }
+
+export interface ParsedDeliverableContent {
+  finalCopy: string;
+  auditMd: string;
+  hasFinalCopy: boolean;
+  hasAudit: boolean;
+}
+
+export function parseDeliverableContent(contentMd: string): ParsedDeliverableContent {
+  const text = String(contentMd ?? "").trim();
+  if (!text) {
+    return { finalCopy: "", auditMd: "", hasFinalCopy: false, hasAudit: false };
+  }
+
+  const finalCopyMatch = text.match(/^\s*#{1,6}\s*Final copy\s*$/im);
+  if (finalCopyMatch && typeof finalCopyMatch.index === "number") {
+    const after = text.slice(finalCopyMatch.index + finalCopyMatch[0].length);
+    const auditMatch = after.match(
+      /^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b/im
+    );
+    if (auditMatch && typeof auditMatch.index === "number") {
+      const finalCopy = after.slice(0, auditMatch.index).trim();
+      const auditMd = after.slice(auditMatch.index).trim();
+      return {
+        finalCopy,
+        auditMd,
+        hasFinalCopy: Boolean(finalCopy),
+        hasAudit: Boolean(auditMd),
+      };
+    }
+    const finalCopy = after.trim();
+    return {
+      finalCopy,
+      auditMd: "",
+      hasFinalCopy: Boolean(finalCopy),
+      hasAudit: false,
+    };
+  }
+
+  const firstAuditMatch = text.match(
+    /^\s*#{1,6}\s*(?:Persisted user facts|Retrieved evidence|AI suggestions|Recommendations|Unknown or unsupported information|Missing information)\b/im
+  );
+  if (firstAuditMatch && typeof firstAuditMatch.index === "number") {
+    // Audit sections exist without a valid '## Final copy' heading.
+    // Do NOT promote AI suggestions or unlabelled preamble into publish-ready copy.
+    return {
+      finalCopy: "",
+      auditMd: text,
+      hasFinalCopy: false,
+      hasAudit: true,
+    };
+  }
+
+  return {
+    finalCopy: text,
+    auditMd: "",
+    hasFinalCopy: Boolean(text),
+    hasAudit: false,
+  };
+}
+

@@ -500,12 +500,28 @@ def test_fanout_concurrency_cap_respected(tmp_path, monkeypatch):
 
     lock = threading.Lock()
     state = {"cur": 0, "peak": 0}
+    b_first_pair = threading.Barrier(2, timeout=5.0)
+    first_pair_released = threading.Event()
+    first_pair_done = False
+    third_task_started_early = False
 
     def slow(conn, *, project_id, root, args):
+        nonlocal third_task_started_early, first_pair_done
+        idx = args.get("i", 0)
         with lock:
             state["cur"] += 1
             state["peak"] = max(state["peak"], state["cur"])
-        time.sleep(0.06)
+            if idx >= 2 and not first_pair_done:
+                third_task_started_early = True
+
+        if idx in (0, 1):
+            # Ensure both tasks 0 and 1 are active concurrently
+            b_first_pair.wait(timeout=5.0)
+            # Hold briefly to prove no 3rd worker thread starts before the first pair completes
+            first_pair_released.wait(timeout=0.04)
+            with lock:
+                first_pair_done = True
+
         with lock:
             state["cur"] -= 1
         return {"ok": True}
@@ -516,13 +532,11 @@ def test_fanout_concurrency_cap_respected(tmp_path, monkeypatch):
         reg.register_tool(ToolRecord(tool_id=tid, source_type="native",
                                      description="d", parameters={}, side_effect="none"))
         reg.bind_handler(tid, slow)
-    calls = [{"tool_id": f"cap.t{i}", "args": {}} for i in range(6)]
-    t0 = time.perf_counter()
+    calls = [{"tool_id": f"cap.t{i}", "args": {"i": i}} for i in range(6)]
     out = fanout(reg, conn, project_id="starter", root=str(tmp_path), calls=calls)
-    wall = time.perf_counter() - t0
     assert len(out) == 6 and all(r["ok"] for r in out)
-    assert 1 <= state["peak"] <= 2, state
-    assert wall < 0.45
+    assert state["peak"] == 2, state
+    assert not third_task_started_early, "Concurrency cap violated: a third task started before first pair completed"
     conn.close()
 
 

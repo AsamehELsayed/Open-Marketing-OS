@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, saveDownloadedFile, type CampaignWorkPackage } from "../../api/client";
 import StatusBadge from "../chrome/StatusBadge";
 
@@ -48,6 +48,16 @@ export default function WorkPackagePanel({ projectId, campaignId, onReview }: {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [writing, setWriting] = useState(false);
+  const writingRef = useRef(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!writing) return;
+    const started = Date.now();
+    setElapsed(0);
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [writing]);
   const [goal, setGoal] = useState("");
   const [goalSaved, setGoalSaved] = useState("");
   const [reload, setReload] = useState(0);
@@ -103,19 +113,23 @@ export default function WorkPackagePanel({ projectId, campaignId, onReview }: {
   }
 
   async function writeContent() {
+    if (writingRef.current) return;
+    writingRef.current = true;
     setBusy(true);
     setWriting(true);
     setError("");
     setNotice("");
     try {
       const out = await api.generateCampaignContent(projectId, campaignId);
-      setNotice(`${out.created.length} draft(s) written. Nothing is approved yet - review each one below.`);
+      const timeStr = out.elapsed_s ? ` in ${out.elapsed_s}s` : "";
+      setNotice(`${out.created.length} draft(s) written${out.model ? ` using ${out.model}${out.provider ? ` (${out.provider})` : ""}` : ""}${timeStr}. Nothing is approved yet - review each one below.`);
       setReload((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The content couldn’t be written. Nothing was saved.");
     } finally {
       setBusy(false);
       setWriting(false);
+      writingRef.current = false;
     }
   }
 
@@ -240,6 +254,7 @@ export default function WorkPackagePanel({ projectId, campaignId, onReview }: {
             >
               {writing ? "Writing…" : "Write this content"}
             </button>
+            {writing && <p role="status" aria-live="polite" className="mt-1 text-meta text-inksecondary">Writing content · {elapsed}s elapsed. Free models can be slow or unavailable; no completion time is guaranteed.</p>}
             {!p.ready_to_generate && <p className="mt-1 text-meta text-inksecondary">Answer the needed questions above first.</p>}
             <p className="mt-1 text-meta text-inkmuted">Writes drafts only. Nothing is published, sent or paid for.</p>
           </div>
