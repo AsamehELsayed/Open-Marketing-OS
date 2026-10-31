@@ -73,25 +73,25 @@ To ensure complete build reproducibility and prevent artifact drift, every candi
 
 ## 4. Executed Installed Windows Acceptance Suite Evidence (38 PASSED, 0 FAILED)
 
-Execution ran against the rebuilt candidate artifact `Open Marketing OS Setup 0.1.0-beta.2.exe` (`13f65a93ac...`):
+Execution ran against the rebuilt candidate artifact `Open Marketing OS Setup 0.1.0-beta.2.exe` (`13f65a93aceb7d7ebaafccd76e978829242d2b6f20dc236b9ebff64839a51950`, 225,732,061 bytes):
 
 ```text
 === Open Marketing OS Phase 4 Windows Acceptance Suite ===
 PASS | 1. Installation verification | EXE=true, Uninstaller=true, Sidecar=true
-PASS | 2. Application launch | Window ready in 3990ms at http://127.0.0.1:52604
+PASS | 2. Application launch | Window ready in 3107ms at http://127.0.0.1:59617
 PASS | 2b. Preload sandbox integrity | {"bridge":"object","req":"undefined","proc":"undefined","mod":"undefined"}
 PASS | 2c. Desktop bridge status | {"version":"0.1.0-beta.2","edition":"openrouter","connected":true}
 PASS | 2d. External network fetch blocked
 PASS | 2e. Sidecar unauthorized request rejected | HTTP 401
 PASS | 3a. GUI Create Business Workspace Alpha Bakery
 PASS | 3b. GUI Create Client Workspace Beta Plumbing
-PASS | 3c. Projects persisted in database | Alpha=starter, Beta=9af84d28247541c6a5474bfeac76edd7
+PASS | 3c. Projects persisted in database | Alpha=starter, Beta=764b32b12b0d4908989e97e4f3cc9b02
 PASS | 4a. Chat creates campaign proposal card
-PASS | 4b. Alpha campaign created | ID=f35a14b0c61684136ad55f31e6d06379
+PASS | 4b. Alpha campaign created | ID=cc6c3dddc6411a7324471b9ba7adffb5
 PASS | 4c. Work package proposal renders
 PASS | 5a. Configure loopback OpenRouter provider
 PASS | 5a2. Connect OpenRouter credential | {"target":"openrouter","status":"connected","message":"Saved securely in Credential Vault."}
-PASS | 5b. End-to-end campaign generation executed | {"created":["del_3f5a5fd62ac764a396933a2f0d789343","del_e46a20ed3a6beedbb6c0ce75740cd3b2","del_c06be62f32758052abaccbd02ae7e8bb"],"titles":["Weekend Sourdough Promotion Strategy","Weekend Sourdough Feature","Morning Loaves Email"],"provider":"openrouter","model":"openrouter/auto","elapsed_s":1.29}
+PASS | 5b. End-to-end campaign generation executed | {"created":["del_dfbe43f579f3f1ce8e1ca81d4a65b0d3","del_3b081b05834ad68e120c95dc8d18399f","del_28d6961093075b476db6b18ce23dd6f3"],"titles":["Weekend Sourdough Promotion Strategy","Weekend Sourdough Feature","Morning Loaves Email"],"provider":"openrouter","model":"openrouter/auto","elapsed_s":1.23}
 PASS | 5c. Generated deliverables validated with final copy and audit sections | Count=3
 PASS | 5d. Deliverable AI revision executed and validated | Version=2
 PASS | 6a. Ready-to-Post Copy Card visible with metrics | READY-TO-POST COPY: 25 words · 192 chars
@@ -109,8 +109,8 @@ PASS | 11a. Clean shutdown leaves 0 orphan processes | []
 PASS | 11b. Relaunch successful after clean shutdown
 PASS | 11c. Projects persisted across restart
 PASS | 11d. Campaign and approved deliverables persisted
-PASS | 12a. Sidecar running before crash test | ["omos-sidecar.exe:25176"]
-PASS | 12b. App shell survives sidecar termination | ["Open Marketing OS.exe:37328", ...]
+PASS | 12a. Sidecar running before crash test | ["omos-sidecar.exe:42940"]
+PASS | 12b. App shell survives sidecar termination | ["Open Marketing OS.exe:41088","Open Marketing OS.exe:28276","Open Marketing OS.exe:2568","Open Marketing OS.exe:36296"]
 PASS | 12c. Sidecar recovered via Retry; data healthy
 PASS | 13a. Hard kill of whole app leaves 0 orphans | []
 PASS | 14a. Uninstallation removed application binaries
@@ -119,6 +119,20 @@ PASS | 14b. Uninstallation preserved user data directory
 ACCEPTANCE SUMMARY: 38 PASSED, 0 FAILED
 ========================================
 ```
+
+### GitHub Actions Remote Verification (10/10 PASS)
+
+On PR #18 head commit `f9d77111e90be9aa2814449aaec5b879088d95ad` ([Run 41172695909](https://github.com/AsamehELsayed/Open-Marketing-OS/actions/runs/41172695909)):
+- **Backend tests (Python 3.11)**: PASS (4m 12s)
+- **Backend tests (Python 3.12)**: PASS (3m 48s)
+- **Desktop unit tests**: PASS (30s)
+- **Deterministic browser campaign journey**: PASS (1m 28s)
+- **Frontend typecheck and build**: PASS (22s)
+- **Locked runtime is installable and bootable**: PASS (41s)
+- **Packaging inputs are consistent**: PASS (13s)
+- **Secret hygiene**: PASS (11s)
+- **Skills provenance gate**: PASS (47s)
+- **Windows tests (DPAPI credential vault)**: PASS (2m 07s)
 
 ---
 
