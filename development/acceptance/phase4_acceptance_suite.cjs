@@ -25,15 +25,17 @@ const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
 const http = require('http');
+const { runBounded, describe } = require('./bounded_exec.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const PLAYWRIGHT_PATH = path.resolve(REPO_ROOT, 'frontend/node_modules/playwright-core');
 const { chromium } = require(PLAYWRIGHT_PATH);
 
-const INSTALL_DIR = 'C:\\Users\\User\\AppData\\Local\\Programs\\Open Marketing OS';
+const INSTALL_DIR = process.env.OMOS_INSTALL_DIR || 'C:\\Users\\User\\AppData\\Local\\Programs\\Open Marketing OS';
+const INSTALLER = process.env.OMOS_INSTALLER || 'C:\\omos-phase4\\installer.exe';
 const EXE = path.join(INSTALL_DIR, 'Open Marketing OS.exe');
 const UNINSTALLER = path.join(INSTALL_DIR, 'Uninstall Open Marketing OS.exe');
-const PROFILE = 'C:\\omos-phase4\\profile';
+const PROFILE = process.env.OMOS_PROFILE || 'C:\\omos-phase4\\profile';
 const EVIDENCE_DIR = path.resolve(__dirname, 'phase4-installed-evidence');
 const RESULTS_FILE = path.resolve(__dirname, 'phase4_acceptance_results.json');
 const PORT = 9333;
@@ -313,10 +315,11 @@ function startMockProvider() {
   console.log('=== Open Marketing OS Phase 4 Windows Acceptance Suite ===\\n');
 
   // STEP 1: Verify installed files (install fresh if needed)
-  if (!fs.existsSync(EXE) && fs.existsSync('C:\\omos-phase4\\installer.exe')) {
-    console.log('Installing Open Marketing OS Setup 0.1.0-beta.2.exe silently...');
-    cp.execSync('C:\\omos-phase4\\installer.exe /S');
-    await sleep(25000);
+  if (!fs.existsSync(EXE) && fs.existsSync(INSTALLER)) {
+    console.log(`Installing ${path.basename(INSTALLER)} silently (bounded to 10 min)...`);
+    const inst = await runBounded(INSTALLER, ['/S'], { label: 'installer /S', timeoutMs: 600000 });
+    console.log(describe(inst));
+    record('1a. Silent installer exited cleanly with no dialog', inst.exitCode === 0 && !inst.timedOut && inst.dialogs.length === 0, describe(inst));
   }
   const exeExists = fs.existsSync(EXE);
   const uninstExists = fs.existsSync(UNINSTALLER);
@@ -645,16 +648,29 @@ print("CONFIG_OK")
 
     // STEP 14: Uninstall Verification
     await killAll();
-    console.log('\n--- Running silent uninstaller ---');
-    try { cp.execSync(`"${UNINSTALLER}" /NCRC /S`, { stdio: 'ignore' }); } catch {}
+    console.log('\n--- Running silent uninstaller (normal CRC validation, no /NCRC) ---');
+    // The uninstaller copies itself to %TEMP% (Un_A.exe) and relaunches, so the first process
+    // exits almost immediately; completion is observed via the filesystem and process list.
+    const un = await runBounded(UNINSTALLER, ['/S'], { label: 'uninstaller /S', timeoutMs: 120000 });
+    console.log(describe(un));
+    record('14-pre. Uninstaller integrity check passed (exit 0, no dialog, no timeout)',
+      un.exitCode === 0 && !un.timedOut && un.dialogs.length === 0, describe(un));
     let exeRemoved = false;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 90; i++) {
       await sleep(1000);
       if (!fs.existsSync(EXE)) {
         exeRemoved = true;
         break;
       }
     }
+    let helperGone = false;
+    for (let i = 0; i < 60; i++) {
+      let running = false;
+      try { running = /Un_A\.exe/i.test(cp.execSync('tasklist /FO CSV /NH').toString()); } catch {}
+      if (!running) { helperGone = true; break; }
+      await sleep(1000);
+    }
+    record('14c. Uninstaller helper (Un_A.exe) finished; no orphan', helperGone);
     const userDataPreserved = fs.existsSync(path.join(PROFILE, 'local', 'OpenMarketingOS', 'data', 'marketing.db'));
     record('14a. Uninstallation removed application binaries', exeRemoved);
     record('14b. Uninstallation preserved user data directory', userDataPreserved);

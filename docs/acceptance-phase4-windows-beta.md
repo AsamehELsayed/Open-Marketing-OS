@@ -67,57 +67,23 @@ To ensure complete build reproducibility and prevent artifact drift, every candi
 | **Restart & State Persistence** | ✅ SQLite persistence in `%LOCALAPPDATA%\OpenMarketingOS\data\marketing.db` | ✅ Persistence regression suite | ✅ Projects, campaign, and approved deliverables intact on relaunch | Steps 11b-11d screenshot (`10_restart_persisted.png`) |
 | **Crash Recovery & Sidecar Respawn** | ✅ Electron shell resilience against sidecar crash; Win32 modal retry | ✅ Desktop unit tests (`test/*.test.cjs`) for recovery & bridge | ✅ Sidecar killed; app survives; Win32 `&Retry` clicks; healthy recovery | Steps 12a-12c screenshot (`12_recovered_healthy.png`) |
 | **Hard Process Termination** | ✅ Tree termination on unexpected death | ✅ Acceptance harness test | ✅ Immediate clean death with 0 orphan processes | Step 13a (`[]` orphans) |
-| **Silent Uninstaller & Data Retention** | ✅ NSIS uninstaller (`Uninstall Open Marketing OS.exe /NCRC /S`) | ✅ Uninstaller execution and filesystem polling | ✅ Binary folder removed; user database preserved | Steps 14a-14b |
+| **Silent Uninstaller & Data Retention** | ✅ NSIS uninstaller (`Uninstall Open Marketing OS.exe /S`, normal CRC validation) | ✅ Uninstaller execution and filesystem polling | ✅ Binary folder removed; user database preserved | Steps 14a-14b |
 
 ---
 
 ## 4. Executed Installed Windows Acceptance Suite Evidence (38 PASSED, 0 FAILED)
 
-Execution ran against the rebuilt candidate artifact `Open Marketing OS Setup 0.1.0-beta.2.exe` (`13f65a93aceb7d7ebaafccd76e978829242d2b6f20dc236b9ebff64839a51950`, 225,732,061 bytes):
+Execution ran against the final nonpublishing installer built natively on Windows by electron-builder 26.15.3 (`Open Marketing OS Setup 0.1.0-beta.2.exe`, SHA-256 `db570d49599449c6b38cec873125c0cd4abbd35ac374057394d810334fb299e2`, 325,064,057 bytes; uninstaller `b4dd030f335cf496acb24cf1822374cb1b8be2fb46f40a2ef87e789f09d95963`). Inputs: desktop sources at PR head `d60381ff` (`build_id` `f9d77111-final`), sidecar payload `omos-sidecar.exe` SHA-256 `d171245b69fe05a98df643b604004a9eb88f4a26a74dc80a447a4c2fd7eea2cc` reused from the existing PyInstaller output. The suite no longer passes `/NCRC`; installer and uninstaller run under bounded timeouts with dialog capture. Result: **41 PASSED, 0 FAILED** (38 original checks + 1a installer exit, 14-pre uninstaller integrity, 14c helper process finished). Raw results: `development/acceptance/phase4_acceptance_results.json`; raw run log in the PR.
+
+Key uninstall lines from that run:
 
 ```text
-=== Open Marketing OS Phase 4 Windows Acceptance Suite ===
-PASS | 1. Installation verification | EXE=true, Uninstaller=true, Sidecar=true
-PASS | 2. Application launch | Window ready in 3107ms at http://127.0.0.1:59617
-PASS | 2b. Preload sandbox integrity | {"bridge":"object","req":"undefined","proc":"undefined","mod":"undefined"}
-PASS | 2c. Desktop bridge status | {"version":"0.1.0-beta.2","edition":"openrouter","connected":true}
-PASS | 2d. External network fetch blocked
-PASS | 2e. Sidecar unauthorized request rejected | HTTP 401
-PASS | 3a. GUI Create Business Workspace Alpha Bakery
-PASS | 3b. GUI Create Client Workspace Beta Plumbing
-PASS | 3c. Projects persisted in database | Alpha=starter, Beta=764b32b12b0d4908989e97e4f3cc9b02
-PASS | 4a. Chat creates campaign proposal card
-PASS | 4b. Alpha campaign created | ID=cc6c3dddc6411a7324471b9ba7adffb5
-PASS | 4c. Work package proposal renders
-PASS | 5a. Configure loopback OpenRouter provider
-PASS | 5a2. Connect OpenRouter credential | {"target":"openrouter","status":"connected","message":"Saved securely in Credential Vault."}
-PASS | 5b. End-to-end campaign generation executed | {"created":["del_dfbe43f579f3f1ce8e1ca81d4a65b0d3","del_3b081b05834ad68e120c95dc8d18399f","del_28d6961093075b476db6b18ce23dd6f3"],"titles":["Weekend Sourdough Promotion Strategy","Weekend Sourdough Feature","Morning Loaves Email"],"provider":"openrouter","model":"openrouter/auto","elapsed_s":1.23}
-PASS | 5c. Generated deliverables validated with final copy and audit sections | Count=3
-PASS | 5d. Deliverable AI revision executed and validated | Version=2
-PASS | 6a. Ready-to-Post Copy Card visible with metrics | READY-TO-POST COPY: 25 words · 192 chars
-PASS | 6b. Structured Audit & Provenance Panel separated
-PASS | 7a. Deliverable edited and saved
-PASS | 7b. Deliverable transitioned to In review
-PASS | 7c. Deliverable approved internally
-PASS | 8a. Export Markdown handled via Native Save dialog
-PASS | 8b. Download approved package handled via Native Save dialog
-PASS | 8c. Approved package API returns valid zip payload
-PASS | 9a. Cross-project isolation: Beta campaigns page has no Alpha content
-PASS | 9b. Cross-project direct access returns HTTP 404
-PASS | 10a. DPAPI credential encryption saved in Settings
-PASS | 11a. Clean shutdown leaves 0 orphan processes | []
-PASS | 11b. Relaunch successful after clean shutdown
-PASS | 11c. Projects persisted across restart
-PASS | 11d. Campaign and approved deliverables persisted
-PASS | 12a. Sidecar running before crash test | ["omos-sidecar.exe:42940"]
-PASS | 12b. App shell survives sidecar termination | ["Open Marketing OS.exe:41088","Open Marketing OS.exe:28276","Open Marketing OS.exe:2568","Open Marketing OS.exe:36296"]
-PASS | 12c. Sidecar recovered via Retry; data healthy
-PASS | 13a. Hard kill of whole app leaves 0 orphans | []
+PASS | 1a. Silent installer exited cleanly with no dialog | installer /S: exit=0
+PASS | 14-pre. Uninstaller integrity check passed (exit 0, no dialog, no timeout) | uninstaller /S: exit=0, 2019ms
+PASS | 14c. Uninstaller helper (Un_A.exe) finished; no orphan
 PASS | 14a. Uninstallation removed application binaries
 PASS | 14b. Uninstallation preserved user data directory
-========================================
-ACCEPTANCE SUMMARY: 38 PASSED, 0 FAILED
-========================================
+ACCEPTANCE SUMMARY: 41 PASSED, 0 FAILED
 ```
 
 ### GitHub Actions Remote Verification (10/10 PASS)
@@ -138,13 +104,15 @@ On PR #18 head commit `f9d77111e90be9aa2814449aaec5b879088d95ad` ([Run 411726959
 
 ## 5. Remaining Known Limitations & Uninstaller Upstream Investigation
 
-1. **NSIS Uninstaller Integrity Check (`/NCRC` Flag & Upstream Issue #10258 / PR #10262)**:
-   - **Root Cause Analysis**: In electron-builder `26.15.3`, uninstaller generation executes the stub installer via `RunAsInvoker` to generate the uninstaller binary (`WriteUninstaller`). Because the uninstaller binary does not have its PE checksum / CRC updated during this extraction path, NSIS's built-in startup integrity check detects a CRC mismatch.
-   - **Interactive Behavior**: Running `Uninstall Open Marketing OS.exe` directly opens a Windows message dialog titled `NSIS Error` ("Installer integrity check has failed").
-   - **Silent Behavior**: Running `Uninstall Open Marketing OS.exe /S` aborts immediately with exit code `2` (the standard NSIS silent verification abort).
-   - **Workaround Verification**: Running with `Uninstall Open Marketing OS.exe /NCRC /S` cleanly bypasses the integrity check, deletes all installed application binaries in 5 seconds, and preserves user data in `%LOCALAPPDATA%\OpenMarketingOS\data\marketing.db`.
-   - **Upstream Fix**: electron-builder upstream PR #10262 (`ba65cf6`) resolves this by patching the uninstaller icon during extraction and verifying its CRC checksum before shipping.
-   - **Policy**: `/NCRC` disables CRC integrity checking and is strictly treated as an acceptance/test workaround, NOT a permanent public release solution. The release remains blocked on upgrading electron-builder to a release incorporating upstream PR #10262.
+1. **NSIS uninstaller integrity - corrected root-cause analysis** (supersedes the earlier "upstream PR #10262" hypothesis, which was wrong for this build):
+   - **Upstream issue #10258 / PR #10262 do not apply.** They concern uninstallers cross-built on macOS/Linux (`UninstallerReader`). electron-builder 26.15.3 on native Windows never calls that code; it runs the stub installer and embeds the file it writes. No electron-builder upgrade is needed and none was made.
+   - **Proven:** the previously accepted candidate installer (`13f65a93...`, 225,732,061 bytes) installs an uninstaller (SHA-256 `05b7561a...`, 171,401 bytes) that fails its NSIS integrity check: `/S` exits 2 and leaves the app installed; a dialog "NSIS Error: Installer integrity check has failed" blocks interactive runs. Its icon resources equal the *installer's* icons, i.e. an uninstaller header without the uninstaller-icon patch that makensis/WriteUninstaller applies (the #10258 signature). Fresh native builds carry patched icons and pass.
+   - **Proven healthy:** three native builds of the same config (the hung build's output, a controlled store-compression build, and the final build) produced valid uninstallers; the installed copy is byte-identical to the built `__uninstaller.exe`; builds are deterministic (the final and hung-build uninstallers have identical SHA-256).
+   - **Not proven:** how that single candidate uninstaller was produced. Not reproduced: a locked output file makes the build fail loudly; a read-only stale file is overwritten by electron-builder. Treat the candidate as a bad artifact; do not distribute it.
+   - **22-hour hang mechanism (proven):** upgrading over an installation whose uninstaller is broken makes the new installer show a modal "Failed to uninstall old application files. Please try running the installer again.: 2" even under `/S`; nothing is modified (old files and user data intact) and it waits forever. electron-builder additionally executes the stub installer during the build with no timeout, so any hidden modal there also hangs a build.
+   - **Guards added:** the acceptance suite no longer uses `/NCRC`; it runs the installer and uninstaller via `bounded_exec.cjs` (timeout, process-tree kill, dialog text capture via `window_snapshot.ps1`) and asserts exit 0 / no dialog.
+   - **Lifecycle matrix (Windows Sandbox, clean Windows):** fresh install OK; `/S` uninstall without `/NCRC` OK (files and registry removed, user data kept, no orphans); upgrade from a healthy prior install OK; upgrade from the broken candidate blocks as above without altering data. Manual recovery for any tester holding the broken candidate: uninstall by deleting the install folder and the `Open Marketing OS` Uninstall registry key (or run its uninstaller once with `/NCRC`), then install the new build; user data in `%LOCALAPPDATA%\OpenMarketingOS` is not touched by either step.
+   - **Gap:** the interactive (non-silent) uninstall wizard was not click-through verified; only its integrity gate (exit 0 / no error dialog in the launching process) was.
 2. **Zero Bundled Model Weights**:
    The installer bundles zero LLM weights by design (225 MB installer size). An active OpenRouter API key, custom OpenAI-compatible endpoint, or local Ollama instance is required for live generation in production.
 3. **Loopback Provider in Acceptance Suite**:
@@ -154,13 +122,8 @@ On PR #18 head commit `f9d77111e90be9aa2814449aaec5b879088d95ad` ([Run 411726959
 
 ## 6. Final Decisions
 
-- **MERGE PR #18 DECISION: GO**
-  - All review concerns have been fully addressed, verified, and hardened with regression tests.
-  - SQLite compare-and-set transactions and lease fencing are verified against stale commits and heartbeat failures (12 tests in `test_phase4_generation_lock.py`).
-  - The approved-only export path is hardened with zero fallback to legacy or malformed drafts (11 tests in `test_phase4_deliverables.py`).
-  - The installed application acceptance suite on Windows passed 38/38 checks with 0 failures on the candidate build.
-  - Code changes remain strictly bounded and preserve documentation integrity.
+- **MERGE PR #18 DECISION: GO**, conditional on full CI green on the exact pushed head. Packaging changes are limited to the acceptance harness and documentation; product code is unchanged by this phase.
 
-- **WINDOWS PILOT RELEASE DECISION: NO-GO**
-  - The release candidate uninstaller suffers from the upstream electron-builder NSIS integrity bug (PR #10262 / issue #10258), causing interactive `NSIS Error` dialogs unless `/NCRC` is supplied.
-  - Per the strict Phase 4 release governance policy, public distribution remains **NO-GO** pending upstream electron-builder fix integration and explicit founder authorization to tag and publish production binaries.
+- **WINDOWS PILOT RELEASE DECISION: CONDITIONAL GO (technical gate cleared; not authorized)**
+  - The installer/uninstaller lifecycle now passes without `/NCRC` on the final binary (41/41).
+  - Conditions: (1) explicit founder authorization to tag/publish; (2) the artifact actually shipped must be the one that passed (verify SHA-256) or must be re-run through the acceptance suite; (3) the broken `13f65a93...` candidate must not be distributed (upgrade from it requires manual recovery); (4) the build is unsigned, so SmartScreen warnings are expected; (5) interactive uninstall wizard click-through remains unverified.
