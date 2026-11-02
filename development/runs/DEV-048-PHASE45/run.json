@@ -1,0 +1,50 @@
+{
+  "run_id": "DEV-048-PHASE45",
+  "title": "Phase 4.5 marketing connector research and offline MCP prototype",
+  "classification": "MEDIUM",
+  "status": "qa",
+  "planner": {
+    "agent": "general/in-session-technical_plan",
+    "status": "completed",
+    "artifact": "development/runs/DEV-048-PHASE45/plan.md"
+  },
+  "workers": [
+    {
+      "agent": "general/in-session-phase45_implementer",
+      "status": "interrupted",
+      "artifact": "development/runs/DEV-048-PHASE45/founder-no-delegation.md"
+    },
+    {
+      "agent": "primary-direct",
+      "status": "completed",
+      "artifact": "development/runs/DEV-048-PHASE45/workers/direct.md"
+    },
+    {
+      "agent": "primary-direct",
+      "status": "completed",
+      "artifact": "development/runs/DEV-048-PHASE45/workers/direct.md"
+    },
+    {
+      "agent": "primary-direct",
+      "status": "completed",
+      "artifact": "development/runs/DEV-048-PHASE45/finalization.md"
+    }
+  ],
+  "qa": null,
+  "reviewer": null,
+  "required_roles": [
+    "planner",
+    "implementer",
+    "qa",
+    "reviewer"
+  ],
+  "founder_plan_approved": true,
+  "plan_approved_at": "2026-11-02T12:00:07Z",
+  "created_at": "2026-11-02T11:45:57Z",
+  "updated_at": "2026-11-02T12:45:38Z",
+  "current_stage": "qa",
+  "execution_mode": "primary_direct_after_founder_no_delegation",
+  "technical_acceptance": "218 passed,24 skipped; final prototype28 passed",
+  "independent_qa_review": "BLOCKED; independent human QA/review or separately authorized process required; no delegation",
+  "security_status": "sanitized snapshot passes; original PR history finding remains pending authorized remediation"
+}

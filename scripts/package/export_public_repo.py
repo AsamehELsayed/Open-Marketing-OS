@@ -98,6 +98,8 @@ INCLUDE_ROOTS = (
     # `strategy/` and `state/`, which hold the founder's private business
     # workspace and stay excluded.
     "config",
+    # Optional offline proof source only; never the prototype scratch workspace.
+    "prototypes/marketing_mcp",
     # DEV-008-SKILLS-OPS: the pinned upstream marketing skills library, which is
     # MIT and therefore redistributable. Narrow on purpose -- the library
     # subtree only, never the whole `.agents/` directory. See
@@ -154,6 +156,7 @@ INCLUDE_FILES = (
     "requirements-lock.txt",
     "requirements-dev.txt",
     "requirements-optional.txt",
+    "prototypes/__init__.py",
     "start.bat",
     "start.sh",
     # The upstream MIT licence for the vendored skills library. Ships because
@@ -177,6 +180,7 @@ DOCS_ALLOWLIST = (
     "docs/user-data-and-backup.md",
     "docs/troubleshooting.md",
     "docs/privacy.md",
+    "docs/research/marketing-connectors.md",
     # distribution and legal
     "docs/distribution/windows-packaging-decision.md",
     "docs/opensource/license-audit.md",
@@ -260,6 +264,7 @@ EXCLUDE_PATTERNS = (
 #: Frontend build output is produced by `npm run build`; it is not source.
 EXCLUDE_DIR_NAMES = (
     "node_modules", "dist", "build", "__pycache__", ".pytest_cache",
+    ".scratch",
 )
 
 #: Test fixture images that must not travel even though images are excluded

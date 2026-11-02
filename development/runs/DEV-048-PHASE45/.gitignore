@@ -1,0 +1,8 @@
+baseline-tmp/
+direct-test-tmp*/
+regression-tmp/
+export-test-tmp/
+tests-first.txt
+tests-second.txt
+demo-first.json
+demo-first.stderr

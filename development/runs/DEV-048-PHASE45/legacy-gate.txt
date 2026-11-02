@@ -1,0 +1,2 @@
+GATE BLOCKED for stage 'approved': cannot claim TESTED: no completed QA execution with artifact
+PROCESS_EXIT_CODE=1

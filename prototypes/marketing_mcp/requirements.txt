@@ -1,0 +1,2 @@
+# Optional proof/test dependency; deliberately separate from shipped runtime.
+mcp==1.30.0

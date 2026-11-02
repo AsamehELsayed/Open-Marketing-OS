@@ -1,0 +1,275 @@
+{
+  "active_sessions_after_calls": 0,
+  "audit": [
+    {
+      "action": "connect",
+      "arg_keys": [],
+      "detail": {
+        "endpoint": "offline://omos-marketing-fixture",
+        "scope": "fixture-alpha"
+      },
+      "ok": true,
+      "project_id": null,
+      "seq": 1,
+      "server_id": "offline-marketing-fixture",
+      "tool": null,
+      "ts": "2026-11-02T12:40:34.921709+00:00"
+    },
+    {
+      "action": "discover",
+      "arg_keys": [],
+      "detail": {
+        "tool_count": 1
+      },
+      "ok": true,
+      "project_id": null,
+      "seq": 2,
+      "server_id": "offline-marketing-fixture",
+      "tool": null,
+      "ts": "2026-11-02T12:40:42.902327+00:00"
+    },
+    {
+      "action": "allow",
+      "arg_keys": [],
+      "detail": {
+        "allowed": [
+          "format_campaign_draft"
+        ]
+      },
+      "ok": true,
+      "project_id": "fixture-alpha",
+      "seq": 3,
+      "server_id": "offline-marketing-fixture",
+      "tool": null,
+      "ts": "2026-11-02T12:40:42.937009+00:00"
+    },
+    {
+      "action": "approve",
+      "arg_keys": [],
+      "detail": {
+        "approval_level": "YELLOW",
+        "category": "WRITE"
+      },
+      "ok": true,
+      "project_id": "fixture-alpha",
+      "seq": 4,
+      "server_id": "offline-marketing-fixture",
+      "tool": "format_campaign_draft",
+      "ts": "2026-11-02T12:40:42.950134+00:00"
+    },
+    {
+      "action": "execute",
+      "arg_keys": [
+        "draft"
+      ],
+      "detail": {
+        "approval_level": "YELLOW",
+        "category": "WRITE"
+      },
+      "ok": true,
+      "project_id": "fixture-alpha",
+      "seq": 5,
+      "server_id": "offline-marketing-fixture",
+      "tool": "format_campaign_draft",
+      "ts": "2026-11-02T12:40:51.292174+00:00"
+    },
+    {
+      "action": "approve",
+      "arg_keys": [],
+      "detail": {
+        "approval_level": "YELLOW",
+        "category": "WRITE"
+      },
+      "ok": true,
+      "project_id": "fixture-alpha",
+      "seq": 6,
+      "server_id": "offline-marketing-fixture",
+      "tool": "format_campaign_draft",
+      "ts": "2026-11-02T12:40:51.302181+00:00"
+    },
+    {
+      "action": "execute",
+      "arg_keys": [
+        "draft"
+      ],
+      "detail": {
+        "approval_level": "YELLOW",
+        "category": "WRITE"
+      },
+      "ok": true,
+      "project_id": "fixture-alpha",
+      "seq": 7,
+      "server_id": "offline-marketing-fixture",
+      "tool": "format_campaign_draft",
+      "ts": "2026-11-02T12:40:58.551702+00:00"
+    }
+  ],
+  "default_denied": true,
+  "deterministic": true,
+  "evidence_sanitization": "Synthetic digest omitted; operational run identifiers summarized",
+  "payload": {
+    "approved_version": 3,
+    "campaign_id": "fixture-campaign",
+    "deliverable_id": "00000000000000000000000000000002",
+    "idempotency_digest": {
+      "algorithm": "SHA-256",
+      "hex_length": 64,
+      "matches_canonical_payload": true,
+      "value_omitted": true
+    },
+    "platform": "linkedin",
+    "project_id": "fixture-alpha",
+    "publish": false,
+    "status": "draft",
+    "text": "A simple marketing workflow starts with a reviewed draft."
+  },
+  "protocol_exchanges": [
+    {
+      "methods": [
+        "initialize",
+        "tools/list"
+      ],
+      "protocol": "2025-11-25",
+      "tools": [
+        {
+          "description": "Format supplied text as an offline draft. Host enforces content approval.",
+          "name": "format_campaign_draft",
+          "parameters": {
+            "properties": {
+              "draft": {
+                "additionalProperties": true,
+                "title": "Draft",
+                "type": "object"
+              }
+            },
+            "required": [
+              "draft"
+            ],
+            "title": "format_campaign_draftArguments",
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "methods": [
+        "initialize",
+        "tools/list",
+        "tools/call"
+      ],
+      "protocol": "2025-11-25",
+      "tools": [
+        {
+          "description": "Format supplied text as an offline draft. Host enforces content approval.",
+          "name": "format_campaign_draft",
+          "parameters": {
+            "properties": {
+              "draft": {
+                "additionalProperties": true,
+                "title": "Draft",
+                "type": "object"
+              }
+            },
+            "required": [
+              "draft"
+            ],
+            "title": "format_campaign_draftArguments",
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "methods": [
+        "initialize",
+        "tools/list",
+        "tools/call"
+      ],
+      "protocol": "2025-11-25",
+      "tools": [
+        {
+          "description": "Format supplied text as an offline draft. Host enforces content approval.",
+          "name": "format_campaign_draft",
+          "parameters": {
+            "properties": {
+              "draft": {
+                "additionalProperties": true,
+                "title": "Draft",
+                "type": "object"
+              }
+            },
+            "required": [
+              "draft"
+            ],
+            "title": "format_campaign_draftArguments",
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ],
+  "sdk": "mcp==1.30.0",
+  "tool_runs": [
+    {
+      "completed_at": "2026-11-02T12:40:42.922+00:00",
+      "cost_note": "free",
+      "employee_id": null,
+      "employee_role": null,
+      "evidence_count": 0,
+      "latency_ms": 1,
+      "project_id": "fixture-alpha",
+      "provider": "mcp",
+      "started_at": "2026-11-02T12:40:42.921+00:00",
+      "status": "failed",
+      "tool_id": "format_campaign_draft",
+      "tool_run_id": "synthetic-run-1",
+      "turn_id": null
+    },
+    {
+      "completed_at": "2026-11-02T12:40:42.938+00:00",
+      "cost_note": "free",
+      "employee_id": null,
+      "employee_role": null,
+      "evidence_count": 0,
+      "latency_ms": 0,
+      "project_id": "fixture-alpha",
+      "provider": "mcp",
+      "started_at": "2026-11-02T12:40:42.938+00:00",
+      "status": "failed",
+      "tool_id": "format_campaign_draft",
+      "tool_run_id": "synthetic-run-2",
+      "turn_id": null
+    },
+    {
+      "completed_at": "2026-11-02T12:40:51.294+00:00",
+      "cost_note": "free",
+      "employee_id": null,
+      "employee_role": null,
+      "evidence_count": 0,
+      "latency_ms": 8346,
+      "project_id": "fixture-alpha",
+      "provider": "mcp",
+      "started_at": "2026-11-02T12:40:42.948+00:00",
+      "status": "success",
+      "tool_id": "format_campaign_draft",
+      "tool_run_id": "synthetic-run-3",
+      "turn_id": null
+    },
+    {
+      "completed_at": "2026-11-02T12:40:58.553+00:00",
+      "cost_note": "free",
+      "employee_id": null,
+      "employee_role": null,
+      "evidence_count": 0,
+      "latency_ms": 7254,
+      "project_id": "fixture-alpha",
+      "provider": "mcp",
+      "started_at": "2026-11-02T12:40:51.299+00:00",
+      "status": "success",
+      "tool_id": "format_campaign_draft",
+      "tool_run_id": "synthetic-run-4",
+      "turn_id": null
+    }
+  ],
+  "unapproved_denied": true
+}
