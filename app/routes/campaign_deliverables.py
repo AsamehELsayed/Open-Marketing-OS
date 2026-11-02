@@ -213,7 +213,8 @@ def generate_campaign_content(project_id: str, campaign_id: str):
             return _ok({"created": result.get("created", []),
                         "titles": result.get("titles", []),
                         "provider": result.get("provider", ""),
-                        "model": result.get("model", "")})
+                        "model": result.get("model", ""),
+                        "elapsed_s": result.get("elapsed_s", 0.0)})
         except service.DeliverableNotFound as exc:
             _translate_error(exc)
         except flow.FlowError as exc:

@@ -21,6 +21,7 @@ import {
   nextDeliverableStatus,
   normalizeDeliverableList,
   normalizeRevisionList,
+  parseDeliverableContent,
   summarizeRevision,
   type DeliverableDraft,
 } from "./deliverables";
@@ -72,6 +73,7 @@ export default function DeliverableEditor({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiRevising, setAiRevising] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Keep async continuations aware of selection changes immediately, before
   // React commits the next render.
@@ -592,7 +594,10 @@ export default function DeliverableEditor({
                   {!editableChanged && mode === "edit" && <span className="text-meta text-inksecondary">No changes to save</span>}
                 </div>
               </form>
-            ) : selected ? (
+            ) : selected ? (() => {
+              const parsed = parseDeliverableContent(selected.content_md);
+              const wordCount = parsed.finalCopy.trim().split(/\s+/).filter(Boolean).length;
+              return (
               <div>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -606,9 +611,49 @@ export default function DeliverableEditor({
                   <StatusBadge status={deliverableStatusLabel(selected.status)} />
                 </div>
 
+                {parsed.hasFinalCopy && (
+                  <div className="mt-3 rounded border border-accent/40 bg-raised p-3.5" data-testid="deliverable-ready-card">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-meta font-semibold uppercase tracking-wider text-accenthover">
+                        Ready-to-Post Copy
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-meta text-inksecondary">
+                          {wordCount} {wordCount === 1 ? "word" : "words"} · {parsed.finalCopy.length} chars
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(parsed.finalCopy);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          }}
+                          className="rounded border border-linedefault bg-surface px-2 py-1 text-meta font-medium text-ink hover:bg-base"
+                        >
+                          {copied ? "Copied!" : "Copy text"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-2 whitespace-pre-wrap rounded bg-surface p-3 text-bodysm text-ink border border-linedefault">
+                      {parsed.finalCopy}
+                    </div>
+                  </div>
+                )}
+
                 <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-linedefault bg-base p-3 font-mono text-bodysm text-ink">
                   {selected.content_md || "This deliverable has no content yet."}
                 </pre>
+
+                {parsed.hasAudit && (
+                  <details className="mt-2 rounded border border-linedefault bg-base p-2.5 text-bodysm" data-testid="deliverable-audit-panel">
+                    <summary className="cursor-pointer font-medium text-inksecondary hover:text-ink">
+                      Structured Audit & Provenance Evidence
+                    </summary>
+                    <div className="mt-2 whitespace-pre-wrap text-meta text-inksecondary border-t border-linedefault pt-2">
+                      {parsed.auditMd}
+                    </div>
+                  </details>
+                )}
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -715,7 +760,7 @@ export default function DeliverableEditor({
                   </div>
                 )}
               </div>
-            ) : (
+            ); })() : (
               <p className="text-bodysm text-inksecondary">
                 Select a deliverable on the left, or create a new one.
               </p>

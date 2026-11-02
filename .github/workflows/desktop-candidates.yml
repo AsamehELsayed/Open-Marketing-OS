@@ -1,7 +1,7 @@
 name: Native desktop candidates (nonpublishing)
 on:
   push:
-    branches: [claude/omos-desktop-rc-integration-91f555]
+    branches: [main]
   workflow_dispatch:
     inputs:
       edition:

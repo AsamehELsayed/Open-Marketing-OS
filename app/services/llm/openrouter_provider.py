@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 from .base import LLMResponse, ToolCall
 
 BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def get_base_url() -> str:
+    try:
+        from app.services.config_service import ConfigService
+
+        custom = ConfigService.get_setting("openrouter_base_url", "")
+        if custom and str(custom).strip():
+            return str(custom).strip()
+    except Exception:
+        pass
+    return BASE_URL
 TRANSIENT = (429, 500, 502, 503, 504)
 STRICT_FREE_MODEL_ID = "apodex/apodex-1.1-mini:free"
 STRICT_ENDPOINT_SLUG = "novita/bf16"
@@ -68,7 +80,7 @@ def _strict_price(pricing: dict, key: str, *, required: bool) -> Decimal | None:
 
 def _strict_json(client, path: str) -> dict:
     try:
-        response = client.get(f"{BASE_URL}{path}")
+        response = client.get(f"{get_base_url()}{path}")
     except Exception as exc:
         raise OpenRouterError(
             f"OpenRouter strict preflight request {path} failed ({type(exc).__name__}).",
@@ -452,7 +464,7 @@ def _fetch_models() -> list[dict]:
     import json
     from openai import OpenAI
     key = get_key()
-    client = OpenAI(api_key=key, base_url=BASE_URL, timeout=20)
+    client = OpenAI(api_key=key, base_url=get_base_url(), timeout=20)
     models = client.models.list()
     out: list[dict] = []
     for m in getattr(models, "data", []) or []:
@@ -497,14 +509,17 @@ def _client(timeout: int):
     key = get_key()
     if not key:
         raise OpenRouterError("OpenRouter is not configured. Connect OpenRouter in Settings.")
-    return OpenAI(api_key=key, base_url=BASE_URL, timeout=timeout, max_retries=0,
+    return OpenAI(api_key=key, base_url=get_base_url(), timeout=timeout, max_retries=0,
                   default_headers={"HTTP-Referer": "https://omos.local",
                                    "X-Title": "Open Marketing OS"})
 
 
 class OpenRouterProvider:
     name = "openrouter"
-    base_url = BASE_URL
+
+    @property
+    def base_url(self) -> str:
+        return get_base_url()
 
     def __init__(self, model: str = "openrouter/auto", timeout_s: int = 45):
         self.model = model
@@ -684,7 +699,7 @@ class OpenRouterProvider:
             transport = (_ObservedHTTPTransport(
                 httpx.HTTPTransport(retries=0), observer) if observer else None)
             http_client = httpx.Client(transport=transport, timeout=timeout) if transport else None
-            client = OpenAI(api_key=key, base_url=BASE_URL, timeout=timeout, max_retries=0,
+            client = OpenAI(api_key=key, base_url=get_base_url(), timeout=timeout, max_retries=0,
                             http_client=http_client,
                             default_headers={"HTTP-Referer": "https://omos.local",
                                              "X-Title": "Open Marketing OS"})

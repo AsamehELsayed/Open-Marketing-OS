@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type CampaignWorkPackage } from "../../api/client";
 
@@ -11,7 +11,9 @@ export default function CampaignChatCard({ projectId, campaignId }: { projectId:
   const [pkg, setPkg] = useState<CampaignWorkPackage | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
+  const writingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,15 +27,22 @@ export default function CampaignChatCard({ projectId, campaignId }: { projectId:
   }, [projectId, campaignId, reload]);
 
   async function write() {
+    if (writingRef.current) return;
+    writingRef.current = true;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      await api.generateCampaignContent(projectId, campaignId);
+      const out = await api.generateCampaignContent(projectId, campaignId);
+      const timeStr = out.elapsed_s ? ` (${out.elapsed_s}s)` : "";
+      const modelStr = out.model ? ` using ${out.model}` : "";
+      setNotice(`Generated ${out.created.length} deliverable(s)${modelStr}${timeStr}.`);
       setReload((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The content couldn’t be written. Nothing was saved.");
     } finally {
       setBusy(false);
+      writingRef.current = false;
     }
   }
 
@@ -79,6 +88,7 @@ export default function CampaignChatCard({ projectId, campaignId }: { projectId:
           {noContent ? "Review the plan" : "Review and approve"}
         </Link>
       </div>
+      {notice && <p className="mt-1 text-meta text-inksecondary">{notice}</p>}
       {error && <p role="alert" className="mt-1 text-meta text-err">{error}</p>}
     </div>
   );

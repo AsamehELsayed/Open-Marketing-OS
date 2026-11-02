@@ -1,0 +1,248 @@
+[
+  {
+    "step": "1a. Silent installer exited cleanly with no dialog",
+    "ok": true,
+    "details": "installer /S: exit=0, 142213ms",
+    "time": "2026-11-01T17:04:01.367Z"
+  },
+  {
+    "step": "1. Installation verification",
+    "ok": true,
+    "details": "EXE=true, Uninstaller=true, Sidecar=true",
+    "time": "2026-11-01T17:04:01.373Z"
+  },
+  {
+    "step": "2. Application launch",
+    "ok": true,
+    "details": "Window ready in 8584ms at http://127.0.0.1:56615",
+    "time": "2026-11-01T17:04:09.960Z"
+  },
+  {
+    "step": "2b. Preload sandbox integrity",
+    "ok": true,
+    "details": "{\"bridge\":\"object\",\"req\":\"undefined\",\"proc\":\"undefined\",\"mod\":\"undefined\"}",
+    "time": "2026-11-01T17:04:10.350Z"
+  },
+  {
+    "step": "2c. Desktop bridge status",
+    "ok": true,
+    "details": "{\"version\":\"0.1.0-beta.2\",\"edition\":\"openrouter\",\"connected\":true}",
+    "time": "2026-11-01T17:04:10.356Z"
+  },
+  {
+    "step": "2d. External network fetch blocked",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:10.370Z"
+  },
+  {
+    "step": "2e. Sidecar unauthorized request rejected",
+    "ok": true,
+    "details": "HTTP 401",
+    "time": "2026-11-01T17:04:10.380Z"
+  },
+  {
+    "step": "3a. GUI Create Business Workspace Alpha Bakery",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:11.220Z"
+  },
+  {
+    "step": "3b. GUI Create Client Workspace Beta Plumbing",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:13.482Z"
+  },
+  {
+    "step": "3c. Projects persisted in database",
+    "ok": true,
+    "details": "Alpha=starter, Beta=3ab0161fd27149cba445a8d976dffb64",
+    "time": "2026-11-01T17:04:13.897Z"
+  },
+  {
+    "step": "4a. Chat creates campaign proposal card",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:27.295Z"
+  },
+  {
+    "step": "4b. Alpha campaign created",
+    "ok": true,
+    "details": "ID=832367bb33fef57edf27196bbcb6225a",
+    "time": "2026-11-01T17:04:27.544Z"
+  },
+  {
+    "step": "4c. Work package proposal renders",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:27.880Z"
+  },
+  {
+    "step": "5a. Configure loopback OpenRouter provider",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:28.429Z"
+  },
+  {
+    "step": "5a2. Connect OpenRouter credential",
+    "ok": true,
+    "details": "{\"target\":\"openrouter\",\"status\":\"connected\",\"message\":\"Saved securely in Credential Vault.\"}",
+    "time": "2026-11-01T17:04:28.483Z"
+  },
+  {
+    "step": "5b. End-to-end campaign generation executed",
+    "ok": true,
+    "details": "{\"created\":[\"del_c68146fd3f94c0c140d7aa4a6f4eceda\",\"del_932a14b5a13a1c9df4916116248c6f67\",\"del_18f669c63a02906aec3222e86d8c12fd\"],\"titles\":[\"Weekend Sourdough Promotion Strategy\",\"Weekend Sourdough Feature\",\"Morning Loaves Email\"],\"provider\":\"openrouter\",\"model\":\"openrouter/auto\",\"elapsed_s\":3.72}",
+    "time": "2026-11-01T17:04:32.238Z"
+  },
+  {
+    "step": "5c. Generated deliverables validated with final copy and audit sections",
+    "ok": true,
+    "details": "Count=3",
+    "time": "2026-11-01T17:04:32.279Z"
+  },
+  {
+    "step": "5d. Deliverable AI revision executed and validated",
+    "ok": true,
+    "details": "Version=2",
+    "time": "2026-11-01T17:04:33.370Z"
+  },
+  {
+    "step": "6a. Ready-to-Post Copy Card visible with metrics",
+    "ok": true,
+    "details": "READY-TO-POST COPY\n25 words · 192 chars\nCopy text\nCrispy golden artisan crust, naturally fermented sourdough, and baked before sunrise. 🥖✨\n",
+    "time": "2026-11-01T17:04:38.203Z"
+  },
+  {
+    "step": "6b. Structured Audit & Provenance Panel separated",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:38.208Z"
+  },
+  {
+    "step": "7a. Deliverable edited and saved",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:40.597Z"
+  },
+  {
+    "step": "7b. Deliverable transitioned to In review",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:42.368Z"
+  },
+  {
+    "step": "7c. Deliverable approved internally",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:43.928Z"
+  },
+  {
+    "step": "8a. Export Markdown handled via Native Save dialog",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:46.688Z"
+  },
+  {
+    "step": "8b. Download approved package handled via Native Save dialog",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:50.809Z"
+  },
+  {
+    "step": "8c. Approved package API returns valid zip payload",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:51.099Z"
+  },
+  {
+    "step": "9a. Cross-project isolation: Beta campaigns page has no Alpha content",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:54.865Z"
+  },
+  {
+    "step": "9b. Cross-project direct access returns HTTP 404",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:54.912Z"
+  },
+  {
+    "step": "10a. DPAPI credential encryption saved in Settings",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:04:57.669Z"
+  },
+  {
+    "step": "11a. Clean shutdown leaves 0 orphan processes",
+    "ok": true,
+    "details": "[]",
+    "time": "2026-11-01T17:05:06.182Z"
+  },
+  {
+    "step": "11b. Relaunch successful after clean shutdown",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:05:10.529Z"
+  },
+  {
+    "step": "11c. Projects persisted across restart",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:05:10.640Z"
+  },
+  {
+    "step": "11d. Campaign and approved deliverables persisted",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:05:11.080Z"
+  },
+  {
+    "step": "12a. Sidecar running before crash test",
+    "ok": true,
+    "details": "[\"omos-sidecar.exe:29520\"]",
+    "time": "2026-11-01T17:05:13.770Z"
+  },
+  {
+    "step": "12b. App shell survives sidecar termination",
+    "ok": true,
+    "details": "[\"Open Marketing OS.exe:43464\",\"Open Marketing OS.exe:26260\",\"Open Marketing OS.exe:43556\"]",
+    "time": "2026-11-01T17:05:19.718Z"
+  },
+  {
+    "step": "12c. Sidecar recovered via Retry; data healthy",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:05:25.885Z"
+  },
+  {
+    "step": "13a. Hard kill of whole app leaves 0 orphans",
+    "ok": true,
+    "details": "[]",
+    "time": "2026-11-01T17:05:35.174Z"
+  },
+  {
+    "step": "14-pre. Uninstaller integrity check passed (exit 0, no dialog, no timeout)",
+    "ok": true,
+    "details": "uninstaller /S: exit=0, 2019ms",
+    "time": "2026-11-01T17:05:38.848Z"
+  },
+  {
+    "step": "14c. Uninstaller helper (Un_A.exe) finished; no orphan",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:06:06.287Z"
+  },
+  {
+    "step": "14a. Uninstallation removed application binaries",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:06:06.287Z"
+  },
+  {
+    "step": "14b. Uninstallation preserved user data directory",
+    "ok": true,
+    "details": "",
+    "time": "2026-11-01T17:06:06.287Z"
+  }
+]

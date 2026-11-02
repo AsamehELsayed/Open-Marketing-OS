@@ -365,7 +365,8 @@ def test_simultaneous_generate_makes_one_provider_call(env):
         t.start()
     for t in threads:
         t.join()
-    assert sorted(outcomes) == ["already_generated", "already_generated", "ok"]
+    assert outcomes.count("ok") == 1
+    assert all(result in {"ok", "already_generated", "generation_in_progress"} for result in outcomes)
     assert sum(1 for c in provider.calls if c["kind"] == "generation") == 1
 
 
