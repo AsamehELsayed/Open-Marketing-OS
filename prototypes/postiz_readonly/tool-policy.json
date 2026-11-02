@@ -1,0 +1,63 @@
+{
+  "status": "EXPERIMENT_DISABLED_BY_DEFAULT",
+  "server": "postiz-dev050-local",
+  "default": "DENY",
+  "scope": "one trusted OMOS project mapped to one Postiz org/vault reference",
+  "allow_tools": {
+    "integrationList": {
+      "arguments": {},
+      "additionalProperties": false
+    },
+    "integrationSchema": {
+      "arguments": {
+        "platform": "linkedin",
+        "isPremium": false
+      },
+      "additionalProperties": false
+    },
+    "groupList": {
+      "arguments": {},
+      "additionalProperties": false
+    }
+  },
+  "deny_known": [
+    "clippingStatusTool",
+    "clippingTool",
+    "clippingWidgetTicketTool",
+    "deletePostTool",
+    "generateImageTool",
+    "generateVideoOptions",
+    "generateVideoTool",
+    "integrationSchedulePostTool",
+    "triggerTool",
+    "mediaListTool",
+    "mediaStatusTool",
+    "postSettingsTool",
+    "postsListTool",
+    "uploadFromUrlTool",
+    "uploadWidgetStatusTool",
+    "uploadWidgetTicketTool",
+    "uploadWidgetTool",
+    "videoFunctionTool",
+    "videoStatusTool",
+    "schedulePostTool",
+    "ask_postiz"
+  ],
+  "deny_unknown": true,
+  "approval_can_override_deny": false,
+  "protocol": {
+    "allow": [
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call restricted to allow_tools"
+    ],
+    "deny_everything_else": true,
+    "http_delete": false,
+    "redirects": false,
+    "setup_only_rest": "GET fixed /api/public/v1/me with raw local key; authenticate organization before every session"
+  },
+  "rest_agent_allowlist": [],
+  "setup_only_rest": "GET fixed /api/public/v1/me; trusted local provisioning only",
+  "credential": "vault reference only; MCP Bearer header; no key in URL"
+}
