@@ -1,0 +1,75 @@
+...F.....................                                                [100%]
+================================== FAILURES ===================================
+_ test_exact_version_scope_and_content_denied_before_formatter[cross_project] _
+
+workspace = (<sqlite3.Connection object at 0x000001BDED4EDD50>, {'id': '00000000000000000000000000000002', 'project_id': 'fixture-alpha', 'campaign_id': 'fixture-campaign', 'type': 'social_post', ...})
+process_receipts = [(Process(_process=<Process 110320>, _stdin=StreamWriterWrapper(_stream=<StreamWriter transport=<_ProactorWritePipeTra....TextIOWrapper name='<tempfile._TemporaryFileWrapper object at 0x000001BDED4D1760>' mode='r+' encoding='utf-8'>, ...})]
+mode = 'cross_project'
+
+    @pytest.mark.parametrize("mode", ["stale", "edited", "cross_project", "forged_snapshot", "wrong_type", "wrong_platform", "bad_copy", "boolean_version"])
+    def test_exact_version_scope_and_content_denied_before_formatter(workspace, process_receipts, mode):
+        host, row = host_for(workspace)
+        row = approve(host.conn, row)
+        host.allow_fixture()
+        expected = row["current_version"]
+        if mode == "stale":
+            expected -= 1
+        elif mode == "edited":
+            row = deliverables.revise(host.conn, PROJECT, CAMPAIGN, row["id"], expected, {"content_md": "Unapproved edit"})
+            expected = row["current_version"]
+        elif mode == "cross_project":
+            host.project_id = "fixture-beta"
+        elif mode == "boolean_version":
+            expected = True
+        else:
+            column, value = {"forged_snapshot": ("title", "Tampered title"), "wrong_type": ("type", "strategy_brief"),
+                "wrong_platform": ("platform", "instagram"), "bad_copy": ("content_md", "## Final copy\n")}[mode]
+            host.conn.execute(f"UPDATE campaign_deliverables SET {column}=? WHERE id=?", (value, row["id"]))
+            host.conn.commit()
+>       assert not host.prepare(CAMPAIGN, row["id"], expected)["ok"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\tests\test_phase45_marketing_mcp.py:111:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+prototypes\marketing_mcp\host.py:97: in prepare
+    draft = self._approved(self.project_id, args)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+prototypes\marketing_mcp\host.py:52: in _approved
+    row = deliverables.get_deliverable(self.conn, project_id, args["campaign_id"], args["deliverable_id"])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\services\campaign_deliverables.py:225: in get_deliverable
+    _require_scope(conn, project_id, campaign_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+conn = <sqlite3.Connection object at 0x000001BDED4EDD50>
+project_id = 'fixture-beta', campaign_id = 'fixture-campaign'
+
+    def _require_scope(conn, project_id: str, campaign_id: str) -> dict:
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise DeliverableValidationError("project_id is required")
+        if not isinstance(campaign_id, str) or not campaign_id.strip():
+            raise DeliverableValidationError("campaign_id is required")
+        if repos.Projects.get(conn, project_id) is None:
+            raise DeliverableNotFound("unknown project")
+        try:
+            campaign = repos.Campaigns.get(conn, campaign_id, project_id)
+        except ValueError:
+            # The shared campaign repo distinguishes owner mismatch internally;
+            # this API deliberately returns the same not-found response as a
+            # missing campaign so cross-project callers learn nothing about it.
+            campaign = None
+        if campaign is None:
+            # Keep foreign campaign existence private across project boundaries.
+>           raise DeliverableNotFound("unknown campaign")
+E           app.services.campaign_deliverables.DeliverableNotFound: unknown campaign
+
+app\services\campaign_deliverables.py:131: DeliverableNotFound
+---------------------------- Captured stderr call -----------------------------
+[11/02/26 14:11:15] INFO     Processing request of type           server.py:733
+
+                             ListToolsRequest
+
+=========================== short test summary info ===========================
+FAILED app/tests/test_phase45_marketing_mcp.py::test_exact_version_scope_and_content_denied_before_formatter[cross_project]
+1 failed, 24 passed in 124.15s (0:02:04)
+PROCESS_EXIT_CODE=1
