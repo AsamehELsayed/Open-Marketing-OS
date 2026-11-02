@@ -22,6 +22,15 @@ Docker/cache figures are not part of the project total; Docker VHDX and engine
 image/volume accounting overlap and must not be added together. DEV-050 image
 downloads are new external storage, measured separately at closeout.
 
+After scoped teardown, Docker engine accounting returned to baseline: 2 images
+(1.485 GB), 2 unrelated stopped containers and 6 retained volumes (474.2 MB).
+All six image references fetched for DEV-050 were verified absent. The shared
+WSL VHDX files still measured **15.014 GB logical length**, versus **5.820 GB**
+before provisioning. Host free space measured **6.278 GB** at that check.
+No physical host-space reclamation is claimed. Manual shared-VM compaction was
+not performed; it needs a separately reviewed maintenance/backup procedure.
+Do not delete the VHDX or prune retained volumes to address this growth.
+
 Main consumers are retained model/test/build copies: DEV-029 13.499 GB,
 DEV-015 7.033 GB, DEV-028 4.253 GB, nested .claude worktrees 6.879 GB,
 development/worktrees 5.487 GB. These parent totals overlap the run breakdown;
