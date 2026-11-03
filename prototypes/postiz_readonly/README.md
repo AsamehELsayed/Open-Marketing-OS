@@ -10,6 +10,10 @@ Postiz run, including empty and nonempty tenant-isolation phases. SDK negotiatio
 used 2025-11-25, with 20 upstream tools discovered and only three exposed/enabled.
 The disposable test stack was subsequently removed; recreate it to rerun the demo.
 
+The public source export includes this package's code, requirements, static setup
+configuration and upstream license. Local credentials, generated Compose overrides,
+the linked acceptance receipt and storage inventories are deliberately withheld.
+
 ## Exact policy
 
 Only `groupList({})`, `integrationList({})`, and
