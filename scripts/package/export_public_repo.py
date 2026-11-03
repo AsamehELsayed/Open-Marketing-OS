@@ -175,6 +175,13 @@ INCLUDE_FILES = (
     "prototypes/postiz_readonly/environment/images.lock.json",
     "prototypes/postiz_readonly/environment/upstream-compose.yaml",
     "prototypes/postiz_readonly/environment/dynamicconfig/development-sql.yaml",
+    # Controlled draft composition depends on the explicit read-only files above.
+    "prototypes/postiz_drafts/__init__.py",
+    "prototypes/postiz_drafts/contract.py",
+    "prototypes/postiz_drafts/host.py",
+    "prototypes/postiz_drafts/local.py",
+    "prototypes/postiz_drafts/transport.py",
+    "prototypes/postiz_drafts/README.md",
     "start.bat",
     "start.sh",
     # The upstream MIT licence for the vendored skills library. Ships because

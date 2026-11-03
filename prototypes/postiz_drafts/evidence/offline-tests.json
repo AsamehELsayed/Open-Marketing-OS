@@ -1,0 +1,25 @@
+{
+  "evidence_type": "DIRECT_AUTHOR_OFFLINE_TESTS",
+  "checked_on": "2026-11-03",
+  "passed": 178,
+  "failed": 0,
+  "skipped": 24,
+  "selections": [
+    {"selection": "app/tests/test_postiz_drafts.py", "passed": 54, "failed": 0, "skipped": 0},
+    {"selection": "test_postiz_readonly + test_phase45_marketing_mcp + test_dev007_mcp + test_dev007_vault + test_dev007_hardening", "passed": 105, "failed": 0, "skipped": 23},
+    {"selection": "app/tests/test_dev007_tool_registry.py", "passed": 19, "failed": 0, "skipped": 1}
+  ],
+  "actual_postiz_write": false,
+  "production_ui_dispatch_wired": false,
+  "independent_planner": "NOT RUN — NO DELEGATION",
+  "independent_qa": "NOT RUN — NO DELEGATION",
+  "independent_reviewer": "NOT RUN — NO DELEGATION",
+  "merge_gate": "NO-GO; independent gates pending",
+  "limitations": [
+    "Synthetic httpx transport with actual SDK serialization is offline evidence only",
+    "No live draft acceptance, provider-egress proof or real-account validation",
+    "Author self-review and CI are not independent QA/reviewer approval",
+    "Skipped cases depend on withheld private/internal fixtures",
+    "Initial restricted scratch-directory attempts were interrupted; successful final runs used isolated scratch with normal filesystem permissions"
+  ]
+}
