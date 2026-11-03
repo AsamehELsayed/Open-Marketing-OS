@@ -8,7 +8,7 @@ from scripts.package import export_public_repo as exporter
 def test_postiz_contracts_run_from_clean_export(tmp_path):
     exported = tmp_path / 'public-source'
     assert exporter.main(['--out', str(exported)]) == 0
-    packages = ('postiz_readonly',)
+    packages = ('postiz_readonly', 'postiz_drafts')
     for package in packages:
         root = exported / 'prototypes' / package
         assert (root / '__init__.py').is_file()
@@ -34,12 +34,15 @@ for name in sys.argv[1:]:
     module = importlib.import_module('prototypes.' + name)
     assert pathlib.Path(module.__file__).resolve().is_relative_to(root)
 import pytest
+tests = ['app/tests/test_' + name + '.py' for name in sys.argv[1:]]
+if 'postiz_drafts' in sys.argv[1:]:
+    tests.append('app/tests/test_postiz_cli.py')
 raise SystemExit(pytest.main([
-    *['app/tests/test_' + name + '.py' for name in sys.argv[1:]],
-    '-q', '-p', 'no:cacheprovider', '--basetemp', str(root / '.test-tmp'),
+    *tests,
+    '-q', '-p', 'no:cacheprovider', '--basetemp', str(root.parent / 'contract-state'),
 ]))
 '''
     result = subprocess.run([sys.executable, '-I', '-c', script, *packages],
-        cwd=exported, capture_output=True, text=True, timeout=180)
+        cwd=exported, capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'passed' in result.stdout

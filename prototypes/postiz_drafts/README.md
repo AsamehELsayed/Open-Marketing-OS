@@ -6,6 +6,25 @@ services and Approvals records supply the local workflow; `local.py` shows the e
 payload, accepts the operator's separate decision and displays persisted results.
 The production campaign UI has not been wired to dispatch writes.
 
+The public source export includes this package and its read-only dependencies,
+static configuration and license. Acceptance evidence and storage inventories
+remain withheld; no local database, credential or operator config is exported.
+
+### CLI process results
+
+JSON remains on stdout; caught failures use a sanitized generic message. Exit
+**0** means the command succeeded. For `execute`, this requires confirmed
+`succeeded`, including a duplicate returning the stored successful receipt.
+Exit **1** means refusal/failure (including missing authorization, denied approval
+or a stale revision before dispatch). Exit **2** means an in-flight, ambiguous or
+late-stale outcome, or manual reconciliation required. Argument-parser usage
+errors also retain argparse's standard exit 2. No nonzero result authorizes retry.
+
+`status` returns 0 for a successful inspection even when the reported ledger is
+ambiguous or the write has never run. `prepare` and decision commands likewise
+report command success, not proof of a remote draft. Always inspect the JSON
+state. Reconciliation returns 2 and never resets the durable ledger or retries.
+
 **Actual Postiz writes performed in DEV-051: NO.** No account connection, provider
 request, Docker startup, deletion, deployment or merge. NO DELEGATION: author tests
 and self-review do not satisfy independent QA/reviewer gates. Do not enable actual

@@ -9,6 +9,11 @@ from prototypes.postiz_readonly.client import Binding
 from .host import ControlledDraftHost
 from .transport import DraftTransport
 
+EXIT_REFUSED = 1
+EXIT_UNCERTAIN = 2
+UNCERTAIN_STATES = frozenset({'in_flight', 'ambiguous', 'succeeded_stale',
+    'manual_reconciliation_required'})
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,6 +31,7 @@ def main():
             child.add_argument('--founder-authorized-local-acceptance', action='store_true',
                 help='Use only AFTER separate founder approval and independent review gates')
     args = parser.parse_args()
+    exit_code = 0
     try:
         config = json.loads(args.config.read_text(encoding='utf-8'))
         if set(config) != {'database', 'project', 'organization', 'endpoint', 'secret_ref', 'channel'}:
@@ -52,15 +58,25 @@ def main():
             else:
                 host.enable()
                 receipt = host.status(args.operation)
-                result = host.execute(args.operation, receipt['approval_id']) if args.command == 'execute' else host.reconcile(args.operation)
+                if args.command == 'execute':
+                    result = host.execute(args.operation, receipt['approval_id'])
+                    if result.get('ok') is not True or result.get('state') != 'succeeded':
+                        # The sanitized host response deliberately groups denials
+                        # and uncertainty. Consult the durable ledger to classify
+                        # the process result, without retrying or changing state.
+                        persisted = host.status(args.operation)['state']
+                        exit_code = EXIT_UNCERTAIN if persisted in UNCERTAIN_STATES else EXIT_REFUSED
+                else:
+                    result = host.reconcile(args.operation)
+                    exit_code = EXIT_UNCERTAIN
             print(json.dumps(result, ensure_ascii=False, indent=2))
         finally:
             conn.close()
     except Exception:
         # Errors may contain sensitive database paths, campaign text or vault errors.
         print(json.dumps({'ok': False, 'error': 'Local draft operation refused or uncertain; inspect local state.'}))
-        return 1
-    return 0
+        return EXIT_REFUSED
+    return exit_code
 
 
 if __name__ == '__main__':
