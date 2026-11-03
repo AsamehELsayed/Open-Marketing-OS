@@ -9,6 +9,7 @@ pytest>=8.0
 
 # Optional offline prototype acceptance tests (not a released runtime dependency).
 -r prototypes/marketing_mcp/requirements.txt
+-r prototypes/postiz_readonly/requirements.txt
 
 # Optional retrieval extras, useful for exercising the hybrid path in CI.
 -r requirements-optional.txt
