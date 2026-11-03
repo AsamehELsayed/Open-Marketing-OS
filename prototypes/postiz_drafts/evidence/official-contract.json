@@ -1,0 +1,83 @@
+{
+  "checked_on": "2026-11-03",
+  "server_commit": "a5affe62c74e39c1e7ac960d50d8418b807d532c",
+  "server_tag": "v2.25.3",
+  "method": "Direct primary-agent official GitHub connector source inspection; NO DELEGATION",
+  "actual_postiz_write": false,
+  "sources": [
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/chat/tools/integration.schedule.post.ts",
+      "blob_sha": "3a653640e43b6c54a059bcbbe025f1053a8a6b23",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/database/prisma/posts/posts.service.ts",
+      "blob_sha": "6756ae653cc52dca7e03d5b997c7549e1b2782b5",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/database/prisma/posts/posts.repository.ts",
+      "blob_sha": "c2830afdd0c3cdbd3ce78377b7066562fc58de06",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/database/prisma/integrations/integration.repository.ts",
+      "blob_sha": "01cb287dca2955ab13316a16bbf17833885a9305",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/chat/start.mcp.ts",
+      "blob_sha": "cd992daf5d7be4ae3cb8ac68d3ad38b8ca0e2b02",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/chat/load.tools.service.ts",
+      "blob_sha": "4496aeaf7d18d0ab34b04f4649f17a18873a061d",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/integrations/social/linkedin.provider.ts",
+      "blob_sha": "6c40dc9e6b194b3dcbdeb8b9984d75b22b7d2648",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    },
+    {
+      "source": "https://github.com/gitroomhq/postiz-app/blob/a5affe62c74e39c1e7ac960d50d8418b807d532c/libraries/nestjs-libraries/src/chat/tools/posts.list.tool.ts",
+      "blob_sha": "d8abc95fdda5473cd8d0d3fc7a8eba6f21494a34",
+      "status": "VERIFIED",
+      "confidence": "HIGH"
+    }
+  ],
+  "findings": [
+    {
+      "status": "VERIFIED",
+      "observation": "schedulePostTool accepts socialPost[].type draft/schedule/now; integrationId/date required; no idempotency key.",
+      "interpretation": "Enforce exact draft subset and durable local operation fence; do not retry uncertain outcomes.",
+      "confidence": "HIGH"
+    },
+    {
+      "status": "VERIFIED",
+      "observation": "Organization-scoped channel lookup; LinkedIn text-only validation local; draft state stored as DRAFT; startWorkflow queries Temporal before returning for DRAFT.",
+      "interpretation": "No publishing workflow starts on inspected draft branch, but infrastructure activity occurs.",
+      "confidence": "HIGH"
+    },
+    {
+      "status": "INFERENCE",
+      "observation": "Official setup permits an inert integration row without real OAuth; source path uses only organization/id and local provider checks.",
+      "interpretation": "Synthetic account-free fixture should work, but actual draft runtime acceptance is not executed/verified.",
+      "confidence": "MEDIUM"
+    },
+    {
+      "status": "NOT ACCESSIBLE",
+      "observation": "Actual draft write explicitly prohibited until separate founder authorization.",
+      "interpretation": "Runtime wire name/schema, no-provider-egress and actual draft success remain pending; no fallback guessing.",
+      "confidence": "HIGH"
+    }
+  ]
+}
