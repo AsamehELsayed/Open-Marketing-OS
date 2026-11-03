@@ -1,0 +1,120 @@
+{
+  "evidence_type": "LIVE_LOCAL_POSTIZ",
+  "checked_on": "2026-11-02",
+  "release_tag": "v2.25.3",
+  "build_public_version": "v2.25.3",
+  "legacy_version_txt": "v1.47.0 (also matches pinned source)",
+  "image": "ghcr.io/gitroomhq/postiz-app@sha256:3e2facf0c1ffdfe07b31cebdc5b850767721cb40a7a389dd07485f8e381bb49f",
+  "sdk": "mcp==1.30.0",
+  "python": "3.12.10",
+  "node": "v22.23.4",
+  "prisma": "6.5.0",
+  "transport": "Streamable HTTP",
+  "endpoint": "http://127.0.0.1:5199/api/mcp",
+  "default_disabled_verified": true,
+  "empty_channel_phase_passed": true,
+  "organizations": [
+    {
+      "fixture": "a",
+      "discovered": [
+        "groupList",
+        "integrationList",
+        "integrationSchema"
+      ],
+      "groups": 1,
+      "channel_ids": [
+        "dev050-inert-a"
+      ],
+      "schema_max_length": 3000,
+      "protocol": "2025-11-25",
+      "upstream_tool_count": 20,
+      "request_counts": {
+        "identity": 5,
+        "initialize": 5,
+        "notifications/initialized": 5,
+        "tools/list": 5,
+        "groupList": 2,
+        "integrationList": 1,
+        "integrationSchema": 1
+      }
+    },
+    {
+      "fixture": "b",
+      "discovered": [
+        "groupList",
+        "integrationList",
+        "integrationSchema"
+      ],
+      "groups": 1,
+      "channel_ids": [
+        "dev050-inert-b"
+      ],
+      "schema_max_length": 3000,
+      "protocol": "2025-11-25",
+      "upstream_tool_count": 20,
+      "request_counts": {
+        "identity": 6,
+        "initialize": 6,
+        "notifications/initialized": 6,
+        "tools/list": 6,
+        "groupList": 3,
+        "integrationList": 1,
+        "integrationSchema": 1
+      }
+    }
+  ],
+  "denied_tools_tested": [
+    "ask_postiz",
+    "deletePostTool",
+    "generateImageTool",
+    "generateVideoTool",
+    "integrationSchedulePostTool",
+    "schedulePostTool",
+    "triggerTool",
+    "unknown",
+    "uploadWidgetTool"
+  ],
+  "default_deny": "Every name except groupList, integrationList, integrationSchema; no approval override",
+  "missing_auth_http_status": 401,
+  "invalid_credential_denied": true,
+  "cross_project_denied": true,
+  "interleaved_bindings_passed": true,
+  "domain_rows_unchanged": true,
+  "domain_counts": {
+    "groups": 2,
+    "integrations": 2,
+    "media": 0,
+    "organizations": 2,
+    "posts": 0,
+    "users": 2
+  },
+  "temporal_workflows": 0,
+  "upload_files": 0,
+  "registry_runs": 31,
+  "isolation": {
+    "actual_container_count": 7,
+    "internal_network": true,
+    "loopback_only": true,
+    "external_dns_configured": false,
+    "provider_secrets_configured": false,
+    "namespace_probe": {
+      "no_default_route": true,
+      "probe_connected": false,
+      "error": "ENETUNREACH"
+    },
+    "limits": "Routing/containment proof, not a packet capture or proof of every attempted syscall."
+  },
+  "direct_tests": {
+    "passed": 82,
+    "skipped": 24,
+    "failed": 0
+  },
+  "independent_qa": "NOT RUN — NO DELEGATION",
+  "independent_review": "NOT RUN — NO DELEGATION",
+  "limitations": [
+    "Synthetic local test only; no real social accounts/OAuth acceptance",
+    "Containment and observed behavior, not full packet capture of every attempted syscall",
+    "Default keys have broad Postiz organization authority; OMOS enforces the read-only boundary",
+    "No production packaging/deployment/merge approval"
+  ]
+}

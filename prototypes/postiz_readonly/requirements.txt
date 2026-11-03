@@ -1,0 +1,3 @@
+# Optional experiment; never included in shipped runtime.
+mcp==1.30.0
+PyYAML==6.0.3

@@ -1,0 +1,8 @@
+{
+  "postiz": "ghcr.io/gitroomhq/postiz-app@sha256:3e2facf0c1ffdfe07b31cebdc5b850767721cb40a7a389dd07485f8e381bb49f",
+  "postiz-postgres": "postgres@sha256:e4cb93687b062cd25a0e8f672d85a7708235009d70d31f8a7698d9370092a9c4",
+  "postiz-redis": "redis@sha256:00e75fbf4349fea45c7907353554a340c8606ce9f6372afe26ad1039641237a8",
+  "temporal-postgresql": "postgres@sha256:b95b87e93ceb7594715d5c71fb6e09f6fc878851ab537735d617325eb9ba8b1b",
+  "temporal-elasticsearch": "elasticsearch@sha256:07e9262b856006959e384de7ca9587bc5c6da024ca7042216a9ea26efe4c69c1",
+  "temporal": "temporalio/auto-setup@sha256:e4c296d2b16d7607938e71182b9cc0936c90002ff63d97227f195625cf798ea3"
+}
