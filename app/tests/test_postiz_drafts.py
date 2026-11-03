@@ -4,6 +4,7 @@ import copy
 import json
 import sqlite3
 import threading
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -367,3 +368,23 @@ def test_failed_reenable_revokes_previous_capability(setup):
     assert not host.enabled and not host.transport.enabled
     assert not host.execute(op['operation_id'], op['approval_id'])['ok']
     assert not setup[2]
+
+
+@pytest.mark.parametrize('field,value', [('organization', 'foreign-org'),
+    ('project', 'fixture-beta'), ('endpoint', 'http://127.0.0.1:5299/api/mcp'),
+    ('secret_ref', 'vault://project/' + 'b' * 32), ('channel', 'foreign-channel')])
+def test_receipts_and_reconciliation_reject_rebound_operator_config(setup, field, value):
+    host, _, op = ready(setup)
+    setup[4]['timeout'] = True
+    host.execute(op['operation_id'], op['approval_id'])
+    channel = value if field == 'channel' else host.transport.channel
+    binding = host.binding if field == 'channel' else replace(host.binding, **{field: value})
+    transport = DraftTransport(binding, host.conn, host.transport.backend, channel=channel,
+        http_transport=host.transport.http_transport)
+    changed = ControlledDraftHost(host.conn, transport)
+    before = len(setup[2])
+    with pytest.raises(ValueError):
+        changed.status(op['operation_id'])
+    with pytest.raises(ValueError):
+        changed.reconcile(op['operation_id'])
+    assert len(setup[2]) == before

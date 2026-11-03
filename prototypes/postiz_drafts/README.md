@@ -81,6 +81,8 @@ baseline. It returns candidate IDs for manual review, never authorizes retry. If
 baseline is missing, zero/multiple candidates exist, or another actor created
 identical content, identity cannot be proved. No exactly-once server guarantee is
 claimed. Do not delete/recreate remotely to resolve uncertainty. Stop for a human.
+Receipts and reconciliation also verify the persisted trusted binding; changing
+operator configuration cannot reinterpret an old operation under another org.
 
 The local composition root/CLI and OS-owned config/database/vault are trusted.
 They are not exposed as LLM tools. General application authentication and production

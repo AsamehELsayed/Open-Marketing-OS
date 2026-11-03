@@ -36,13 +36,18 @@ class ControlledDraftHost:
                 operation_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
                 request_json TEXT NOT NULL, payload_json TEXT NOT NULL,
                 approval_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
-                baseline_json TEXT, post_id TEXT, updated_at TEXT NOT NULL
+                baseline_json TEXT, post_id TEXT, updated_at TEXT NOT NULL,
+                binding_json TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS postiz_draft_audit (
                 seq INTEGER PRIMARY KEY, project_id TEXT NOT NULL,
                 operation_id TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL
             );
         ''')
+        if 'binding_json' not in {r[1] for r in conn.execute('PRAGMA table_info(postiz_draft_operations)')}:
+            # Older prototype rows lack sufficient authority evidence; fail closed.
+            conn.execute("ALTER TABLE postiz_draft_operations ADD COLUMN binding_json TEXT NOT NULL DEFAULT ''")
+            conn.commit()
         self.gateway = McpGateway(transport=transport, vault=transport)
         self.gateway.register_mcp_server(SERVER, self.binding.endpoint,
             self.project_id, self.binding.secret_ref)
@@ -79,9 +84,14 @@ class ControlledDraftHost:
         self.conn.row_factory = __import__('sqlite3').Row
         row = self.conn.execute('SELECT * FROM postiz_draft_operations WHERE operation_id=? AND project_id=?',
             (operation, self.project_id)).fetchone()
-        if row is None:
+        if row is None or row['binding_json'] != self._binding_json():
             raise ValueError('Operation unavailable')
         return dict(row)
+
+    def _binding_json(self):
+        return canonical({'project': self.project_id, 'organization': self.binding.organization,
+            'endpoint': self.binding.endpoint, 'secret_ref': self.binding.secret_ref,
+            'channel': self.transport.channel})
 
     def _exact(self, request):
         draft = self._approved(self.project_id, request)
@@ -108,9 +118,9 @@ class ControlledDraftHost:
                     'body_md': 'Draft only. No publishing. Exact payload:\n\n' + canonical(payload),
                     'status': 'pending', 'fields_json': canonical({'operation_id': operation}),
                     'updated_at': deliverables.now()}, commit=False)
-                self.conn.execute('INSERT INTO postiz_draft_operations VALUES(?,?,?,?,?,?,?,?,?)',
+                self.conn.execute('INSERT INTO postiz_draft_operations VALUES(?,?,?,?,?,?,?,?,?,?)',
                     (operation, self.project_id, canonical(request), canonical(payload), approval,
-                     'prepared', None, None, deliverables.now()))
+                     'prepared', None, None, deliverables.now(), self._binding_json()))
                 self._audit(operation, 'prepared')
         # Return private content only to the local review surface, never Registry telemetry.
         result = self.status(operation)
